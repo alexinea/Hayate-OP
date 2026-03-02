@@ -1,9 +1,10 @@
 <Solution>
   <Folder Name="/samples/">
-    <Project Path="samples/ObjectPool.Samples/ObjectPool.Samples.csproj" />
+    <Project Path="samples/HayateOP.Samples/HayateOP.Samples.csproj" />
   </Folder>
   <Folder Name="/src/">
-    <Project Path="src/ObjectPool/ObjectPool.csproj" />
+    <Project Path="src/HayateOP.Extensions.DependencyInjection/HayateOP.Extensions.DependencyInjection.csproj" />
+    <Project Path="src/HayateOP/HayateOP.csproj" />
   </Folder>
   <Folder Name="/tests/" />
 </Solution>
