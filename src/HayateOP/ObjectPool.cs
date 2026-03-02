@@ -3,14 +3,15 @@ using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace DotNetCore.Extensions.ObjectPool;
+namespace DotNetCore.HayateOP;
 
-public class ObjectPool<T> : IDisposable
+public class ObjectPool<T> : IObjectPool<T>, IDisposable
+    where T : class
 {
     private readonly ConcurrentBag<T> _pool;
-    private readonly Func<T> _factory;
+    private readonly IPooledObjectPolicy<T> _policy;
     private readonly SemaphoreSlim _semaphore;
-    private readonly int _maxSize;
+    private readonly int _maxPoolSize;
 
     private long _totalCreated;
     private long _totalReturned;
@@ -19,16 +20,16 @@ public class ObjectPool<T> : IDisposable
     /// <summary>
     /// 构造对象池
     /// </summary>
-    /// <param name="factory"></param>
+    /// <param name="policy"></param>
     /// <param name="maxConcurrent"></param>
-    /// <param name="maxSize"></param>
+    /// <param name="maxPoolSize"></param>
     /// <exception cref="ArgumentNullException"></exception>
-    public ObjectPool(Func<T> factory, int maxConcurrent, int maxSize = 100)
+    public ObjectPool(IPooledObjectPolicy<T> policy, int maxConcurrent, int maxPoolSize = 100)
     {
         _pool = new ConcurrentBag<T>();
-        _factory = factory ?? throw new ArgumentNullException(nameof(factory));
+        _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _semaphore = new(maxConcurrent);
-        _maxSize = maxSize;
+        _maxPoolSize = maxPoolSize;
     }
 
     /// <summary>
@@ -46,7 +47,7 @@ public class ObjectPool<T> : IDisposable
 
             Interlocked.Increment(ref _totalMissed);
             Interlocked.Increment(ref _totalCreated);
-            return _factory();
+            return _policy.Create();
         }
         catch
         {
@@ -71,7 +72,7 @@ public class ObjectPool<T> : IDisposable
 
             Interlocked.Increment(ref _totalMissed);
             Interlocked.Increment(ref _totalCreated);
-            return _factory();
+            return _policy.Create();
         }
         catch
         {
@@ -92,17 +93,23 @@ public class ObjectPool<T> : IDisposable
             return;
         }
 
-        if (item is IResettable resettable)
+        if (!_policy.Return(item))
         {
-            resettable.Reset();
+            DisposeItem(item);
+            _semaphore.Release();
+            return;
         }
 
         Interlocked.Increment(ref _totalReturned);
 
-        if (_pool.Count < _maxSize)
+        if (_pool.Count < _maxPoolSize)
+        {
             _pool.Add(item);
+        }
         else if (item is IDisposable disposable)
-            disposable.Dispose();
+        {
+            DisposeItem(item);
+        }
 
         _semaphore.Release();
     }
@@ -129,10 +136,15 @@ public class ObjectPool<T> : IDisposable
     {
         while (_pool.TryTake(out T item))
         {
-            if (item is IDisposable disposable)
-            {
-                disposable.Dispose();
-            }
+            DisposeItem(item);
+        }
+    }
+
+    private void DisposeItem(T item)
+    {
+        if (item is IDisposable disposable)
+        {
+            disposable.Dispose();
         }
     }
 
