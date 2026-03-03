@@ -3,11 +3,16 @@
 using System.Text;
 using DotNetCore.HayateOP;
 using HayateOP.Samples;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 Console.OutputEncoding = Encoding.UTF8;
 
 var services = new ServiceCollection();
+
+// var builder = new ConfigurationBuilder().AddJsonFile("appsettings.json");
+// var config = builder.Build();
+// services.Configure<ObjectPoolOptions>(config.GetSection("HayateOP"));
 
 // services.AddObjectPool<MyPooledObject>(config =>
 // {

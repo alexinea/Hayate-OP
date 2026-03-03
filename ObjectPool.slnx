@@ -6,5 +6,7 @@
     <Project Path="src/HayateOP.Extensions.DependencyInjection/HayateOP.Extensions.DependencyInjection.csproj" />
     <Project Path="src/HayateOP/HayateOP.csproj" />
   </Folder>
-  <Folder Name="/tests/" />
+  <Folder Name="/tests/">
+    <Project Path="tests/HayateCP.Tests/HayateCP.Tests.csproj" />
+  </Folder>
 </Solution>

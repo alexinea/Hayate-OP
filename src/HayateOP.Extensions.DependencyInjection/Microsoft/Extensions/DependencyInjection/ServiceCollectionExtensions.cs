@@ -16,14 +16,27 @@ public static class ServiceCollectionExtensions
         Action<ObjectPoolOptions>? configure = null)
         where T : class, new()
     {
+        if(services == null) throw new ArgumentNullException(nameof(services));
+        
         if (configure != null)
+        {
             services.Configure(configure);
-
+        }
+        else
+        {
+            var defaultOptions = new ObjectPoolOptions();
+            services.Configure<ObjectPoolOptions>(op =>
+            {
+                op.MaxConcurrent = defaultOptions.MaxConcurrent;
+                op.MaxPoolSize = defaultOptions.MaxPoolSize;
+            });
+        }
+        
         services.AddSingleton<IPooledObjectPolicy<T>, DefaultPooledObjectPolicy<T>>();
         services.AddSingleton<IObjectPool<T>, ObjectPoolService<T>>();
         return services;
     }
-
+    
     /// <summary>
     /// 添加自定义策略的对象池
     /// </summary>
@@ -38,8 +51,21 @@ public static class ServiceCollectionExtensions
         where T : class
         where TPolicy : class, IPooledObjectPolicy<T>
     {
+        if(services == null) throw new ArgumentNullException(nameof(services));
+        
         if (configure != null)
+        {
             services.Configure(configure);
+        }
+        else
+        {
+            var defaultOptions = new ObjectPoolOptions();
+            services.Configure<ObjectPoolOptions>(op =>
+            {
+                op.MaxConcurrent = defaultOptions.MaxConcurrent;
+                op.MaxPoolSize = defaultOptions.MaxPoolSize;
+            });
+        }
 
         services.AddSingleton<IPooledObjectPolicy<T>, TPolicy>();
         services.AddSingleton<IObjectPool<T>, ObjectPoolService<T>>();
