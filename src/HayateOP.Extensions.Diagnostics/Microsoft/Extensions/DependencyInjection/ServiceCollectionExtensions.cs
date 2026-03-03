@@ -5,10 +5,11 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class ServiceCollectionExtensions
 {
-    public static IHayateOpModuleServiceCollection AddDiagnostics(this IHayateOpModuleServiceCollection services)
+    public static IHayateServiceCollection<T> AddDiagnostics<T>(this IHayateServiceCollection<T> services)
+        where T : class, new()
     {
-        services.AddModule<HayateOpDiagnostics>();
-        
+        services.AddModule<HayateOpDiagnosticsService>();
+
         return services;
     }
 }

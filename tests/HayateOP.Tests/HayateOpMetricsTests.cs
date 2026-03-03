@@ -9,7 +9,7 @@ public class HayateOpMetricsTests
     {
         var services = new ServiceCollection();
         services.AddLogging(cfg => cfg.AddConsole());
-        services.AddObjectPool<TestPooledObject>(o =>
+        services.AddHayateObjectPool<TestPooledObject>(o =>
         {
             o.MaxConcurrent = 5;
             o.MaxPoolSize = 10;
@@ -22,12 +22,12 @@ public class HayateOpMetricsTests
     public void Get_LogAndMetrics()
     {
         var sp = BuildServiceProvider();
-        var pool= sp.GetRequiredService<IHayateObjectPool<TestPooledObject>>();
+        var pool = sp.GetRequiredService<IHayateObjectPool<TestPooledObject>>();
         var obj = pool.Get();
         pool.Return(obj);
         Assert.NotNull(obj);
     }
-    
+
     [Fact]
     public void Clear_DisposesAll()
     {

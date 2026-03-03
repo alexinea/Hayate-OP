@@ -19,7 +19,7 @@ var services = new ServiceCollection();
 //     config.MaxPoolSize = 30;
 // });
 
-services.AddObjectPool<MyPooledObject, CustomPoolPolicy>(config =>
+services.AddHayateObjectPool<MyPooledObject, CustomPoolPolicy>(config =>
 {
     config.MaxConcurrent = 15;
     config.MaxPoolSize = 30;

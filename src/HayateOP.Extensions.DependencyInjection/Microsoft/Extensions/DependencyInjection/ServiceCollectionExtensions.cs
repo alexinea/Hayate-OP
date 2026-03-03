@@ -13,7 +13,7 @@ public static class ServiceCollectionExtensions
     /// <param name="configure"></param>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
-    public static IHayateOpModuleServiceCollection AddObjectPool<T>(
+    public static IHayateServiceCollection<T> AddHayateObjectPool<T>(
         this IServiceCollection services,
         Action<HayateOpOptions>? configure = null)
         where T : class, new()
@@ -40,7 +40,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IHayateOpMetrics, EmptyHayateOpMetrics>();
         services.AddSingleton<IHayateObjectPool<T>, HayateObjectPoolService<T>>();
 
-        return new MsdiHayateOpModuleServiceCollection(services);
+        return new MsdiHayateServiceCollection<T>(services);
     }
 
     /// <summary>
@@ -51,10 +51,10 @@ public static class ServiceCollectionExtensions
     /// <typeparam name="T"></typeparam>
     /// <typeparam name="TPolicy"></typeparam>
     /// <returns></returns>
-    public static IHayateOpModuleServiceCollection AddObjectPool<T, TPolicy>(
+    public static IHayateServiceCollection<T> AddHayateObjectPool<T, TPolicy>(
         this IServiceCollection services,
         Action<HayateOpOptions>? configure = null)
-        where T : class
+        where T : class, new()
         where TPolicy : class, IHayateObjectPolicy<T>
     {
         if (services == null) throw new ArgumentNullException(nameof(services));
@@ -79,6 +79,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IHayateOpMetrics, EmptyHayateOpMetrics>();
         services.AddSingleton<IHayateObjectPool<T>, HayateObjectPoolService<T>>();
 
-        return new MsdiHayateOpModuleServiceCollection(services);
+        return new MsdiHayateServiceCollection<T>(services);
     }
 }

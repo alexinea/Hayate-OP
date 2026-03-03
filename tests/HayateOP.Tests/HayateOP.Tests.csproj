@@ -23,6 +23,7 @@
 
     <ItemGroup>
       <ProjectReference Include="..\..\src\HayateOP.Extensions.DependencyInjection\HayateOP.Extensions.DependencyInjection.csproj" />
+      <ProjectReference Include="..\..\src\HayateOP.Extensions.HealthCheck\HayateOP.Extensions.HealthCheck.csproj" />
       <ProjectReference Include="..\..\src\HayateOP\HayateOP.csproj" />
     </ItemGroup>
 

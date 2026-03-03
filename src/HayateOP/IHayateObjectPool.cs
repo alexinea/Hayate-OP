@@ -12,6 +12,6 @@ public interface IHayateObjectPool<T> where T : class
     T Get();
     Task<T> GetAsync(CancellationToken cancellationToken = default);
     void Return(T item);
-    (int PooledCount, long TotalCreated, long TotalReturned, long TotalMissed, int AvailableConcurrentSlots) GetStats();
+    (int PooledCount, long TotalCreated, long TotalReturned, long TotalMissed, int AvailableSlots) GetStats();
     void Clear();
 }

@@ -8,7 +8,7 @@ public class HayateObjectPoolTests
     public void Get_WhenPoolEmpty_CreatesNew()
     {
         var services = new ServiceCollection();
-        services.AddObjectPool<TestPooledObject>(o =>
+        services.AddHayateObjectPool<TestPooledObject>(o =>
         {
             o.MaxConcurrent = 5;
             o.MaxPoolSize = 10;
@@ -28,7 +28,7 @@ public class HayateObjectPoolTests
     public void Return_Object_GoesToPool()
     {
         var services = new ServiceCollection();
-        services.AddObjectPool<TestPooledObject>();
+        services.AddHayateObjectPool<TestPooledObject>();
         var sp = services.BuildServiceProvider();
         var pool = sp.GetRequiredService<IHayateObjectPool<TestPooledObject>>();
 
@@ -44,7 +44,7 @@ public class HayateObjectPoolTests
     public void Get_AfterReturn_ReturnsSameInstance()
     {
         var services = new ServiceCollection();
-        services.AddObjectPool<TestPooledObject>();
+        services.AddHayateObjectPool<TestPooledObject>();
         var sp = services.BuildServiceProvider();
         var pool = sp.GetRequiredService<IHayateObjectPool<TestPooledObject>>();
 
@@ -59,7 +59,7 @@ public class HayateObjectPoolTests
     public async Task GetAsync_Works()
     {
         var services = new ServiceCollection();
-        services.AddObjectPool<TestPooledObject>();
+        services.AddHayateObjectPool<TestPooledObject>();
         var sp = services.BuildServiceProvider();
         var pool = sp.GetRequiredService<IHayateObjectPool<TestPooledObject>>();
 
@@ -71,7 +71,7 @@ public class HayateObjectPoolTests
     public void Clear_DisposesAll()
     {
         var services = new ServiceCollection();
-        services.AddObjectPool<TestPooledObject>();
+        services.AddHayateObjectPool<TestPooledObject>();
         var sp = services.BuildServiceProvider();
         var pool = sp.GetRequiredService<IHayateObjectPool<TestPooledObject>>();
 

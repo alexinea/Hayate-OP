@@ -208,14 +208,14 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
     /// 获取统计信息
     /// </summary>
     /// <returns></returns>
-    public (int PooledCount, long TotalCreated, long TotalReturned, long TotalMissed, int AvailableConcurrentSlots) GetStats()
+    public (int PooledCount, long TotalCreated, long TotalReturned, long TotalMissed, int AvailableSlots) GetStats()
     {
         return (
             PooledCount: _pool.Count,
             TotalCreated: Interlocked.Read(ref _totalCreated),
             TotalReturned: Interlocked.Read(ref _totalReturned),
             TotalMissed: Interlocked.Read(ref _totalMissed),
-            AvailableConcurrentSlots: _semaphore.CurrentCount
+            AvailableSlots: _semaphore.CurrentCount
         );
     }
 
