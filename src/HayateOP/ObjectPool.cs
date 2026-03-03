@@ -106,7 +106,7 @@ public class ObjectPool<T> : IObjectPool<T>, IDisposable
         {
             _pool.Add(item);
         }
-        else if (item is IDisposable disposable)
+        else
         {
             DisposeItem(item);
         }

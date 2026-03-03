@@ -8,19 +8,19 @@ public static class ServiceCollectionExtensions
     /// 添加默认对象池
     /// </summary>
     /// <param name="services"></param>
-    /// <param name="maxConcurrent"></param>
-    /// <param name="maxPoolSize"></param>
+    /// <param name="configure"></param>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
-    public static IServiceCollection AddObjectPool<T>(this IServiceCollection services,
-        int maxConcurrent = 10, int maxPoolSize = 20) where T : class, new()
+    public static IServiceCollection AddObjectPool<T>(
+        this IServiceCollection services,
+        Action<ObjectPoolOptions>? configure = null)
+        where T : class, new()
     {
+        if (configure != null)
+            services.Configure(configure);
+
         services.AddSingleton<IPooledObjectPolicy<T>, DefaultPooledObjectPolicy<T>>();
-        services.AddSingleton<IObjectPool<T>, ObjectPoolService<T>>(sp =>
-        {
-            var policy = sp.GetRequiredService<IPooledObjectPolicy<T>>();
-            return new ObjectPoolService<T>(policy, maxConcurrent, maxPoolSize);
-        });
+        services.AddSingleton<IObjectPool<T>, ObjectPoolService<T>>();
         return services;
     }
 
@@ -28,22 +28,21 @@ public static class ServiceCollectionExtensions
     /// 添加自定义策略的对象池
     /// </summary>
     /// <param name="services"></param>
-    /// <param name="maxConcurrent"></param>
-    /// <param name="maxPoolSize"></param>
+    /// <param name="configure"></param>
     /// <typeparam name="T"></typeparam>
     /// <typeparam name="TPolicy"></typeparam>
     /// <returns></returns>
-    public static IServiceCollection AddObjectPool<T, TPolicy>(this IServiceCollection services,
-        int maxConcurrent = 10, int maxPoolSize = 20)
+    public static IServiceCollection AddObjectPool<T, TPolicy>(
+        this IServiceCollection services,
+        Action<ObjectPoolOptions>? configure = null)
         where T : class
         where TPolicy : class, IPooledObjectPolicy<T>
     {
+        if (configure != null)
+            services.Configure(configure);
+
         services.AddSingleton<IPooledObjectPolicy<T>, TPolicy>();
-        services.AddSingleton<IObjectPool<T>, ObjectPoolService<T>>(sp =>
-        {
-            var policy = sp.GetRequiredService<IPooledObjectPolicy<T>>();
-            return new ObjectPoolService<T>(policy, maxConcurrent, maxPoolSize);
-        });
+        services.AddSingleton<IObjectPool<T>, ObjectPoolService<T>>();
         return services;
     }
 }

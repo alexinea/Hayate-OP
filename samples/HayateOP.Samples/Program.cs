@@ -1,18 +1,25 @@
-﻿// See https://aka.ms/new-console-template for more information
+// See https://aka.ms/new-console-template for more information
 
+using System.Text;
 using DotNetCore.HayateOP;
 using HayateOP.Samples;
 using Microsoft.Extensions.DependencyInjection;
 
+Console.OutputEncoding = Encoding.UTF8;
+
 var services = new ServiceCollection();
 
-// services.AddObjectPool<MyPooledObject>(
-//     maxConcurrent: 15,
-//     maxPoolSize: 30);
+// services.AddObjectPool<MyPooledObject>(config =>
+// {
+//     config.MaxConcurrent = 15;
+//     config.MaxPoolSize = 30;
+// });
 
-services.AddObjectPool<MyPooledObject, CustomPoolPolicy>(
-    maxConcurrent: 15,
-    maxPoolSize: 30);
+services.AddObjectPool<MyPooledObject, CustomPoolPolicy>(config =>
+{
+    config.MaxConcurrent = 15;
+    config.MaxPoolSize = 30;
+});
 
 var provider = services.BuildServiceProvider();
 
