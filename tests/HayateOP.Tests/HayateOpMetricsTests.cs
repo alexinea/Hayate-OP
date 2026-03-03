@@ -1,7 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace HayateOP.Tests;
+namespace DotNetCore.HayateOP.Tests;
 
 public class HayateOpMetricsTests
 {

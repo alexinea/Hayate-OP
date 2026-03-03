@@ -1,4 +1,4 @@
-﻿namespace HayateOP;
+﻿namespace DotNetCore.HayateOP;
 
 /// <summary>
 /// 选项配置

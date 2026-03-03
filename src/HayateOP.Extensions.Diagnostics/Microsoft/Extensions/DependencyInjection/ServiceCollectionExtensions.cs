@@ -1,5 +1,5 @@
-﻿using HayateOP;
-using HayateOP.Metrics;
+﻿using DotNetCore.HayateOP;
+using DotNetCore.HayateOP.Metrics;
 
 namespace Microsoft.Extensions.DependencyInjection;
 

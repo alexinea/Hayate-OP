@@ -5,7 +5,7 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-        <RootNamespace>HayateOP.Samples</RootNamespace>
+        <RootNamespace>DotNetCore.HayateOP.Samples</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>

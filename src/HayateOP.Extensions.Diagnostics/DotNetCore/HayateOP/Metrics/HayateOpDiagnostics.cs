@@ -1,7 +1,8 @@
 ﻿using System.Diagnostics;
+using DotNetCore.HayateOP.Modules;
 using Microsoft.Extensions.Options;
 
-namespace HayateOP.Metrics;
+namespace DotNetCore.HayateOP.Metrics;
 
 public class HayateOpDiagnostics : IHayateOpMetrics, IHayateOpModule
 {

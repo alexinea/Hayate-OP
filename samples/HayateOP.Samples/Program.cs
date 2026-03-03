@@ -1,8 +1,8 @@
 // See https://aka.ms/new-console-template for more information
 
 using System.Text;
-using HayateOP;
-using HayateOP.Samples;
+using DotNetCore.HayateOP;
+using DotNetCore.HayateOP.Samples;
 using Microsoft.Extensions.DependencyInjection;
 
 Console.OutputEncoding = Encoding.UTF8;

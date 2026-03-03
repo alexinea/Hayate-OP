@@ -1,6 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 
-namespace HayateOP.Tests;
+namespace DotNetCore.HayateOP.Tests;
 
 public class HayateObjectPoolTests
 {

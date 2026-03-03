@@ -1,4 +1,4 @@
-﻿namespace HayateOP.Samples;
+﻿namespace DotNetCore.HayateOP.Samples;
 
 public class MyPooledObject : IHayateOpResettable, IDisposable
 {

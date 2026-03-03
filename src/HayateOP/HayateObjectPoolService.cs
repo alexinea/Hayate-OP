@@ -1,9 +1,9 @@
-﻿using HayateOP.Metrics;
-using HayateOP.Policies;
+﻿using DotNetCore.HayateOP.Metrics;
+using DotNetCore.HayateOP.Policies;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace HayateOP;
+namespace DotNetCore.HayateOP;
 
 public class HayateObjectPoolService<T> : HayateObjectPool<T> where T : class
 {

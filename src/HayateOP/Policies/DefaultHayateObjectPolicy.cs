@@ -1,4 +1,4 @@
-﻿namespace HayateOP.Policies;
+﻿namespace DotNetCore.HayateOP.Policies;
 
 /// <summary>
 /// 默认对象策略池

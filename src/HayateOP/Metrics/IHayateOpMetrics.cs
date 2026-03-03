@@ -1,4 +1,4 @@
-﻿namespace HayateOP.Metrics;
+﻿namespace DotNetCore.HayateOP.Metrics;
 
 /// <summary>
 /// 对象池诊断指标接口

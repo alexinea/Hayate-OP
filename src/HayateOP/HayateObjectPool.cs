@@ -2,12 +2,12 @@
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
-using HayateOP.Metrics;
-using HayateOP.Policies;
+using DotNetCore.HayateOP.Metrics;
+using DotNetCore.HayateOP.Policies;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace HayateOP;
+namespace DotNetCore.HayateOP;
 
 public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
     where T : class

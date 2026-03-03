@@ -1,7 +1,7 @@
 ﻿using System.Threading;
 using System.Threading.Tasks;
 
-namespace HayateOP;
+namespace DotNetCore.HayateOP;
 
 /// <summary>
 /// 对象池通用接口

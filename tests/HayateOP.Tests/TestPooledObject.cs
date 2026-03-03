@@ -1,4 +1,4 @@
-﻿namespace HayateOP.Tests;
+﻿namespace DotNetCore.HayateOP.Tests;
 
 public class TestPooledObject : IHayateOpResettable, IDisposable
 {

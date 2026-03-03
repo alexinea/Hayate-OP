@@ -1,6 +1,6 @@
-﻿using HayateOP;
-using HayateOP.Metrics;
-using HayateOP.Policies;
+﻿using DotNetCore.HayateOP;
+using DotNetCore.HayateOP.Metrics;
+using DotNetCore.HayateOP.Policies;
 
 namespace Microsoft.Extensions.DependencyInjection;
 
@@ -40,7 +40,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IHayateOpMetrics, EmptyHayateOpMetrics>();
         services.AddSingleton<IHayateObjectPool<T>, HayateObjectPoolService<T>>();
 
-        return new MsdiHayateServiceCollection<T>(services);
+        return new MSDIHayateServiceCollection<T>(services);
     }
 
     /// <summary>
@@ -79,6 +79,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IHayateOpMetrics, EmptyHayateOpMetrics>();
         services.AddSingleton<IHayateObjectPool<T>, HayateObjectPoolService<T>>();
 
-        return new MsdiHayateServiceCollection<T>(services);
+        return new MSDIHayateServiceCollection<T>(services);
     }
 }

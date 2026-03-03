@@ -16,4 +16,8 @@
         <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.3" />
     </ItemGroup>
 
+    <ItemGroup>
+      <Folder Include="DotNetCore\" />
+    </ItemGroup>
+
 </Project>

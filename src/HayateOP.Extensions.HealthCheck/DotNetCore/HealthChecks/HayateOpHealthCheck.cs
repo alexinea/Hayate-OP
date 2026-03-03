@@ -1,6 +1,8 @@
-﻿using Microsoft.Extensions.Diagnostics.HealthChecks;
+﻿using DotNetCore.HayateOP;
+using DotNetCore.HayateOP.Modules;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
-namespace HayateOP.HealthChecks;
+namespace DotNetCore.HealthChecks;
 
 public class HayateOpHealthCheck<T> : IHealthCheck, IHayateOpModule where T : class
 {

@@ -1,17 +1,16 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using DotNetCore.HayateOP.Modules;
+using Microsoft.Extensions.DependencyInjection;
 
-namespace HayateOP;
+namespace DotNetCore.HayateOP;
 
-internal class MsdiHayateServiceCollection<T> : IHayateServiceCollection<T> where T : class, new()
+internal class MSDIHayateServiceCollection<T> : IHayateServiceCollection<T> where T : class, new()
 {
     private readonly IServiceCollection _services;
 
-    public MsdiHayateServiceCollection(IServiceCollection services)
+    public MSDIHayateServiceCollection(IServiceCollection services)
     {
         _services = services ?? throw new ArgumentNullException(nameof(services));
     }
-
-    public IServiceCollection ExposeServices() => _services;
 
     public IHayateServiceCollection<T> AddModule<TModule>() where TModule : class, IHayateOpModule
     {

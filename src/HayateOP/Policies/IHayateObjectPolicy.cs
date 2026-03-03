@@ -1,4 +1,4 @@
-﻿namespace HayateOP.Policies;
+﻿namespace DotNetCore.HayateOP.Policies;
 
 /// <summary>
 /// 对象池策略接口，定义了对象池创建对象的规则

@@ -2,7 +2,7 @@
 
     <PropertyGroup>
         <LangVersion>default</LangVersion>
-        <RootNamespace>HayateOP</RootNamespace>
+        <RootNamespace>DotNetCore.HayateOP</RootNamespace>
         <Nullable>enable</Nullable>
         <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
     </PropertyGroup>

@@ -1,4 +1,4 @@
-﻿namespace HayateOP.Metrics;
+﻿namespace DotNetCore.HayateOP.Metrics;
 
 public class EmptyHayateOpMetrics : IHayateOpMetrics
 {
