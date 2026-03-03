@@ -1,8 +1,6 @@
-﻿using DotNetCore.HayateOP;
+﻿namespace HayateOP.Samples;
 
-namespace HayateOP.Samples;
-
-public class MyPooledObject : IResettable, IDisposable
+public class MyPooledObject : IHayateOpResettable, IDisposable
 {
     public int Id { get; set; }
     public string Data { get; set; }

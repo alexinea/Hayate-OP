@@ -1,4 +1,6 @@
-﻿using DotNetCore.HayateOP;
+﻿using HayateOP;
+using HayateOP.Metrics;
+using HayateOP.Policies;
 
 namespace Microsoft.Extensions.DependencyInjection;
 
@@ -11,32 +13,36 @@ public static class ServiceCollectionExtensions
     /// <param name="configure"></param>
     /// <typeparam name="T"></typeparam>
     /// <returns></returns>
-    public static IServiceCollection AddObjectPool<T>(
+    public static IHayateOpModuleServiceCollection AddObjectPool<T>(
         this IServiceCollection services,
-        Action<ObjectPoolOptions>? configure = null)
+        Action<HayateOpOptions>? configure = null)
         where T : class, new()
     {
-        if(services == null) throw new ArgumentNullException(nameof(services));
-        
+        if (services == null) throw new ArgumentNullException(nameof(services));
+
         if (configure != null)
         {
             services.Configure(configure);
         }
         else
         {
-            var defaultOptions = new ObjectPoolOptions();
-            services.Configure<ObjectPoolOptions>(op =>
+            var defaultOptions = new HayateOpOptions();
+            services.Configure<HayateOpOptions>(op =>
             {
                 op.MaxConcurrent = defaultOptions.MaxConcurrent;
                 op.MaxPoolSize = defaultOptions.MaxPoolSize;
             });
         }
-        
-        services.AddSingleton<IPooledObjectPolicy<T>, DefaultPooledObjectPolicy<T>>();
-        services.AddSingleton<IObjectPool<T>, ObjectPoolService<T>>();
-        return services;
+
+        services.AddLogging();
+
+        services.AddSingleton<IHayateObjectPolicy<T>, DefaultHayateObjectPolicy<T>>();
+        services.AddSingleton<IHayateOpMetrics, EmptyHayateOpMetrics>();
+        services.AddSingleton<IHayateObjectPool<T>, HayateObjectPoolService<T>>();
+
+        return new MsdiHayateOpModuleServiceCollection(services);
     }
-    
+
     /// <summary>
     /// 添加自定义策略的对象池
     /// </summary>
@@ -45,30 +51,34 @@ public static class ServiceCollectionExtensions
     /// <typeparam name="T"></typeparam>
     /// <typeparam name="TPolicy"></typeparam>
     /// <returns></returns>
-    public static IServiceCollection AddObjectPool<T, TPolicy>(
+    public static IHayateOpModuleServiceCollection AddObjectPool<T, TPolicy>(
         this IServiceCollection services,
-        Action<ObjectPoolOptions>? configure = null)
+        Action<HayateOpOptions>? configure = null)
         where T : class
-        where TPolicy : class, IPooledObjectPolicy<T>
+        where TPolicy : class, IHayateObjectPolicy<T>
     {
-        if(services == null) throw new ArgumentNullException(nameof(services));
-        
+        if (services == null) throw new ArgumentNullException(nameof(services));
+
         if (configure != null)
         {
             services.Configure(configure);
         }
         else
         {
-            var defaultOptions = new ObjectPoolOptions();
-            services.Configure<ObjectPoolOptions>(op =>
+            var defaultOptions = new HayateOpOptions();
+            services.Configure<HayateOpOptions>(op =>
             {
                 op.MaxConcurrent = defaultOptions.MaxConcurrent;
                 op.MaxPoolSize = defaultOptions.MaxPoolSize;
             });
         }
 
-        services.AddSingleton<IPooledObjectPolicy<T>, TPolicy>();
-        services.AddSingleton<IObjectPool<T>, ObjectPoolService<T>>();
-        return services;
+        services.AddLogging();
+
+        services.AddSingleton<IHayateObjectPolicy<T>, TPolicy>();
+        services.AddSingleton<IHayateOpMetrics, EmptyHayateOpMetrics>();
+        services.AddSingleton<IHayateObjectPool<T>, HayateObjectPoolService<T>>();
+
+        return new MsdiHayateOpModuleServiceCollection(services);
     }
 }

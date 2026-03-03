@@ -1,9 +1,8 @@
-﻿using DotNetCore.HayateOP;
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 
-namespace HayateCP.Tests;
+namespace HayateOP.Tests;
 
-public class ObjectPoolTests
+public class HayateObjectPoolTests
 {
     [Fact]
     public void Get_WhenPoolEmpty_CreatesNew()
@@ -15,7 +14,7 @@ public class ObjectPoolTests
             o.MaxPoolSize = 10;
         });
         var sp = services.BuildServiceProvider();
-        var pool = sp.GetRequiredService<IObjectPool<TestPooledObject>>();
+        var pool = sp.GetRequiredService<IHayateObjectPool<TestPooledObject>>();
 
         var obj = pool.Get();
         var stats = pool.GetStats();
@@ -31,7 +30,7 @@ public class ObjectPoolTests
         var services = new ServiceCollection();
         services.AddObjectPool<TestPooledObject>();
         var sp = services.BuildServiceProvider();
-        var pool = sp.GetRequiredService<IObjectPool<TestPooledObject>>();
+        var pool = sp.GetRequiredService<IHayateObjectPool<TestPooledObject>>();
 
         var obj = pool.Get();
         pool.Return(obj);
@@ -47,7 +46,7 @@ public class ObjectPoolTests
         var services = new ServiceCollection();
         services.AddObjectPool<TestPooledObject>();
         var sp = services.BuildServiceProvider();
-        var pool = sp.GetRequiredService<IObjectPool<TestPooledObject>>();
+        var pool = sp.GetRequiredService<IHayateObjectPool<TestPooledObject>>();
 
         var obj1 = pool.Get();
         pool.Return(obj1);
@@ -62,7 +61,7 @@ public class ObjectPoolTests
         var services = new ServiceCollection();
         services.AddObjectPool<TestPooledObject>();
         var sp = services.BuildServiceProvider();
-        var pool = sp.GetRequiredService<IObjectPool<TestPooledObject>>();
+        var pool = sp.GetRequiredService<IHayateObjectPool<TestPooledObject>>();
 
         var obj = await pool.GetAsync();
         Assert.NotNull(obj);
@@ -74,7 +73,7 @@ public class ObjectPoolTests
         var services = new ServiceCollection();
         services.AddObjectPool<TestPooledObject>();
         var sp = services.BuildServiceProvider();
-        var pool = sp.GetRequiredService<IObjectPool<TestPooledObject>>();
+        var pool = sp.GetRequiredService<IHayateObjectPool<TestPooledObject>>();
 
         var obj = pool.Get();
         pool.Return(obj);

@@ -1,8 +1,8 @@
-﻿using DotNetCore.HayateOP;
+﻿using HayateOP.Policies;
 
 namespace HayateOP.Samples;
 
-public class CustomPoolPolicy: IPooledObjectPolicy<MyPooledObject>
+public class CustomPoolPolicy: IHayateObjectPolicy<MyPooledObject>
 {
     public MyPooledObject Create()
     {

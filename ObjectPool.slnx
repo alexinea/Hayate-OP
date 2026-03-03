@@ -4,9 +4,10 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HayateOP.Extensions.DependencyInjection/HayateOP.Extensions.DependencyInjection.csproj" />
+    <Project Path="src/HayateOP.Extensions.Diagnostics/HayateOP.Extensions.Diagnostics.csproj" />
     <Project Path="src/HayateOP/HayateOP.csproj" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/HayateCP.Tests/HayateCP.Tests.csproj" />
+    <Project Path="tests/HayateOP.Tests/HayateOP.Tests.csproj" />
   </Folder>
 </Solution>

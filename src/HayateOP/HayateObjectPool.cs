@@ -2,24 +2,24 @@
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
-using DotNetCore.HayateOP.Metrics;
+using HayateOP.Metrics;
+using HayateOP.Policies;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace DotNetCore.HayateOP;
+namespace HayateOP;
 
-public class ObjectPool<T> : IObjectPool<T>, IDisposable
+public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
     where T : class
 {
     private readonly ConcurrentBag<T> _pool;
     private readonly string _poolName;
-    private readonly IPooledObjectPolicy<T> _policy;
-    private readonly IOptions<ObjectPoolOptions> _options;
+    private readonly IHayateObjectPolicy<T> _policy;
     private readonly SemaphoreSlim _semaphore;
     private readonly int _maxPoolSize;
 
-    private readonly ILogger<ObjectPool<T>>? _logger;
-    // private readonly IObjectPoolMetrics _metrics;
+    private readonly ILogger<HayateObjectPool<T>>? _logger;
+    private readonly IHayateOpMetrics _metrics;
 
     private long _totalCreated;
     private long _totalReturned;
@@ -32,11 +32,11 @@ public class ObjectPool<T> : IObjectPool<T>, IDisposable
     /// <param name="maxConcurrent"></param>
     /// <param name="maxPoolSize"></param>
     /// <exception cref="ArgumentNullException"></exception>
-    public ObjectPool(
-        IPooledObjectPolicy<T> policy,
+    public HayateObjectPool(
+        IHayateObjectPolicy<T> policy,
         int maxConcurrent,
         int maxPoolSize = 100)
-        : this(nameof(ObjectPool<T>), policy, null, null, null, maxConcurrent, maxPoolSize)
+        : this(nameof(HayateObjectPool<T>), policy, null, null, null, maxConcurrent, maxPoolSize)
     {
     }
 
@@ -48,9 +48,9 @@ public class ObjectPool<T> : IObjectPool<T>, IDisposable
     /// <param name="maxConcurrent"></param>
     /// <param name="maxPoolSize"></param>
     /// <exception cref="ArgumentNullException"></exception>
-    public ObjectPool(
+    public HayateObjectPool(
         string name,
-        IPooledObjectPolicy<T> policy,
+        IHayateObjectPolicy<T> policy,
         int maxConcurrent,
         int maxPoolSize = 100)
         : this(name, policy, null, null, null, maxConcurrent, maxPoolSize)
@@ -67,12 +67,12 @@ public class ObjectPool<T> : IObjectPool<T>, IDisposable
     /// <param name="maxConcurrent"></param>
     /// <param name="maxPoolSize"></param>
     /// <param name="options"></param>
-    public ObjectPool(
+    public HayateObjectPool(
         string name,
-        IPooledObjectPolicy<T> policy,
-        ILogger<ObjectPool<T>>? logger,
-        IOptions<ObjectPoolOptions>? options,
-        IObjectPoolMetrics? metrics,
+        IHayateObjectPolicy<T> policy,
+        ILogger<HayateObjectPool<T>>? logger,
+        IOptions<HayateOpOptions>? options,
+        IHayateOpMetrics? metrics,
         int? maxConcurrent,
         int? maxPoolSize)
     {
@@ -81,8 +81,11 @@ public class ObjectPool<T> : IObjectPool<T>, IDisposable
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _semaphore = new(maxConcurrent ?? options?.Value.MaxConcurrent ?? 10);
         _maxPoolSize = maxPoolSize ?? options?.Value.MaxPoolSize ?? 20;
+        var options1 = options?.Value ?? new HayateOpOptions();
         _logger = logger;
-        // _metrics = metrics ?? EmptyObjectPoolMetrics.Instance;
+        _metrics = options1.EnableMetrics
+            ? metrics ?? EmptyHayateOpMetrics.Instance
+            : EmptyHayateOpMetrics.Instance;
     }
 
     /// <summary>
@@ -91,30 +94,25 @@ public class ObjectPool<T> : IObjectPool<T>, IDisposable
     /// <returns></returns>
     public T Get()
     {
-        // var stop = System.Diagnostics.Stopwatch.StartNew();
+        var stop = System.Diagnostics.Stopwatch.StartNew();
         _semaphore.Wait();
-
-        // T? item = default(T);
-        // var success = false;
 
         try
         {
             if (_pool.TryTake(out var item))
             {
-                // success = true;
-                WriteMetric(HayateOPDiagnostic.ObjectGet, item);
+                _metrics.RecordObjectAcquired(_poolName, item, stop.Elapsed.TotalMilliseconds);
                 _logger?.LogTrace("Object retrieved from pool. Type: {Type}", typeof(T).Name);
             }
             else
             {
                 Interlocked.Increment(ref _totalMissed);
                 Interlocked.Increment(ref _totalCreated);
-                WriteMetric(HayateOPDiagnostic.ObjectMiss, typeof(T));
+                _metrics.RecordObjectMiss(_poolName, typeof(T));
                 _logger?.LogTrace("Object pool miss. Created new instance. Type: {Type}", typeof(T).Name);
                 item = _policy.Create();
             }
 
-            // _metrics.RecordObjectAcquired(_poolName, item, success, stop.Elapsed.TotalMilliseconds);
 
             return item;
         }
@@ -123,10 +121,10 @@ public class ObjectPool<T> : IObjectPool<T>, IDisposable
             _semaphore.Release();
             throw;
         }
-        // finally
-        // {
-        //     stop.Stop();
-        // }
+        finally
+        {
+            stop.Stop();
+        }
     }
 
     /// <summary>
@@ -136,30 +134,24 @@ public class ObjectPool<T> : IObjectPool<T>, IDisposable
     /// <returns></returns>
     public async Task<T> GetAsync(CancellationToken cancellationToken = default)
     {
-        //var stop = System.Diagnostics.Stopwatch.StartNew();
+        var stop = System.Diagnostics.Stopwatch.StartNew();
         await _semaphore.WaitAsync(cancellationToken);
-
-        // T? item = default(T);
-        // var success = false;
 
         try
         {
             if (_pool.TryTake(out var item))
             {
-                //success = true;
-                WriteMetric(HayateOPDiagnostic.ObjectGet, item);
+                _metrics.RecordObjectAcquired(_poolName, item, stop.Elapsed.TotalMilliseconds);
                 _logger?.LogTrace("Object retrieved from pool (async). Type: {Type}", typeof(T).Name);
             }
             else
             {
                 Interlocked.Increment(ref _totalMissed);
                 Interlocked.Increment(ref _totalCreated);
-                WriteMetric(HayateOPDiagnostic.ObjectMiss, typeof(T));
+                _metrics.RecordObjectMiss(_poolName, typeof(T));
                 _logger?.LogTrace("Object pool miss (async). Created new instance. Type: {Type}", typeof(T).Name);
                 item = _policy.Create();
             }
-
-            //_metrics.RecordObjectAcquired(_poolName, item, success, stop.Elapsed.TotalMilliseconds);
 
             return item;
         }
@@ -168,10 +160,10 @@ public class ObjectPool<T> : IObjectPool<T>, IDisposable
             _semaphore.Release();
             throw;
         }
-        // finally
-        // {
-        //     stop.Stop();
-        // }
+        finally
+        {
+            stop.Stop();
+        }
     }
 
     /// <summary>
@@ -196,7 +188,7 @@ public class ObjectPool<T> : IObjectPool<T>, IDisposable
         }
 
         Interlocked.Increment(ref _totalReturned);
-        WriteMetric(HayateOPDiagnostic.ObjectReturn, item);
+        _metrics.RecordObjectReturned(_poolName, item, true);
         _logger?.LogTrace("Object returned to pool. Type: {Type}", typeof(T).Name);
 
         if (_pool.Count < _maxPoolSize)
@@ -241,11 +233,11 @@ public class ObjectPool<T> : IObjectPool<T>, IDisposable
 
     private void DisposeItem(T item)
     {
-        if (item is IDisposable disposable)
+        if (item is IDisposable d)
         {
             try
             {
-                disposable.Dispose();
+                d.Dispose();
                 _logger?.LogTrace("Object disposed. Type: {Type}", typeof(T).Name);
             }
             catch (Exception ex)
@@ -254,16 +246,6 @@ public class ObjectPool<T> : IObjectPool<T>, IDisposable
             }
         }
     }
-
-    private void WriteMetric(string name, object value)
-    {
-        if (_options.Value.EnableMetrics && HayateOPDiagnostic.Source.IsEnabled(name))
-        {
-            HayateOPDiagnostic.Source.Write(name, value);
-        }
-    }
-
-    private bool IsObjectValid(T? item) => item != null;
 
     public void Dispose()
     {

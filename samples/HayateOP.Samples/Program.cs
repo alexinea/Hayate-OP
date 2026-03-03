@@ -1,9 +1,8 @@
 // See https://aka.ms/new-console-template for more information
 
 using System.Text;
-using DotNetCore.HayateOP;
+using HayateOP;
 using HayateOP.Samples;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 Console.OutputEncoding = Encoding.UTF8;
@@ -28,7 +27,7 @@ services.AddObjectPool<MyPooledObject, CustomPoolPolicy>(config =>
 
 var provider = services.BuildServiceProvider();
 
-var pool = provider.GetRequiredService<IObjectPool<MyPooledObject>>();
+var pool = provider.GetRequiredService<IHayateObjectPool<MyPooledObject>>();
 
 var obj = pool.Get();
 

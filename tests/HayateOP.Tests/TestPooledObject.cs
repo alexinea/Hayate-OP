@@ -1,8 +1,6 @@
-﻿using DotNetCore.HayateOP;
+﻿namespace HayateOP.Tests;
 
-namespace HayateCP.Tests;
-
-public class TestPooledObject : IResettable, IDisposable
+public class TestPooledObject : IHayateOpResettable, IDisposable
 {
     public int Id { get; set; }
     public string? Data { get; set; }

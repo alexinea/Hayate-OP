@@ -1,9 +1,9 @@
-﻿namespace DotNetCore.HayateOP;
+﻿namespace HayateOP;
 
 /// <summary>
 /// 选项配置
 /// </summary>
-public class ObjectPoolOptions
+public class HayateOpOptions
 {
     public int MaxConcurrent { get; set; } = 10;
 
