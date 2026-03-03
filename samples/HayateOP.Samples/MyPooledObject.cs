@@ -6,6 +6,8 @@ public class MyPooledObject : IResettable, IDisposable
 {
     public int Id { get; set; }
     public string Data { get; set; }
+    
+    public bool IsDisposed { get; private set; }
 
     public void Reset()
     {

@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>default</LangVersion>
+        <RootNamespace>DotNetCore.HayateOP</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\HayateOP.Extensions.DependencyInjection\HayateOP.Extensions.DependencyInjection.csproj" />
+      <ProjectReference Include="..\HayateOP\HayateOP.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Folder Include="Metrics\" />
+    </ItemGroup>
+
+</Project>

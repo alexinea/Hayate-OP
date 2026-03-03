@@ -8,4 +8,6 @@ public class ObjectPoolOptions
     public int MaxConcurrent { get; set; } = 10;
 
     public int MaxPoolSize { get; set; } = 20;
+
+    public bool EnableMetrics { get; set; } = false;
 }
