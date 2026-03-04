@@ -7,7 +7,7 @@ namespace DotNetCore.HealthChecks;
 public class HayateOpHealthCheck<T> : IHealthCheck, IHayateOpModule where T : class
 {
     private readonly IHayateObjectPool<T> _pool;
-
+    
     public HayateOpHealthCheck(IHayateObjectPool<T> pool)
     {
         _pool = pool ?? throw new ArgumentNullException(nameof(pool));

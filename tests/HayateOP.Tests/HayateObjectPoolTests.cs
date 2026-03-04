@@ -54,7 +54,7 @@ public class HayateObjectPoolTests
 
         Assert.Same(obj1, obj2);
     }
-
+    
     [Fact]
     public async Task GetAsync_Works()
     {

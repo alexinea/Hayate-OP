@@ -14,5 +14,9 @@ public class EmptyHayateOpMetrics : IHayateOpMetrics
     {
     }
 
+    public void RecordPoolScaled(string poolName, string action, int oldSize, int newSize)
+    {
+    }
+
     public static IHayateOpMetrics Instance { get; } = new EmptyHayateOpMetrics();
 }

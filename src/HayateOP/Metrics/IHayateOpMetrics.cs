@@ -27,4 +27,13 @@ public interface IHayateOpMetrics
     /// <param name="poolName"></param>
     /// <param name="item"></param>
     void RecordObjectMiss(string poolName, object item);
+
+    /// <summary>
+    /// 记录对象池扩缩容的操作
+    /// </summary>
+    /// <param name="poolName"></param>
+    /// <param name="action"></param>
+    /// <param name="oldSize"></param>
+    /// <param name="newSize"></param>
+    void RecordPoolScaled(string poolName, string action, int oldSize, int newSize);
 }

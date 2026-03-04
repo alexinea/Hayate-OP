@@ -15,8 +15,9 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
     private readonly ConcurrentBag<T> _pool;
     private readonly string _poolName;
     private readonly IHayateObjectPolicy<T> _policy;
+    private readonly HayateOpOptions _options;
     private readonly SemaphoreSlim _semaphore;
-    private readonly int _maxPoolSize;
+    private readonly Timer _scalingTimer;
 
     private readonly ILogger<HayateObjectPool<T>>? _logger;
     private readonly IHayateOpMetrics _metrics;
@@ -25,67 +26,56 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
     private long _totalReturned;
     private long _totalMissed;
 
+    private int _currentPoolSize;
+
     /// <summary>
     /// 构造对象池
     /// </summary>
     /// <param name="policy"></param>
-    /// <param name="maxConcurrent"></param>
-    /// <param name="maxPoolSize"></param>
     /// <exception cref="ArgumentNullException"></exception>
-    public HayateObjectPool(
-        IHayateObjectPolicy<T> policy,
-        int maxConcurrent,
-        int maxPoolSize = 100)
-        : this(nameof(HayateObjectPool<T>), policy, null, null, null, maxConcurrent, maxPoolSize)
+    public HayateObjectPool(IHayateObjectPolicy<T> policy)
+        : this(policy, null, null, null)
     {
     }
 
     /// <summary>
     /// 构造对象池
     /// </summary>
-    /// <param name="name"></param>
-    /// <param name="policy"></param>
-    /// <param name="maxConcurrent"></param>
-    /// <param name="maxPoolSize"></param>
-    /// <exception cref="ArgumentNullException"></exception>
-    public HayateObjectPool(
-        string name,
-        IHayateObjectPolicy<T> policy,
-        int maxConcurrent,
-        int maxPoolSize = 100)
-        : this(name, policy, null, null, null, maxConcurrent, maxPoolSize)
-    {
-    }
-
-    /// <summary>
-    /// 构造对象池
-    /// </summary>
-    /// <param name="name"></param>
     /// <param name="policy"></param>
     /// <param name="logger"></param>
     /// <param name="metrics"></param>
-    /// <param name="maxConcurrent"></param>
-    /// <param name="maxPoolSize"></param>
     /// <param name="options"></param>
     public HayateObjectPool(
-        string name,
         IHayateObjectPolicy<T> policy,
         ILogger<HayateObjectPool<T>>? logger,
         IOptions<HayateOpOptions>? options,
-        IHayateOpMetrics? metrics,
-        int? maxConcurrent,
-        int? maxPoolSize)
+        IHayateOpMetrics? metrics)
     {
+        _poolName = typeof(T).Name;
         _pool = new ConcurrentBag<T>();
-        _poolName = name;
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
-        _semaphore = new(maxConcurrent ?? options?.Value.MaxConcurrent ?? 10);
-        _maxPoolSize = maxPoolSize ?? options?.Value.MaxPoolSize ?? 20;
-        var options1 = options?.Value ?? new HayateOpOptions();
+        _options = options?.Value ?? new HayateOpOptions();
+        _semaphore = new(_options.MaxConcurrent);
+
+        _currentPoolSize = _options.MaxPoolSize;
+
         _logger = logger;
-        _metrics = options1.EnableMetrics
+        _metrics = _options.EnableMetrics
             ? metrics ?? EmptyHayateOpMetrics.Instance
             : EmptyHayateOpMetrics.Instance;
+
+        // 预创建最小容量对象
+        for (var i = 0; i < _options.MinPoolSize; i++)
+        {
+            _pool.Add(_policy.Create());
+            Interlocked.Increment(ref _totalCreated);
+        }
+
+        // 自动伸缩定时器
+        _scalingTimer = new Timer(ScalingCallback!, null, _options.ScalingIntervalMilliseconds, _options.ScalingIntervalMilliseconds);
+
+        _logger?.LogInformation("Object pool initialized. Min:{Min} Max:{Max} Concurrent:{Concurrent}",
+            _options.MinPoolSize, _options.MaxPoolSize, _options.MaxConcurrent);
     }
 
     /// <summary>
@@ -191,7 +181,7 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
         _metrics.RecordObjectReturned(_poolName, item, true);
         _logger?.LogTrace("Object returned to pool. Type: {Type}", typeof(T).Name);
 
-        if (_pool.Count < _maxPoolSize)
+        if (_pool.Count < _currentPoolSize)
         {
             _pool.Add(item);
         }
@@ -208,16 +198,78 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
     /// 获取统计信息
     /// </summary>
     /// <returns></returns>
-    public (int PooledCount, long TotalCreated, long TotalReturned, long TotalMissed, int AvailableSlots) GetStats()
+    public (int PooledCount, long TotalCreated, long TotalReturned, long TotalMissed, int AvailableSlots, int MinSize, int MaxSize) GetStats()
     {
         return (
             PooledCount: _pool.Count,
             TotalCreated: Interlocked.Read(ref _totalCreated),
             TotalReturned: Interlocked.Read(ref _totalReturned),
             TotalMissed: Interlocked.Read(ref _totalMissed),
-            AvailableSlots: _semaphore.CurrentCount
+            AvailableSlots: _semaphore.CurrentCount,
+            MinSize: _options.MinPoolSize,
+            MaxSize: _currentPoolSize
         );
     }
+
+    #region Scaling
+
+    /// <summary>
+    /// 扩缩容回调，根据当前使用率自动调整池大小
+    /// </summary>
+    /// <param name="state"></param>
+    private void ScalingCallback(object state)
+    {
+        try
+        {
+            var stats = GetStats();
+            double usageRate = (double)stats.PooledCount / _currentPoolSize;
+
+            // 扩容
+            if (usageRate > _options.ScaleUpThreshold && _currentPoolSize < _options.MaxPoolSize)
+            {
+                int oldSize = _currentPoolSize;
+                int newSize = Math.Min(_currentPoolSize + 5, _options.MaxPoolSize);
+                int addCount = newSize - oldSize;
+
+                for (var i = 0; i < addCount; i++)
+                {
+                    _pool.Add(_policy.Create());
+                    Interlocked.Increment(ref _totalCreated);
+                }
+
+                _currentPoolSize = newSize;
+                _logger?.LogInformation("Pool scaled UP. New size: {Size}", _currentPoolSize);
+                _metrics.RecordPoolScaled(_poolName, "UP", oldSize, newSize);
+            }
+            // 缩容
+            else if (usageRate < _options.ScaleDownThreshold && _currentPoolSize > _options.MinPoolSize)
+            {
+                int oldSize = _currentPoolSize;
+                int newSize = Math.Max(_currentPoolSize - 5, _options.MinPoolSize);
+                int removeCount = oldSize - newSize;
+
+                for (var i = 0; i < removeCount; i++)
+                {
+                    if (_pool.TryTake(out var item))
+                    {
+                        DisposeItem(item);
+                    }
+                }
+
+                _currentPoolSize = newSize;
+                _logger?.LogInformation("Pool scaled DOWN. New size: {Size}", _currentPoolSize);
+                _metrics.RecordPoolScaled(_poolName, "DOWN", oldSize, newSize);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Scaling callback failed");
+        }
+    }
+
+    #endregion;
+
+    #region Clear and Dispose
 
     /// <summary>
     /// 清空池并释放所有对象
@@ -251,6 +303,9 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
     {
         Clear();
         _semaphore.Dispose();
+        _scalingTimer.Dispose();
         _logger?.LogInformation("Object pool disposed. Type: {Type}", typeof(T).Name);
     }
+
+    #endregion
 }

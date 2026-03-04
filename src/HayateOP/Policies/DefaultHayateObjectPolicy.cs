@@ -10,9 +10,9 @@ public class DefaultHayateObjectPolicy<T> : IHayateObjectPolicy<T> where T : cla
 
     public bool Return(T item)
     {
-        if (item is IHayateOpResettable resettable)
+        if (item is IHayateOpResettable r)
         {
-            resettable.Reset();
+            r.Reset();
         }
 
         return true;

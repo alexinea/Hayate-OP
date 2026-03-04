@@ -12,7 +12,7 @@ public class HayateObjectPoolService<T> : HayateObjectPool<T> where T : class
         IOptions<HayateOpOptions> options,
         IHayateOpMetrics metrics,
         ILogger<HayateObjectPool<T>> logger)
-        : base(typeof(HayateObjectPoolService<T>).Name, policy, logger, options, metrics, options.Value.MaxConcurrent, options.Value.MaxPoolSize)
+        : base(policy, logger, options, metrics)
     {
     }
 }

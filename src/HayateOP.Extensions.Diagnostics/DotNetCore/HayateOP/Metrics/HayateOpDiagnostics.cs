@@ -11,6 +11,7 @@ public class HayateOpDiagnostics : IHayateOpMetrics, IHayateOpModule
     public const string ObjectGet = "HayateOP.Object.Get";
     public const string ObjectReturn = "HayateOP.Object.Return";
     public const string ObjectMiss = "HayateOP.Object.Miss";
+    public const string PoolScaled = "HayateOp.Pool.Scaled";
 
     private readonly HayateOpOptions _options;
 
@@ -40,6 +41,14 @@ public class HayateOpDiagnostics : IHayateOpMetrics, IHayateOpModule
         if (_options.EnableMetrics && Source.IsEnabled(ObjectMiss))
         {
             Source.Write($"{poolName}_{ObjectMiss}", item);
+        }
+    }
+
+    public void RecordPoolScaled(string poolName, string action, int oldSize, int newSize)
+    {
+        if (_options.EnableMetrics && Source.IsEnabled(PoolScaled))
+        {
+            Source.Write($"{poolName}_{PoolScaled}", new { Action = action, OldSize = oldSize, NewSize = newSize });
         }
     }
 }
