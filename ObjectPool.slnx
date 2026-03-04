@@ -9,6 +9,8 @@
     <Project Path="src/HayateOP/HayateOP.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/HayateOP.Benchmarks/HayateOP.Benchmarks.csproj" />
+    <Project Path="tests/HayateOP.PressureTests/HayateOP.PressureTests.csproj" />
     <Project Path="tests/HayateOP.Tests/HayateOP.Tests.csproj" />
   </Folder>
 </Solution>
