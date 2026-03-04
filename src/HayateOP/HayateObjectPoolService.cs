@@ -1,5 +1,6 @@
 ﻿using DotNetCore.HayateOP.Metrics;
 using DotNetCore.HayateOP.Policies;
+using DotNetCore.HayateOP.Scaling;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -10,9 +11,10 @@ public class HayateObjectPoolService<T> : HayateObjectPool<T> where T : class
     public HayateObjectPoolService(
         IHayateObjectPolicy<T> policy,
         IOptions<HayateOpOptions> options,
-        IHayateOpMetrics metrics,
-        ILogger<HayateObjectPool<T>> logger)
-        : base(policy, logger, options, metrics)
+        IHayateOpScalingStrategy scalingStrategy,
+        ILogger<HayateObjectPool<T>> logger,
+        IHayateOpMetrics metrics)
+        : base(policy, options?.Value, scalingStrategy, logger, metrics)
     {
     }
 }

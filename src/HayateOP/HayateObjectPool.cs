@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using DotNetCore.HayateOP.Metrics;
 using DotNetCore.HayateOP.Policies;
+using DotNetCore.HayateOP.Scaling;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -17,6 +18,7 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
     private readonly IHayateObjectPolicy<T> _policy;
     private readonly HayateOpOptions _options;
     private readonly SemaphoreSlim _semaphore;
+    private readonly IHayateOpScalingStrategy _scalingStrategy;
     private readonly Timer _scalingTimer;
 
     private readonly ILogger<HayateObjectPool<T>>? _logger;
@@ -34,7 +36,7 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
     /// <param name="policy"></param>
     /// <exception cref="ArgumentNullException"></exception>
     public HayateObjectPool(IHayateObjectPolicy<T> policy)
-        : this(policy, null, null, null)
+        : this(policy, null, null, null, null)
     {
     }
 
@@ -42,19 +44,22 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
     /// 构造对象池
     /// </summary>
     /// <param name="policy"></param>
+    /// <param name="scalingStrategy"></param>
     /// <param name="logger"></param>
     /// <param name="metrics"></param>
     /// <param name="options"></param>
     public HayateObjectPool(
         IHayateObjectPolicy<T> policy,
+        HayateOpOptions? options,
+        IHayateOpScalingStrategy? scalingStrategy,
         ILogger<HayateObjectPool<T>>? logger,
-        IOptions<HayateOpOptions>? options,
         IHayateOpMetrics? metrics)
     {
         _poolName = typeof(T).Name;
         _pool = new ConcurrentBag<T>();
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
-        _options = options?.Value ?? new HayateOpOptions();
+        _options = options ?? new HayateOpOptions();
+        _scalingStrategy = scalingStrategy ?? new ThresholdScalingStrategy();
         _semaphore = new(_options.MaxConcurrent);
 
         _currentPoolSize = _options.MaxPoolSize;
@@ -222,13 +227,12 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
         try
         {
             var stats = GetStats();
-            double usageRate = (double)stats.PooledCount / _currentPoolSize;
-
+            int newSize = _scalingStrategy.CalculateNewSize(_currentPoolSize, stats.PooledCount, _options);
+            
             // 扩容
-            if (usageRate > _options.ScaleUpThreshold && _currentPoolSize < _options.MaxPoolSize)
+            if (newSize > _currentPoolSize)
             {
                 int oldSize = _currentPoolSize;
-                int newSize = Math.Min(_currentPoolSize + 5, _options.MaxPoolSize);
                 int addCount = newSize - oldSize;
 
                 for (var i = 0; i < addCount; i++)
@@ -242,10 +246,9 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
                 _metrics.RecordPoolScaled(_poolName, "UP", oldSize, newSize);
             }
             // 缩容
-            else if (usageRate < _options.ScaleDownThreshold && _currentPoolSize > _options.MinPoolSize)
+            else if (newSize < _currentPoolSize)
             {
                 int oldSize = _currentPoolSize;
-                int newSize = Math.Max(_currentPoolSize - 5, _options.MinPoolSize);
                 int removeCount = oldSize - newSize;
 
                 for (var i = 0; i < removeCount; i++)

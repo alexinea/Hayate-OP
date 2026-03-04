@@ -1,0 +1,19 @@
+﻿using System;
+
+namespace DotNetCore.HayateOP.Scaling;
+
+public class ThresholdScalingStrategy : IHayateOpScalingStrategy
+{
+    public int CalculateNewSize(int currentSize, int poolCount, HayateOpOptions options)
+    {
+        double usage = (double)poolCount / currentSize;
+
+        if (usage > options.ScaleUpThreshold && currentSize < options.MaxPoolSize)
+            return Math.Min(currentSize + 5, options.MaxPoolSize);
+
+        if (usage < options.ScaleDownThreshold && currentSize > options.MinPoolSize)
+            return Math.Max(currentSize - 5, options.MinPoolSize);
+
+        return currentSize;
+    }
+}
