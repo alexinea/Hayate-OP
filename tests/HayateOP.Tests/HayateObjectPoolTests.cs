@@ -8,11 +8,7 @@ public class HayateObjectPoolTests
     public void Get_WhenPoolEmpty_CreatesNew()
     {
         var services = new ServiceCollection();
-        services.AddHayateObjectPool<TestPooledObject>(o =>
-        {
-            o.MaxConcurrent = 5;
-            o.MaxPoolSize = 10;
-        });
+        services.AddHayateObjectPool<TestPooledObject>();
         var sp = services.BuildServiceProvider();
         var pool = sp.GetRequiredService<IHayateObjectPool<TestPooledObject>>();
 
@@ -20,8 +16,8 @@ public class HayateObjectPoolTests
         var stats = pool.GetStats();
 
         Assert.NotNull(obj);
-        Assert.Equal(1, stats.TotalCreated);
-        Assert.Equal(1, stats.TotalMissed);
+        Assert.Equal(HayateOpConsts.DEFAULT_MIN_POOL_SIZE, stats.TotalCreated);
+        Assert.Equal(0, stats.TotalMissed);
     }
 
     [Fact]
@@ -36,7 +32,7 @@ public class HayateObjectPoolTests
         pool.Return(obj);
         var stats = pool.GetStats();
 
-        Assert.Equal(1, stats.PooledCount);
+        Assert.Equal(HayateOpConsts.DEFAULT_MIN_POOL_SIZE, stats.PooledCount);
         Assert.Equal(1, stats.TotalReturned);
     }
 

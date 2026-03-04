@@ -3,7 +3,6 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
 using DotNetCore.HayateOP;
-using Microsoft.Extensions.DependencyInjection;
 
 BenchmarkRunner.Run<HayateOpBenchmark>();
 
@@ -13,6 +12,7 @@ public class TestItem : IHayateOpResettable, IDisposable
 {
     public int Id { get; set; }
     public int Value { get; set; }
+
     public void Reset()
     {
         Id = 0;
@@ -28,27 +28,21 @@ public class TestItem : IHayateOpResettable, IDisposable
 public class HayateOpBenchmark
 {
     private IHayateObjectPool<TestItem> _pool;
-    
+
     private Microsoft.Extensions.ObjectPool.ObjectPool<TestItem> _msPool;
     private Microsoft.Extensions.ObjectPool.ObjectPoolProvider _provider = new Microsoft.Extensions.ObjectPool.DefaultObjectPoolProvider();
-    
+
     [GlobalSetup]
     public void Setup()
     {
-        var services = new ServiceCollection();
-        services.AddLogging();
-        services.AddHayateObjectPool<TestItem>(opt =>
+        var options = new HayateOpOptions
         {
-            opt.MinPoolSize = 10;
-            opt.MaxPoolSize = 100;
-            opt.MaxConcurrent = 32;
-            opt.EnableMetrics = false;
-        });
-        
-        var sp = services.BuildServiceProvider();
-        _pool = sp.GetRequiredService<IHayateObjectPool<TestItem>>();
-        
-        
+            MinPoolSize = 32,
+            MaxPoolSize = 256,
+            MaxConcurrent = 128,
+        };
+        _pool = new HayateOpFactory().GetPool<TestItem>(options);
+
         // MSOP
         _msPool = _provider.Create<TestItem>(new MsReusableObjectPolicy());
     }
@@ -57,7 +51,7 @@ public class HayateOpBenchmark
     public TestItem GetReturn()
     {
         var item = _pool.Get();
-        
+
         try
         {
             // 模拟使用...
@@ -83,7 +77,7 @@ public class HayateOpBenchmark
             _msPool.Return(obj); // 必须归还
         }
     }
-    
+
     [Benchmark(Baseline = true)]
     public TestItem NewEachTime()
     {
@@ -98,7 +92,7 @@ public class HayateOpBenchmark
 public class MsReusableObjectPolicy : Microsoft.Extensions.ObjectPool.PooledObjectPolicy<TestItem>
 {
     public override TestItem Create() => new TestItem();
-    
+
     // Return 时会调用这个方法来清空/重置对象状态
     public override bool Return(TestItem obj)
     {
