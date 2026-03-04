@@ -1,6 +1,7 @@
 ﻿using DotNetCore.HayateOP;
 using DotNetCore.HayateOP.Metrics;
 using DotNetCore.HayateOP.Policies;
+using DotNetCore.HayateOP.Scaling;
 
 namespace Microsoft.Extensions.DependencyInjection;
 
@@ -36,8 +37,10 @@ public static class ServiceCollectionExtensions
 
         services.AddLogging();
 
+        services.AddSingleton<IHayateOpScalingStrategy, ThresholdScalingStrategy>();
         services.AddSingleton<IHayateObjectPolicy<T>, DefaultHayateObjectPolicy<T>>();
         services.AddSingleton<IHayateOpMetrics, EmptyHayateOpMetrics>();
+        services.AddSingleton<IHayateOpFactory, HayateOpFactory>();
         services.AddSingleton<IHayateObjectPool<T>, HayateObjectPoolService<T>>();
 
         return new MSDIHayateServiceCollection<T>(services);
@@ -75,8 +78,10 @@ public static class ServiceCollectionExtensions
 
         services.AddLogging();
 
+        services.AddSingleton<IHayateOpScalingStrategy, ThresholdScalingStrategy>();
         services.AddSingleton<IHayateObjectPolicy<T>, TPolicy>();
         services.AddSingleton<IHayateOpMetrics, EmptyHayateOpMetrics>();
+        services.AddSingleton<IHayateOpFactory, HayateOpFactory>();
         services.AddSingleton<IHayateObjectPool<T>, HayateObjectPoolService<T>>();
 
         return new MSDIHayateServiceCollection<T>(services);
