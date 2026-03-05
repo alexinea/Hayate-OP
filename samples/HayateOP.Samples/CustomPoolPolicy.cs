@@ -2,7 +2,7 @@
 
 namespace DotNetCore.HayateOP.Samples;
 
-public class CustomPoolPolicy: IHayateObjectPolicy<MyPooledObject>
+public class CustomPoolPolicy : IHayateObjectPolicy<MyPooledObject>
 {
     public MyPooledObject Create()
     {
@@ -20,5 +20,22 @@ public class CustomPoolPolicy: IHayateObjectPolicy<MyPooledObject>
 
         // 通过 true 表示可以放回池，false 表示直接销毁
         return true;
+    }
+
+    public bool Validate(MyPooledObject item)
+    {
+        return true;
+    }
+
+    public void ActivateObject(MyPooledObject item)
+    {
+    }
+
+    public void PassivateObject(MyPooledObject item)
+    {
+    }
+
+    public void DestroyObject(MyPooledObject item)
+    {
     }
 }

@@ -14,7 +14,7 @@ public class HayateOpScalingTests
             o.MinPoolSize = 5;
             o.MaxPoolSize = 20;
             o.MaxConcurrent = 10;
-            o.ScalingIntervalMilliseconds = 500;
+            o.ScalingIntervalMs = 500;
         }).AddHealthChecks();
         return services.BuildServiceProvider();
     }
@@ -27,6 +27,6 @@ public class HayateOpScalingTests
         var stats = pool.GetStats();
 
         Assert.True(stats.MinSize > 0);
-        Assert.True(stats.MaxSize >= stats.MinSize);
+        Assert.True(stats.TotalCreated >= stats.MinSize);
     }
 }

@@ -61,11 +61,11 @@ public class HayateOpFactory : IHayateOpFactory
     }
 
     private IHayateObjectPool<T> CreatePoolInternal<T>(
-        IHayateObjectPolicy<T>? policy,
-        HayateOpOptions? options = null,
-        IHayateOpScalingStrategy? scalingStrategy = null,
-        ILogger<HayateObjectPool<T>>? logger = null,
-        IHayateOpMetrics? metrics = null) where T : class, new()
+        IHayateObjectPolicy<T> policy,
+        HayateOpOptions options = null,
+        IHayateOpScalingStrategy scalingStrategy = null,
+        ILogger<HayateObjectPool<T>> logger = null,
+        IHayateOpMetrics metrics = null) where T : class, new()
     {
         policy = (policy ?? new DefaultHayateObjectPolicy<T>());
         return new HayateObjectPool<T>(policy, options, scalingStrategy, logger, metrics);

@@ -27,7 +27,7 @@ public class PressureTester
             opt.MinPoolSize = 20;
             opt.MaxPoolSize = 200;
             opt.MaxConcurrent = 64;
-            opt.ScalingIntervalMilliseconds = 1000;
+            opt.ScalingIntervalMs = 1000;
             opt.EnableMetrics = false;
         });
         var sp = services.BuildServiceProvider();
@@ -61,6 +61,6 @@ public class PressureTester
         Console.WriteLine($"PooledCount: {stats.PooledCount}");
         Console.WriteLine($"TotalCreated: {stats.TotalCreated}");
         Console.WriteLine($"TotalMissed: {stats.TotalMissed}");
-        Console.WriteLine($"CurrentSize(Max): {stats.MaxSize}");
+        Console.WriteLine($"CurrentSize(Max): {stats.CurrentSize}");
     }
 }

@@ -17,4 +17,26 @@ public class DefaultHayateObjectPolicy<T> : IHayateObjectPolicy<T> where T : cla
 
         return true;
     }
+
+    public bool Validate(T item)
+    {
+        if (item is IHayateValidatableObject v)
+        {
+            return v.IsValid();
+        }
+
+        return true;
+    }
+
+    public void ActivateObject(T item)
+    {
+    }
+
+    public void PassivateObject(T item)
+    {
+    }
+
+    public void DestroyObject(T item)
+    {
+    }
 }

@@ -19,8 +19,7 @@ public class HayateOpHealthCheck<T> : IHealthCheck, IHayateOpModule where T : cl
         var data = new Dictionary<string, object>
         {
             { "PooledCount", stats.PooledCount },
-            { " CurrentPoolSize", stats.MaxSize },
-            { "MinPoolsize", stats.MinSize },
+            { "MinPoolSize", stats.MinSize },
             { "TotalCreated", stats.TotalCreated },
             { "TotalReturned", stats.TotalReturned },
             { "TotalMissed", stats.TotalMissed },

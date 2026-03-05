@@ -1,4 +1,5 @@
-﻿using System.Threading;
+﻿using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace DotNetCore.HayateOP;
@@ -10,8 +11,11 @@ namespace DotNetCore.HayateOP;
 public interface IHayateObjectPool<T> where T : class
 {
     T Get();
+    T Get(TimeSpan timeout);
     Task<T> GetAsync(CancellationToken cancellationToken = default);
     void Return(T item);
-    (int PooledCount, long TotalCreated, long TotalReturned, long TotalMissed, int AvailableSlots, int MinSize, int MaxSize) GetStats();
+    HayateOpStats GetStats();
+    HayateOpSnapshot TakeSnapshot();
+    void ReloadConfig(Action<HayateOpOptions> configure);
     void Clear();
 }
