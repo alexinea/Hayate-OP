@@ -25,6 +25,10 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
     private readonly ILogger<HayateObjectPool<T>> _logger;
     private readonly IHayateMetrics _metrics;
 
+    // 扩缩容冷却，防止抖动
+    private DateTime _lastScaleUpTime = DateTime.MinValue;
+    private DateTime _lastScaleDownTime = DateTime.MinValue;
+
     private readonly Timer _evictionTimer;
     private readonly Timer _scalingTimer;
     private readonly Timer _validateTimer;
@@ -156,6 +160,9 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
             if (sw.Elapsed >= timeout)
             {
                 Interlocked.Increment(ref _totalMissed);
+
+                ForceScaleUpOneStep();
+
                 var newObj = _options.RejectPolicy switch
                 {
                     HayatePoolRejectPolicy.Abort => throw new TimeoutException($"Pool timeout after {timeout.TotalSeconds} seconds"),
@@ -331,6 +338,31 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
         }
     }
 
+    private void ForceScaleUpOneStep()
+    {
+        try
+        {
+            int currentTotal = _shards.Sum(s => s.Capacity);
+            if (currentTotal >= _options.MaxPoolSize) return;
+
+            // 每次超时 +5 个，防止雪崩
+            int add = Math.Min(5, _options.MaxPoolSize - currentTotal);
+            for (var i = 0; i < add; i++)
+            {
+                var shard = _shards[i % _shards.Length];
+                var objW = CreateWrappedObject();
+                shard.Add(objW, _logger);
+            }
+
+            _lastScaleUpTime = DateTime.UtcNow;
+            _logger?.LogWarning("FORCE SCALE UP (because timeout) → total: {Total}", _shards.Sum(s => s.Capacity));
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
     private void Destroy(HayateObject<T> w)
     {
         if (w == null) return;
@@ -453,35 +485,59 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
             var currentCapacity = _shards.Sum(s => s.Capacity);
             var targetCapacity = _scalingStrategy.CalculateNewSize(currentCapacity, totalPooled, _options);
 
-            if (targetCapacity > currentCapacity)
+            // 扩容冷却时间 3 秒，缩容冷却时间 15 秒，防止频繁抖动
+            var canScaleUp = (DateTime.UtcNow - _lastScaleUpTime).TotalSeconds >= 3;
+            var canScaleDown = (DateTime.UtcNow - _lastScaleDownTime).TotalSeconds >= 15;
+
+            if (targetCapacity > currentCapacity && canScaleUp)
             {
                 // 扩容
-                var addCount = targetCapacity - currentCapacity;
-                for (var i = 0; i < addCount; i++)
+                var add = targetCapacity - currentCapacity;
+                for (var i = 0; i < add; i++)
                 {
                     var shard = _shards[i % _shards.Length];
-                    var newW = CreateWrappedObject();
-                    shard.Add(newW, _logger);
+                    var objW = CreateWrappedObject();
+                    shard.Add(objW, _logger);
                 }
 
-                _logger?.LogInformation("Pool scaled UP. Target capacity: {TargetCapacity} Current capacity: {CurrentCapacity}", targetCapacity, currentCapacity);
+                _lastScaleUpTime = DateTime.UtcNow;
+                _logger?.LogInformation("Pool scaled UP. {CurrentCapacity} → {TargetCapacity}", currentCapacity, targetCapacity);
                 _metrics.RecordPoolScaled(_name, "UP", currentCapacity, targetCapacity);
             }
-            else if (targetCapacity < currentCapacity)
+            else if (targetCapacity < currentCapacity && canScaleDown && totalPooled < currentCapacity * 0.4f)
             {
                 // 缩容
-                var removeCount = currentCapacity - targetCapacity;
-                for (var i = 0; i < removeCount; i++)
+                var remove = currentCapacity - targetCapacity;
+                int removed = 0;
+
+                foreach (var shard in _shards)
                 {
-                    var shard = _shards[i % _shards.Length];
-                    //if (shard.TryTake(out var w, TimeSpan.Zero, _options.UseFairSemaphore))
-                    if (shard.TryTake(out var w, _options.UseFairSemaphore))
+                    if (removed >= remove) break;
+                    if (shard.Count <= _options.MinPoolSize / _shards.Length) continue;
+
+                    while (shard.Count > _options.MinPoolSize / _shards.Length && removed < remove)
                     {
-                        Destroy(w);
+                        if (shard.TryTake(out var w, _options.UseFairSemaphore, _logger))
+                        {
+                            Destroy(w);
+                            removed++;
+                        }
+                        else break;
                     }
                 }
 
-                _logger?.LogInformation("Pool scaled DOWN. Target capacity: {TargetCapacity} Current capacity: {CurrentCapacity}", targetCapacity, currentCapacity);
+                //for (var i = 0; i < remove; i++)
+                //{
+                //    var shard = _shards[i % _shards.Length];
+                //    //if (shard.TryTake(out var w, TimeSpan.Zero, _options.UseFairSemaphore))
+                //    if (shard.TryTake(out var w, _options.UseFairSemaphore))
+                //    {
+                //        Destroy(w);
+                //    }
+                //}
+
+                _lastScaleDownTime = DateTime.UtcNow;
+                _logger?.LogInformation("Pool scaled DOWN. {CurrentCapacity} → {TargetCapacity}", currentCapacity, targetCapacity);
                 _metrics.RecordPoolScaled(_name, "DOWN", currentCapacity, targetCapacity);
             }
         }

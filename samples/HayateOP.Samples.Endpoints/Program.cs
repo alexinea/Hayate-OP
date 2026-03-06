@@ -16,8 +16,8 @@ builder.Services.AddHayateObjectPool<MyBizObj>(opt =>
     opt.UseFairSemaphore = true;
     opt.EnableMetrics = true;
     opt.ShardCount = 4;
-    opt.ScalingIntervalMs = 1000 * 60 * 60;
-    opt.DefaultGetTimeout = TimeSpan.FromMinutes(5);
+    //opt.ScalingIntervalMs = 1000 * 60 * 60;
+    //opt.DefaultGetTimeout = TimeSpan.FromMinutes(5);
 });
 
 builder.Services.AddLogging(b =>
@@ -59,8 +59,8 @@ app.MapGet("/test-hayateop", async (IHayateObjectPoolFactory factory, ILogger<Ha
         logger.LogInformation("获取对象池，当前统计：{Stats}", pool.GetStats());
 
         // 显式指定获取对象的超时时间（便于排查）
-        //obj = pool.Get(TimeSpan.FromSeconds(5)); // 覆盖默认BlockTimeout，临时排查
-        obj = pool.Get(); // 覆盖默认BlockTimeout，临时排查
+        obj = pool.Get(TimeSpan.FromSeconds(5)); // 覆盖默认BlockTimeout，临时排查
+        //obj = pool.Get(); // 覆盖默认BlockTimeout，临时排查
         if (obj == null)
         {
             logger.LogError("从对象池获取MyBizObj失败，对象为null");
