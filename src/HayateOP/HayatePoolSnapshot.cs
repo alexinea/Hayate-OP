@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace DotNetCore.HayateOP;
 
-public class HayateOpSnapshot
+public class HayatePoolSnapshot
 {
     public DateTimeOffset Timestamp { get; set; }
     public int PooledCount { get; set; }

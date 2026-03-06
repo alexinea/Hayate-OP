@@ -10,21 +10,13 @@ public class DefaultHayateObjectPolicy<T> : IHayateObjectPolicy<T> where T : cla
 
     public bool Return(T item)
     {
-        if (item is IHayateOpResettable r)
-        {
-            r.Reset();
-        }
-
+        if (item is IHayateResettable r) r.Reset();
         return true;
     }
 
     public bool Validate(T item)
     {
-        if (item is IHayateValidatableObject v)
-        {
-            return v.IsValid();
-        }
-
+        if (item is IHayateValidatable v) return v.IsValid();
         return true;
     }
 

@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Diagnostics;
 
-namespace DotNetCore.HayateOP.Internals;
+namespace DotNetCore.HayateOP.Common;
 
 /// <summary>
 /// 高性能的值类型秒表，用于精确测量时间间隔。

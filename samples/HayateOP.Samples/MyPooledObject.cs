@@ -1,6 +1,6 @@
 ﻿namespace DotNetCore.HayateOP.Samples;
 
-public class MyPooledObject : IHayateOpResettable, IDisposable
+public class MyPooledObject : IHayateResettable, IDisposable
 {
     public int Id { get; set; }
     public string Data { get; set; }

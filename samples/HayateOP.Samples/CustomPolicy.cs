@@ -2,7 +2,7 @@
 
 namespace DotNetCore.HayateOP.Samples;
 
-public class CustomPoolPolicy : IHayateObjectPolicy<MyPooledObject>
+public class CustomPolicy : IHayateObjectPolicy<MyPooledObject>
 {
     public MyPooledObject Create()
     {

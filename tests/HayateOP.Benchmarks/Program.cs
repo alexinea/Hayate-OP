@@ -8,7 +8,7 @@ BenchmarkRunner.Run<HayateOpBenchmark>();
 
 Console.WriteLine("Hello, World!");
 
-public class TestItem : IHayateOpResettable, IDisposable
+public class TestItem : IHayateResettable, IDisposable
 {
     public int Id { get; set; }
     public int Value { get; set; }
@@ -35,13 +35,13 @@ public class HayateOpBenchmark
     [GlobalSetup]
     public void Setup()
     {
-        var options = new HayateOpOptions
+        var options = new HayatePoolOptions
         {
             MinPoolSize = 32,
             MaxPoolSize = 256,
             MaxConcurrent = 128,
         };
-        _pool = new HayateOpFactory().GetPool<TestItem>(options);
+        _pool = new HayateObjectPoolFactory().GetPool<TestItem>(options);
 
         // MSOP
         _msPool = _provider.Create<TestItem>(new MsReusableObjectPolicy());

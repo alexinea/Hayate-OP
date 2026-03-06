@@ -4,7 +4,7 @@ using Microsoft.Extensions.Options;
 
 namespace DotNetCore.HayateOP.Metrics;
 
-public class HayateOpDiagnostics : IHayateOpMetrics, IHayateOpModule
+public class HayateDiagnostics : IHayateMetrics, IHayateOpModule
 {
     public static readonly DiagnosticSource Source = new DiagnosticListener("HayateOP");
 
@@ -13,11 +13,11 @@ public class HayateOpDiagnostics : IHayateOpMetrics, IHayateOpModule
     public const string ObjectMiss = "HayateOP.Object.Miss";
     public const string PoolScaled = "HayateOp.Pool.Scaled";
 
-    private readonly HayateOpOptions _options;
+    private readonly HayatePoolOptions _options;
 
-    public HayateOpDiagnostics(IOptions<HayateOpOptions>? options)
+    public HayateDiagnostics(IOptions<HayatePoolOptions>? options)
     {
-        _options = options?.Value ?? new HayateOpOptions();
+        _options = options?.Value ?? new HayatePoolOptions();
     }
 
     public void RecordObjectAcquired(string poolName, object item, double elapsedMilliseconds)

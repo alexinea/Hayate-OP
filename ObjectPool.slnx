@@ -1,10 +1,12 @@
 <Solution>
   <Folder Name="/samples/">
+    <Project Path="samples/HayateOP.Samples.Endpoints/HayateOP.Samples.Endpoints.csproj" />
     <Project Path="samples/HayateOP.Samples/HayateOP.Samples.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HayateOP.Extensions.DependencyInjection/HayateOP.Extensions.DependencyInjection.csproj" />
     <Project Path="src/HayateOP.Extensions.Diagnostics/HayateOP.Extensions.Diagnostics.csproj" />
+    <Project Path="src/HayateOP.Extensions.Endpoints/HayateOP.Extensions.Endpoints.csproj" />
     <Project Path="src/HayateOP.Extensions.HealthCheck/HayateOP.Extensions.HealthCheck.csproj" />
     <Project Path="src/HayateOP/HayateOP.csproj" />
   </Folder>

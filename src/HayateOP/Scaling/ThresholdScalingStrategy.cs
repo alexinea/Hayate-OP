@@ -2,9 +2,9 @@
 
 namespace DotNetCore.HayateOP.Scaling;
 
-public class ThresholdScalingStrategy : IHayateOpScalingStrategy
+public class ThresholdScalingStrategy : IHayateScalingStrategy
 {
-    public int CalculateNewSize(int currentSize, int poolCount, HayateOpOptions options)
+    public int CalculateNewSize(int currentSize, int poolCount, HayatePoolOptions options)
     {
         double usage = (double)poolCount / currentSize;
 

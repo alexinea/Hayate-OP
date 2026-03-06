@@ -16,7 +16,7 @@ public static class ServiceCollectionExtensions
     /// <returns></returns>
     public static IHayateServiceCollection<T> AddHayateObjectPool<T>(
         this IServiceCollection services,
-        Action<HayateOpOptions>? configure = null)
+        Action<HayatePoolOptions>? configure = null)
         where T : class, new()
     {
         if (services == null) throw new ArgumentNullException(nameof(services));
@@ -27,20 +27,44 @@ public static class ServiceCollectionExtensions
         }
         else
         {
-            var defaultOptions = new HayateOpOptions();
-            services.Configure<HayateOpOptions>(op =>
+            var defaultOptions = new HayatePoolOptions();
+            services.Configure<HayatePoolOptions>(op =>
             {
                 op.MaxConcurrent = defaultOptions.MaxConcurrent;
+                op.MinPoolSize = defaultOptions.MinPoolSize;
                 op.MaxPoolSize = defaultOptions.MaxPoolSize;
+                op.EnableMetrics= defaultOptions.EnableMetrics;
+                op.ScalingIntervalMs = defaultOptions.ScalingIntervalMs;
+                op.ScaleUpThreshold = defaultOptions.ScaleUpThreshold;
+                op.ScaleDownThreshold = defaultOptions.ScaleDownThreshold;
+                op.ValidateOnBorrow = defaultOptions.ValidateOnBorrow;
+                op.ValidateOnReturn = defaultOptions.ValidateOnReturn;
+                op.ValidateWhileIdle = defaultOptions.ValidateWhileIdle;
+                op.ValidateIntervalMs= defaultOptions.ValidateIntervalMs;
+                op.MaxLifeTime= defaultOptions.MaxLifeTime;
+                op.MaxIdleTime= defaultOptions.MaxIdleTime;
+                op.SoftMinEvictableIdleTime= defaultOptions.SoftMinEvictableIdleTime;
+                op.EvictionIntervalMs= defaultOptions.EvictionIntervalMs;
+                op.NumTestsPerEvictionRun = defaultOptions.NumTestsPerEvictionRun;
+                op.DefaultGetTimeout = defaultOptions.DefaultGetTimeout;
+                op.UseFairSemaphore = defaultOptions.UseFairSemaphore;
+                op.LeakDetectionThreshold= defaultOptions.LeakDetectionThreshold;
+                op.EnableLeakDetection = defaultOptions.EnableLeakDetection;
+                op.RejectPolicy = defaultOptions.RejectPolicy;
+                op.CreationRetryCount = defaultOptions.CreationRetryCount;
+                op.CreationRetryDelay = defaultOptions.CreationRetryDelay;
+                op.ShardCount = defaultOptions.ShardCount;
+                op.GenerationThresholdMs= defaultOptions.GenerationThresholdMs;
+                op.OldGenerationValidationInterval = defaultOptions.OldGenerationValidationInterval;
             });
         }
 
         services.AddLogging();
 
-        services.AddSingleton<IHayateOpScalingStrategy, ThresholdScalingStrategy>();
+        services.AddSingleton<IHayateScalingStrategy, ThresholdScalingStrategy>();
         services.AddSingleton<IHayateObjectPolicy<T>, DefaultHayateObjectPolicy<T>>();
-        services.AddSingleton<IHayateOpMetrics, EmptyHayateOpMetrics>();
-        services.AddSingleton<IHayateOpFactory, HayateOpFactory>();
+        services.AddSingleton<IHayateMetrics, EmptyHayateMetrics>();
+        services.AddSingleton<IHayateObjectPoolFactory, HayateObjectPoolFactory>();
         services.AddSingleton<IHayateObjectPool<T>, HayateObjectPoolService<T>>();
 
         return new MSDIHayateServiceCollection<T>(services);
@@ -56,7 +80,7 @@ public static class ServiceCollectionExtensions
     /// <returns></returns>
     public static IHayateServiceCollection<T> AddHayateObjectPool<T, TPolicy>(
         this IServiceCollection services,
-        Action<HayateOpOptions>? configure = null)
+        Action<HayatePoolOptions>? configure = null)
         where T : class, new()
         where TPolicy : class, IHayateObjectPolicy<T>
     {
@@ -68,20 +92,44 @@ public static class ServiceCollectionExtensions
         }
         else
         {
-            var defaultOptions = new HayateOpOptions();
-            services.Configure<HayateOpOptions>(op =>
+            var defaultOptions = new HayatePoolOptions();
+            services.Configure<HayatePoolOptions>(op =>
             {
                 op.MaxConcurrent = defaultOptions.MaxConcurrent;
+                op.MinPoolSize = defaultOptions.MinPoolSize;
                 op.MaxPoolSize = defaultOptions.MaxPoolSize;
+                op.EnableMetrics = defaultOptions.EnableMetrics;
+                op.ScalingIntervalMs = defaultOptions.ScalingIntervalMs;
+                op.ScaleUpThreshold = defaultOptions.ScaleUpThreshold;
+                op.ScaleDownThreshold = defaultOptions.ScaleDownThreshold;
+                op.ValidateOnBorrow = defaultOptions.ValidateOnBorrow;
+                op.ValidateOnReturn = defaultOptions.ValidateOnReturn;
+                op.ValidateWhileIdle = defaultOptions.ValidateWhileIdle;
+                op.ValidateIntervalMs = defaultOptions.ValidateIntervalMs;
+                op.MaxLifeTime = defaultOptions.MaxLifeTime;
+                op.MaxIdleTime = defaultOptions.MaxIdleTime;
+                op.SoftMinEvictableIdleTime = defaultOptions.SoftMinEvictableIdleTime;
+                op.EvictionIntervalMs = defaultOptions.EvictionIntervalMs;
+                op.NumTestsPerEvictionRun = defaultOptions.NumTestsPerEvictionRun;
+                op.DefaultGetTimeout = defaultOptions.DefaultGetTimeout;
+                op.UseFairSemaphore = defaultOptions.UseFairSemaphore;
+                op.LeakDetectionThreshold = defaultOptions.LeakDetectionThreshold;
+                op.EnableLeakDetection = defaultOptions.EnableLeakDetection;
+                op.RejectPolicy = defaultOptions.RejectPolicy;
+                op.CreationRetryCount = defaultOptions.CreationRetryCount;
+                op.CreationRetryDelay = defaultOptions.CreationRetryDelay;
+                op.ShardCount = defaultOptions.ShardCount;
+                op.GenerationThresholdMs = defaultOptions.GenerationThresholdMs;
+                op.OldGenerationValidationInterval = defaultOptions.OldGenerationValidationInterval;
             });
         }
 
         services.AddLogging();
 
-        services.AddSingleton<IHayateOpScalingStrategy, ThresholdScalingStrategy>();
+        services.AddSingleton<IHayateScalingStrategy, ThresholdScalingStrategy>();
         services.AddSingleton<IHayateObjectPolicy<T>, TPolicy>();
-        services.AddSingleton<IHayateOpMetrics, EmptyHayateOpMetrics>();
-        services.AddSingleton<IHayateOpFactory, HayateOpFactory>();
+        services.AddSingleton<IHayateMetrics, EmptyHayateMetrics>();
+        services.AddSingleton<IHayateObjectPoolFactory, HayateObjectPoolFactory>();
         services.AddSingleton<IHayateObjectPool<T>, HayateObjectPoolService<T>>();
 
         return new MSDIHayateServiceCollection<T>(services);

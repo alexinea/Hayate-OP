@@ -3,7 +3,7 @@
 /// <summary>
 ///  拒绝策略枚举，定义了当请求被拒绝时的处理方式
 /// </summary>
-public enum HayateOpRejectPolicy
+public enum HayatePoolRejectPolicy
 {
     /// <summary>
     ///  直接抛出异常，拒绝请求

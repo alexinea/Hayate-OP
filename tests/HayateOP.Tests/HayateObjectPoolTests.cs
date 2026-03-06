@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using DotNetCore.HayateOP.Common;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace DotNetCore.HayateOP.Tests;
 
@@ -16,7 +17,7 @@ public class HayateObjectPoolTests
         var stats = pool.GetStats();
 
         Assert.NotNull(obj);
-        Assert.Equal(HayateOpConsts.DEFAULT_MIN_POOL_SIZE, stats.TotalCreated);
+        Assert.Equal(HayateConsts.DEFAULT_MIN_POOL_SIZE, stats.TotalCreated);
         Assert.Equal(0, stats.TotalMissed);
     }
 
@@ -32,7 +33,7 @@ public class HayateObjectPoolTests
         pool.Return(obj);
         var stats = pool.GetStats();
 
-        Assert.Equal(HayateOpConsts.DEFAULT_MIN_POOL_SIZE, stats.PooledCount);
+        Assert.Equal(HayateConsts.DEFAULT_MIN_POOL_SIZE, stats.PooledCount);
         Assert.Equal(1, stats.TotalReturned);
     }
 

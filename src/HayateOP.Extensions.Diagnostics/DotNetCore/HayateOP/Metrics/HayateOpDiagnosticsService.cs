@@ -5,36 +5,36 @@ namespace DotNetCore.HayateOP.Metrics;
 
 public class HayateOpDiagnosticsService : IHayateOpModule
 {
-    private readonly IHayateOpMetrics _metrics;
-    private readonly HayateOpOptions _options;
+    private readonly IHayateMetrics _metrics;
+    private readonly HayatePoolOptions _options;
 
-    public HayateOpDiagnosticsService(IOptions<HayateOpOptions>? options)
+    public HayateOpDiagnosticsService(IOptions<HayatePoolOptions>? options)
     {
-        _options = options?.Value ?? new HayateOpOptions();
-        _metrics = _options.EnableMetrics ? new HayateOpDiagnostics(options) : EmptyHayateOpMetrics.Instance;
+        _options = options?.Value ?? new HayatePoolOptions();
+        _metrics = _options.EnableMetrics ? new HayateDiagnostics(options) : EmptyHayateMetrics.Instance;
     }
     
     public void RecordObjectAcquired(string poolName, object item, double elapsedMilliseconds)
     {
-        if (_options.EnableMetrics && HayateOpDiagnostics.Source.IsEnabled(HayateOpDiagnostics.ObjectGet))
+        if (_options.EnableMetrics && HayateDiagnostics.Source.IsEnabled(HayateDiagnostics.ObjectGet))
         {
-            HayateOpDiagnostics.Source.Write($"{poolName}_{HayateOpDiagnostics.ObjectGet}", item);
+            HayateDiagnostics.Source.Write($"{poolName}_{HayateDiagnostics.ObjectGet}", item);
         }
     }
 
     public void RecordObjectReturned(string poolName, object item, bool isValid)
     {
-        if (_options.EnableMetrics && HayateOpDiagnostics.Source.IsEnabled(HayateOpDiagnostics.ObjectReturn))
+        if (_options.EnableMetrics && HayateDiagnostics.Source.IsEnabled(HayateDiagnostics.ObjectReturn))
         {
-            HayateOpDiagnostics.Source.Write($"{poolName}_{HayateOpDiagnostics.ObjectReturn}", item);
+            HayateDiagnostics.Source.Write($"{poolName}_{HayateDiagnostics.ObjectReturn}", item);
         }
     }
 
     public void RecordObjectMiss(string poolName, object item)
     {
-        if (_options.EnableMetrics && HayateOpDiagnostics.Source.IsEnabled(HayateOpDiagnostics.ObjectMiss))
+        if (_options.EnableMetrics && HayateDiagnostics.Source.IsEnabled(HayateDiagnostics.ObjectMiss))
         {
-            HayateOpDiagnostics.Source.Write($"{poolName}_{HayateOpDiagnostics.ObjectMiss}", item);
+            HayateDiagnostics.Source.Write($"{poolName}_{HayateDiagnostics.ObjectMiss}", item);
         }
     }
 }

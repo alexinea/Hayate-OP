@@ -1,6 +1,6 @@
 ﻿namespace DotNetCore.HayateOP.Tests;
 
-public class TestPooledObject : IHayateOpResettable, IDisposable
+public class TestPooledObject : IHayateResettable, IDisposable
 {
     public int Id { get; set; }
     public string? Data { get; set; }

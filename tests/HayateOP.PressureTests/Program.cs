@@ -9,7 +9,7 @@ await PressureTester.RunAsync();
 
 Console.WriteLine("Hello, World!");
 
-public class TestItem : IHayateOpResettable, IDisposable
+public class TestItem : IHayateResettable, IDisposable
 {
     public int Value { get; set; }
     public void Reset() => Value = 0;

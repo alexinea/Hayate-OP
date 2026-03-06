@@ -3,7 +3,7 @@
 /// <summary>
 /// 对象池诊断指标接口
 /// </summary>
-public interface IHayateOpMetrics
+public interface IHayateMetrics
 {
     /// <summary>
     /// 记录对象从池中取出的操作

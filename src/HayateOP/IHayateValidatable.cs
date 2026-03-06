@@ -1,6 +1,6 @@
 ﻿namespace DotNetCore.HayateOP;
 
-public interface IHayateValidatableObject
+public interface IHayateValidatable
 {
     bool IsValid();
 }

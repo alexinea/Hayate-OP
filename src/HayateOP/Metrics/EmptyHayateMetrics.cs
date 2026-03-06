@@ -1,6 +1,6 @@
 ﻿namespace DotNetCore.HayateOP.Metrics;
 
-public class EmptyHayateOpMetrics : IHayateOpMetrics
+public class EmptyHayateMetrics : IHayateMetrics
 {
     public void RecordObjectAcquired(string poolName, object item, double elapsedMilliseconds)
     {
@@ -18,5 +18,5 @@ public class EmptyHayateOpMetrics : IHayateOpMetrics
     {
     }
 
-    public static IHayateOpMetrics Instance { get; } = new EmptyHayateOpMetrics();
+    public static IHayateMetrics Instance { get; } = new EmptyHayateMetrics();
 }

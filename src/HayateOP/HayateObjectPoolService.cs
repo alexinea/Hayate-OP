@@ -10,10 +10,10 @@ public class HayateObjectPoolService<T> : HayateObjectPool<T> where T : class
 {
     public HayateObjectPoolService(
         IHayateObjectPolicy<T> policy,
-        IOptions<HayateOpOptions> options,
-        IHayateOpScalingStrategy scalingStrategy,
+        IOptions<HayatePoolOptions> options,
+        IHayateScalingStrategy scalingStrategy,
         ILogger<HayateObjectPool<T>> logger,
-        IHayateOpMetrics metrics)
+        IHayateMetrics metrics)
         : base(policy, options?.Value, scalingStrategy, logger, metrics)
     {
     }
