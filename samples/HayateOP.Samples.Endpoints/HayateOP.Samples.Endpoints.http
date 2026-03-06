@@ -1,0 +1,6 @@
+@HayateOP.Samples.Endpoints_HostAddress = http://localhost:5185
+
+GET {{HayateOP.Samples.Endpoints_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
