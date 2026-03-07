@@ -5,12 +5,12 @@ namespace DotNetCore.HayateOP.Common;
 /// Hayate 对象池的默认常量定义。
 /// 这些常量用于 <see cref="HayatePoolOptions"/> 的默认配置值。
 /// </summary>
-public static class HayateConsts
+public static class HayateConstant
 {
-    /// <summary>
-    /// 默认最大并发借用数（对应 <see cref="HayatePoolOptions.MaxConcurrent"/>）。
-    /// </summary>
-    public const int DEFAULT_MAX_CONCURRENT = 32;
+    ///// <summary>
+    ///// 默认最大并发借用数（对应 <see cref="HayatePoolOptions.MaxConcurrent"/>）。
+    ///// </summary>
+    //public const int DEFAULT_MAX_CONCURRENT = 32;
 
     /// <summary>
     /// 默认最小池容量（对应 <see cref="HayatePoolOptions.MinPoolSize"/>）。
@@ -21,6 +21,10 @@ public static class HayateConsts
     /// 默认最大池容量（对应 <see cref="HayatePoolOptions.MaxPoolSize"/>）。
     /// </summary>
     public const int DEFAULT_MAX_POOL_SIZE = 50;
+
+    /*
+     * Scaling
+     */
 
     /// <summary>
     /// 默认伸缩检查间隔，单位：毫秒（对应 <see cref="HayatePoolOptions.ScalingIntervalMs"/>）。
@@ -36,6 +40,12 @@ public static class HayateConsts
     /// 默认缩容阈值，范围 0~1（对应 <see cref="HayatePoolOptions.ScaleDownThreshold"/>）。
     /// </summary>
     public const double DEFAULT_SCALE_DOWN_THRESHOLD = 0.2;
+
+    public const int DEFAULT_SCALE_UP_COOLDOWN_SECONDS = 3;
+
+    public const int DEFAULT_SCALE_DOWN_COOLDOWN_SECONDS = 15;
+
+    public const int DEFAULT_SCALE_UP_STEP = 5;
 
     /*
      * Validate
@@ -80,9 +90,9 @@ public static class HayateConsts
      */
 
     /// <summary>
-    /// 默认获取超时时间，单位：秒（对应 <see cref="HayatePoolOptions.DefaultGetTimeout"/>）。
+    /// 默认获取超时时间，单位：秒（对应 <see cref="HayatePoolOptions.DefaultAcquireTimeout"/>）。
     /// </summary>
-    public const int DEFAULT_GET_TIMEOUT_SECONDS = 5;
+    public const int DEFAULT_ACQUIRE_TIMEOUT_SECONDS = 5;
 
     /*
      * Leak Detection

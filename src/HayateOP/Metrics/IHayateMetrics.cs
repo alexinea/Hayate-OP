@@ -19,7 +19,7 @@ public interface IHayateMetrics
     /// <param name="poolName"></param>
     /// <param name="item"></param>
     /// <param name="isValid"></param>
-    void RecordObjectReturned(string poolName, object item, bool isValid);
+    void RecordObjectReleased(string poolName, object item, bool isValid);
 
     /// <summary>
     /// 记录对象池创建新对象的操作

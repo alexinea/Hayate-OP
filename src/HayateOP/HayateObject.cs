@@ -7,8 +7,8 @@ public class HayateObject<T> where T : class
     public T Value { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime LastBorrowedAt { get; set; }
-    public DateTime LastReturnedAt { get; set; }
-    public string BorrowTrace { get; set; }
+    public DateTime LastReleasedAt { get; set; }
+    public string AcquireTrace { get; set; }
     public bool IsBorrowed { get; set; }
     public int Generation { get; set; } // 0 年轻代 1 老年代
     
@@ -20,6 +20,6 @@ public class HayateObject<T> where T : class
     {
         Value = value ?? throw new ArgumentNullException(nameof(value));
         CreatedAt = DateTime.UtcNow;
-        LastReturnedAt = DateTime.UtcNow;
+        LastReleasedAt = DateTime.UtcNow;
     }
 }

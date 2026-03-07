@@ -5,14 +5,14 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using DotNetCore.HayateOP.Common;
+using DotNetCore.HayateOP.Logging;
 using DotNetCore.HayateOP.Metrics;
 using DotNetCore.HayateOP.Policies;
 using DotNetCore.HayateOP.Scaling;
-using Microsoft.Extensions.Logging;
 
 namespace DotNetCore.HayateOP;
 
-public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
+public class HayatePoolBasic<T> : IHayateObjectPool<T>, IDisposable
     where T : class
 {
     private readonly string _name;
@@ -22,77 +22,101 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
     private readonly HayatePoolOptions _options;
     private readonly IHayateScalingStrategy _scalingStrategy;
 
-    private readonly ILogger<HayateObjectPool<T>> _logger;
+    private readonly IHayateLogger _logger;
     private readonly IHayateMetrics _metrics;
 
-    // 扩缩容冷却，防止抖动
+    private readonly ConcurrentDictionary<T, HayateObject<T>> _objectMap = new();
+    private readonly object _lock = new();
+
+    // 后台任务
+    private Timer _evictionTimer;
+    private Timer _scalingTimer;
+    private Timer _validateTimer;
+
+    // 扩缩容冷却控制，防止抖动
     private DateTime _lastScaleUpTime = DateTime.MinValue;
     private DateTime _lastScaleDownTime = DateTime.MinValue;
 
-    private readonly Timer _evictionTimer;
-    private readonly Timer _scalingTimer;
-    private readonly Timer _validateTimer;
-
+    // 统计数据
     private long _totalCreated;
-    private long _totalReturned;
+    private long _totalReleased;
     private long _totalMissed;
     private long _leakDetectedCount;
-
     private readonly HayatePoolStats _stats = new();
     private readonly object _statsLock = new();
 
-    private readonly ConcurrentDictionary<T, HayateObject<T>> _objectMap = new();
-
-    public HayateObjectPool(
+    internal HayatePoolBasic(
         IHayateObjectPolicy<T> policy,
         HayatePoolOptions options,
-        IHayateScalingStrategy scalingStrategy = null,
-        ILogger<HayateObjectPool<T>> logger = null,
-        IHayateMetrics metrics = null)
+        IHayateScalingStrategy scalingStrategy,
+        IHayateMetrics metrics,
+        IHayateLogger logger,
+        string poolName)
     {
-        _name = typeof(T).Name;
-
-        _policy = policy ?? throw new ArgumentNullException(nameof(policy));
-        _options = options ?? new HayatePoolOptions();
-        _scalingStrategy = scalingStrategy ?? new ThresholdScalingStrategy();
-
+        _policy = policy;
+        _options = options;
+        _scalingStrategy = scalingStrategy;
+        _metrics = metrics;
         _logger = logger;
-        _metrics = _options.EnableMetrics
-            ? metrics ?? EmptyHayateMetrics.Instance
-            : EmptyHayateMetrics.Instance;
+        _name = poolName;
 
-        if (_options.MinPoolSize > _options.MaxPoolSize)
-        {
-            throw new ArgumentException("MinPoolSize cannot be greater than MaxPoolSize", nameof(options));
-        }
-
-        // 验证配置：确保 ShardCount > 0
-        if (_options.ShardCount < 1)
-        {
-            throw new ArgumentException("ShardCount must be at least 1", nameof(options));
-        }
-
+        // 初始化分片
         _shards = Enumerable
             .Range(0, _options.ShardCount)
-            .Select(index => new Shard(_options, index))
+            .Select(index => new Shard(_options, index, _logger))
             .ToArray();
 
+    }
+
+    #region Initialized
+
+    internal void PreWarm()
+    {
+        try
+        {
+            int perShard = _options.MinPoolSize / _shards.Length;
+            int remainder = _options.MinPoolSize % _shards.Length;
+            int totalPreWarmed = 0;
+
+            for (var i = 0; i < _shards.Length; i++)
+            {
+                var shard = _shards[i];
+                int count = perShard + (i < remainder ? 1 : 0); // 处理余数
+
+                for (var j = 0; j < count; j++)
+                {
+                    shard.Add(CreateWrappedObject());
+                    totalPreWarmed++;
+                }
+
+                _logger.LogInformation("[Shard {Index}] Pre-warmed with {Count} objects", shard.Index, perShard);
+            }
+
+            _logger.LogInformation("Object pool pre-warmed with {Count} objects", perShard * _shards.Length);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during pool pre-warming");
+        }
+    }
+
+    internal void StartBackgroundTasks()
+    {
         _evictionTimer = new Timer(EvictionCallback, null, _options.EvictionIntervalMs, _options.EvictionIntervalMs);
         _scalingTimer = new Timer(ScalingCallback, null, _options.ScalingIntervalMs, _options.ScalingIntervalMs);
         _validateTimer = new Timer(ValidateCallback, null, _options.ValidateIntervalMs, _options.ValidateIntervalMs);
-
-        PreWarm();
-
-        _logger?.LogInformation("Object pool initialized. Min:{Min} Max:{Max} Concurrent:{Concurrent}",
-            _options.MinPoolSize, _options.MaxPoolSize, _options.MaxConcurrent);
     }
 
-    public T Get()
+    #endregion
+
+    #region Core methods
+
+    public T Acquire()
     {
-        return Get(_options.DefaultGetTimeout);
+        return Acquire(_options.DefaultAcquireTimeout);
     }
 
-    public T Get(TimeSpan timeout)
+    public T Acquire(TimeSpan timeout)
     {
         if (timeout < TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be non-negative");
@@ -104,8 +128,7 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
         {
             foreach (var shard in _shards)
             {
-                //if (shard.TryTake(out var w, timeout - sw.Elapsed, _options.UseFairSemaphore, _logger))
-                if (shard.TryTake(out var w, _options.UseFairSemaphore, _logger))
+                if (shard.TryTake(out var w, _options.UseFairMode))
                 {
                     bool shouldValidate = _options.ValidateOnBorrow;
 
@@ -124,20 +147,21 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
                         }
                     }
 
+                    // 有效性检查
                     if (shouldValidate && !_policy.Validate(w.Value))
                     {
-                        _logger?.LogWarning("[Shard {Index}] Object failed validation on borrow. Disposing. Type: {Type}", shard.Index, typeof(T).Name);
+                        _logger.LogWarning("[Shard {Index}] Object failed validation on borrow. Disposing. Type: {Type}", shard.Index, typeof(T).Name);
                         Destroy(w);
                         continue;
                     }
 
                     // 激活对象
-                    _policy.ActivateObject(w.Value);
+                    _policy.OnAcquire(w.Value);
 
                     // 记录借出时间和调用栈（如果启用泄漏检测）
                     w.LastBorrowedAt = DateTime.UtcNow;
                     w.IsBorrowed = true;
-                    w.BorrowTrace = _options.EnableLeakDetection ? Environment.StackTrace : null;
+                    w.AcquireTrace = _options.EnableLeakDetection ? Environment.StackTrace : null;
 
                     // 分代更新
                     if (DateTime.UtcNow - w.CreatedAt > TimeSpan.FromMilliseconds(_options.GenerationThresholdMs))
@@ -150,7 +174,7 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
                     // 记录指标
                     _metrics.RecordObjectAcquired(_name, w.Value, waitTime);
 
-                    _logger?.LogDebug("Object borrowed from pool. Type: {Type} WaitTime: {WaitTime:F2}ms, shard: {ShardIndex}", typeof(T).Name, waitTime, shard.Index);
+                    _logger.LogDebug("Object borrowed from pool. Type: {Type} WaitTime: {WaitTime:F2}ms, shard: {ShardIndex}", typeof(T).Name, waitTime, shard.Index);
 
                     return w.Value;
                 }
@@ -169,7 +193,7 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
                     HayatePoolRejectPolicy.Block => throw new TimeoutException("Pool is full, block policy triggered"),
                     HayatePoolRejectPolicy.BlockTimeout => throw new TimeoutException($"Pool timeout after {timeout.TotalSeconds} seconds (BlockTimeout policy)"),
                     HayatePoolRejectPolicy.CreateNew => CreateWrappedObject().Value, // 创建新对象（不加入池）
-                    _ => throw new TimeoutException("Pool timeout")
+                    _ => throw new TimeoutException($"HayatePool [{_name}] acquire timeout")
                 };
 
                 // 记录指标
@@ -183,7 +207,7 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
         }
     }
 
-    public async Task<T> GetAsync(CancellationToken cancellationToken = default)
+    public async Task<T> AcquireAsync(CancellationToken cancellationToken = default)
     {
         var delay = TimeSpan.FromMilliseconds(1);
 
@@ -191,8 +215,8 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
         {
             foreach (var shard in _shards)
             {
-                //if (shard.TryTake(out var w, TimeSpan.Zero, _options.UseFairSemaphore))
-                if (shard.TryTake(out var w, _options.UseFairSemaphore))
+                //if (shard.TryTake(out var w, TimeSpan.Zero, _options.UseFairMode))
+                if (shard.TryTake(out var w, _options.UseFairMode))
                 {
                     if (_options.ValidateOnBorrow && !_policy.Validate(w.Value))
                     {
@@ -200,7 +224,7 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
                         continue;
                     }
 
-                    _policy.ActivateObject(w.Value);
+                    _policy.OnAcquire(w.Value);
 
                     w.IsBorrowed = true;
                     w.LastBorrowedAt = DateTime.UtcNow;
@@ -215,34 +239,38 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
         throw new TaskCanceledException();
     }
 
-    public void Return(T item)
+    public void Release(T item)
     {
         if (item is null)
         {
-            _logger?.LogWarning("Returned null object to pool. Type: {Type}", typeof(T).Name);
+            _logger.LogWarning("Returned null object to pool. Type: {Type}", typeof(T).Name);
             return;
         }
 
         // 查找对应的包装对象，验证是否属于池中对象
-        if (!_objectMap.TryGetValue(item, out var w))
+        HayateObject<T> w;
+        lock (_lock)
         {
-            _logger?.LogWarning("Returned object does not belong to pool. Disposing. Type: {Type}", typeof(T).Name);
+            if (!_objectMap.TryGetValue(item, out w))
+            {
+                _logger.LogWarning("Returned object does not belong to pool. Disposing. Type: {Type}", typeof(T).Name);
 
-            Destroy(item);
+                Destroy(item);
 
-            _metrics.RecordObjectReturned(_name, item, false);
+                _metrics.RecordObjectReleased(_name, item, false);
 
-            return;
+                return;
+            }
         }
 
         // 有效性检查
         if (_options.ValidateOnReturn && !_policy.Validate(item))
         {
-            _logger?.LogWarning("Object returned to pool. Disposing. Type: {Type}", typeof(T).Name);
+            _logger.LogWarning("Object returned to pool. Disposing. Type: {Type}", typeof(T).Name);
 
             Destroy(w);
 
-            _metrics.RecordObjectReturned(_name, item, false);
+            _metrics.RecordObjectReleased(_name, item, false);
 
             return;
         }
@@ -250,15 +278,15 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
         try
         {
             // 纯化对象
-            _policy.PassivateObject(item);
+            _policy.OnPassivate(item);
 
             // 更新对象状态
             w.IsBorrowed = false;
-            w.LastReturnedAt = DateTime.UtcNow;
-            w.LeaseTimeMs = (long)(w.LastReturnedAt - w.LastBorrowedAt).TotalMilliseconds;
+            w.LastReleasedAt = DateTime.UtcNow;
+            w.LeaseTimeMs = (long)(w.LastReleasedAt - w.LastBorrowedAt).TotalMilliseconds;
 
             // 重置对象
-            _policy.Return(item);
+            _policy.OnRelease(item);
 
             // 记录租赁时间统计
             UpdateLeaseTimeStats(w.LeaseTimeMs);
@@ -266,19 +294,21 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
             // 归还到当前对应分片
             var shardIndex = Thread.GetCurrentProcessorId() % _shards.Length;
             var shard = _shards[shardIndex];
-            shard.Add(w, _logger);
+            shard.Add(w);
 
-            Interlocked.Increment(ref _totalReturned);
-            _metrics.RecordObjectReturned(_name, item, true);
-            _logger?.LogDebug("Object returned to pool. Type: {Type} LeaseTime: {LeaseTime:F2}ms, shard: {ShardIndex}", typeof(T).Name, w.LeaseTimeMs, shardIndex);
+            Interlocked.Increment(ref _totalReleased);
+            _metrics.RecordObjectReleased(_name, item, true);
+            _logger.LogDebug("Object returned to pool. Type: {Type} LeaseTime: {LeaseTime:F2}ms, shard: {ShardIndex}", typeof(T).Name, w.LeaseTimeMs, shardIndex);
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error during object return validation. Disposing. Type: {Type}", typeof(T).Name);
+            _logger.LogError(ex, "Error during object return validation. Disposing. Type: {Type}", typeof(T).Name);
             Destroy(w);
-            _metrics.RecordObjectReturned(_name, item, false);
+            _metrics.RecordObjectReleased(_name, item, false);
         }
     }
+
+    #endregion
 
     #region 辅助方法
 
@@ -290,13 +320,13 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
             {
                 var o = _policy.Create();
                 var w = new HayateObject<T>(o);
-                _objectMap.TryAdd(o, w);
+                lock (_lock) _objectMap[o] = w;
                 Interlocked.Increment(ref _totalCreated);
                 return w;
             }
             catch (Exception ex)
             {
-                _logger?.LogError(ex, "Error creating object. Retry {Retry}/{MaxRetries}", retry + 1, _options.CreationRetryCount);
+                _logger.LogError(ex, "Error creating object. Retry {Retry}/{MaxRetries}", retry + 1, _options.CreationRetryCount);
 
                 if (retry == _options.CreationRetryCount - 1)
                     throw new InvalidOperationException("Failed to create object after retries", ex);
@@ -308,58 +338,29 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
         throw new InvalidOperationException("Failed to create object after retries");
     }
 
-    private void PreWarm()
-    {
-        try
-        {
-            int perShard = _options.MinPoolSize / _shards.Length;
-            int remainder = _options.MinPoolSize % _shards.Length;
-
-            int totalPreWarmed = 0;
-            for (var i = 0; i < _shards.Length; i++)
-            {
-                var shard = _shards[i];
-                int count = perShard + (i < remainder ? 1 : 0); // 处理余数
-
-                for (var j = 0; j < count; j++)
-                {
-                    shard.Add(CreateWrappedObject(), _logger);
-                    totalPreWarmed++;
-                }
-
-                _logger?.LogInformation("[Shard {Index}] Pre-warmed with {Count} objects", shard.Index, perShard);
-            }
-
-            _logger?.LogInformation("Object pool pre-warmed with {Count} objects", perShard * _shards.Length);
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Error during pool pre-warming");
-        }
-    }
-
     private void ForceScaleUpOneStep()
     {
         try
         {
             int currentTotal = _shards.Sum(s => s.Capacity);
             if (currentTotal >= _options.MaxPoolSize) return;
+            if ((DateTime.UtcNow - _lastScaleUpTime).TotalSeconds < _options.ScaleUpCooldownSeconds) return;
 
             // 每次超时 +5 个，防止雪崩
-            int add = Math.Min(5, _options.MaxPoolSize - currentTotal);
+            int add = Math.Min(_options.ScaleUpStep, _options.MaxPoolSize - currentTotal);
             for (var i = 0; i < add; i++)
             {
                 var shard = _shards[i % _shards.Length];
-                var objW = CreateWrappedObject();
-                shard.Add(objW, _logger);
+                shard.Add(CreateWrappedObject());
             }
 
             _lastScaleUpTime = DateTime.UtcNow;
-            _logger?.LogWarning("FORCE SCALE UP (because timeout) → total: {Total}", _shards.Sum(s => s.Capacity));
+            _logger.LogWarning("FORCE SCALE UP (because timeout) → total: {Total}", _shards.Sum(s => s.Capacity));
+            _metrics.RecordPoolScaled(_name, "ForceUp", currentTotal, currentTotal + add);
         }
-        catch
+        catch (Exception ex)
         {
-            // ignore
+            _logger.LogError(ex, "Force scale up failed");
         }
     }
 
@@ -369,14 +370,14 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
 
         try
         {
-            _policy.DestroyObject(w.Value);
+            _policy.OnDestroy(w.Value);
             if (w.Value is IDisposable d) d.Dispose();
-            _objectMap.TryRemove(w.Value, out _);
-            _logger?.LogDebug("Wrapped object destroyed. Type: {Type}", typeof(T).Name);
+            lock (_lock) _objectMap.TryRemove(w.Value, out _);
+            _logger.LogDebug("Wrapped object destroyed. Type: {Type}", typeof(T).Name);
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error during wrapped object destruction. Type: {Type}", typeof(T).Name);
+            _logger.LogError(ex, "Error during wrapped object destruction. Type: {Type}", typeof(T).Name);
         }
     }
 
@@ -386,14 +387,14 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
 
         try
         {
-            _policy.DestroyObject(o);
+            _policy.OnDestroy(o);
             if (o is IDisposable d) d.Dispose();
-            _objectMap.TryRemove(o, out _);
-            _logger?.LogDebug("Object destroyed. Type: {Type}", typeof(T).Name);
+            lock (_lock) _objectMap.TryRemove(o, out _);
+            _logger.LogDebug("Object destroyed. Type: {Type}", typeof(T).Name);
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error during object destruction. Type: {Type}", typeof(T).Name);
+            _logger.LogError(ex, "Error during object destruction. Type: {Type}", typeof(T).Name);
         }
     }
 
@@ -421,7 +422,7 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
 
     #endregion
 
-    #region Eviction
+    #region Background Tasks
 
     private void EvictionCallback(object state)
     {
@@ -431,11 +432,9 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
             foreach (var shard in _shards)
             {
                 // 分批检查
-                var itemsToCheck = shard.GetAll()
-                    .Take(_options.NumTestsPerEvictionRun)
-                    .ToArray();
-
+                var itemsToCheck = shard.GetAll().Take(_options.NumTestsPerEvictionRun).ToArray();
                 int evictedCount = 0;
+
                 foreach (var item in itemsToCheck)
                 {
                     // 跳过正在使用的对象
@@ -443,8 +442,8 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
 
                     // 判断是否需要驱逐
                     var isExpired = now - item.CreatedAt > _options.MaxLifeTime;
-                    var isIdleTooLong = now - item.LastReturnedAt > _options.MaxIdleTime;
-                    var isSoftIdle = now - item.LastReturnedAt > _options.SoftMinEvictableIdleTime;
+                    var isIdleTooLong = now - item.LastReleasedAt > _options.MaxIdleTime;
+                    var isSoftIdle = now - item.LastReleasedAt > _options.SoftMinEvictableIdleTime;
 
                     // 软最小空闲逻辑
                     // 只有当空闲数超过最小池大小时才驱逐软空闲对象
@@ -456,7 +455,7 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
                         Destroy(item);
                         evictedCount++;
 
-                        _logger?.LogInformation("[Shard {Index}] Evicting object. Type: {Type} Expired: {Expired} IdleTooLong: {IdleTooLong} SoftIdle: {SoftIdle}",
+                        _logger.LogInformation("[Shard {Index}] Evicting object. Type: {Type} Expired: {Expired} IdleTooLong: {IdleTooLong} SoftIdle: {SoftIdle}",
                             shard.Index, typeof(T).Name, isExpired, isIdleTooLong, shouldEvictSoft);
                     }
                 }
@@ -469,21 +468,17 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Eviction callback failed");
+            _logger.LogError(ex, "Eviction callback failed");
         }
     }
-
-    #endregion
-
-    #region Scaling
 
     private void ScalingCallback(object state)
     {
         try
         {
-            var totalPooled = _shards.Sum(s => s.Count);
+            var totalIdle = _shards.Sum(s => s.Count);
             var currentCapacity = _shards.Sum(s => s.Capacity);
-            var targetCapacity = _scalingStrategy.CalculateNewSize(currentCapacity, totalPooled, _options);
+            var targetCapacity = _scalingStrategy.CalculateNewSize(currentCapacity, totalIdle, _options);
 
             // 扩容冷却时间 3 秒，缩容冷却时间 15 秒，防止频繁抖动
             var canScaleUp = (DateTime.UtcNow - _lastScaleUpTime).TotalSeconds >= 3;
@@ -496,15 +491,14 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
                 for (var i = 0; i < add; i++)
                 {
                     var shard = _shards[i % _shards.Length];
-                    var objW = CreateWrappedObject();
-                    shard.Add(objW, _logger);
+                    shard.Add(CreateWrappedObject());
                 }
 
                 _lastScaleUpTime = DateTime.UtcNow;
-                _logger?.LogInformation("Pool scaled UP. {CurrentCapacity} → {TargetCapacity}", currentCapacity, targetCapacity);
+                _logger.LogInformation("Pool [{PoolName}] scaled UP. {CurrentCapacity} → {TargetCapacity}", _name, currentCapacity, targetCapacity);
                 _metrics.RecordPoolScaled(_name, "UP", currentCapacity, targetCapacity);
             }
-            else if (targetCapacity < currentCapacity && canScaleDown && totalPooled < currentCapacity * 0.4f)
+            else if (targetCapacity < currentCapacity && canScaleDown && totalIdle < currentCapacity * 0.4f)
             {
                 // 缩容
                 var remove = currentCapacity - targetCapacity;
@@ -517,7 +511,7 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
 
                     while (shard.Count > _options.MinPoolSize / _shards.Length && removed < remove)
                     {
-                        if (shard.TryTake(out var w, _options.UseFairSemaphore, _logger))
+                        if (shard.TryTake(out var w, _options.UseFairMode))
                         {
                             Destroy(w);
                             removed++;
@@ -526,30 +520,16 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
                     }
                 }
 
-                //for (var i = 0; i < remove; i++)
-                //{
-                //    var shard = _shards[i % _shards.Length];
-                //    //if (shard.TryTake(out var w, TimeSpan.Zero, _options.UseFairSemaphore))
-                //    if (shard.TryTake(out var w, _options.UseFairSemaphore))
-                //    {
-                //        Destroy(w);
-                //    }
-                //}
-
                 _lastScaleDownTime = DateTime.UtcNow;
-                _logger?.LogInformation("Pool scaled DOWN. {CurrentCapacity} → {TargetCapacity}", currentCapacity, targetCapacity);
+                _logger.LogInformation("Pool [{PoolName}] scaled DOWN. {CurrentCapacity} → {TargetCapacity}", _name, currentCapacity, targetCapacity);
                 _metrics.RecordPoolScaled(_name, "DOWN", currentCapacity, targetCapacity);
             }
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Scaling callback failed");
+            _logger.LogError(ex, "Scaling callback failed");
         }
     }
-
-    #endregion;
-
-    #region Validate
 
     private void ValidateCallback(object state)
     {
@@ -564,22 +544,22 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
                 {
                     if (!w.IsBorrowed && !_policy.Validate(w.Value))
                     {
-                        shard.Remove(w, _logger);
+                        shard.Remove(w);
                         Destroy(w);
                         invalidCount++;
-                        _logger?.LogWarning("Idle object failed validation and was evicted. Type: {Type}", typeof(T).Name);
+                        _logger.LogWarning("Idle object failed validation and was evicted. Type: {Type}", typeof(T).Name);
                     }
                 }
             }
 
             if (invalidCount > 0)
             {
-                _logger?.LogWarning("Validation task removed {Count} invalid objects from pool", invalidCount);
+                _logger.LogWarning("Validation task removed {Count} invalid objects from pool", invalidCount);
             }
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Validate callback failed");
+            _logger.LogError(ex, "Validate callback failed");
         }
     }
 
@@ -595,7 +575,7 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
             {
                 PooledCount = _shards.Sum(s => s.Count),
                 TotalCreated = Interlocked.Read(ref _totalCreated),
-                TotalReturned = Interlocked.Read(ref _totalReturned),
+                TotalReleased = Interlocked.Read(ref _totalReleased),
                 TotalMissed = Interlocked.Read(ref _totalMissed),
                 AvailableSlots = _shards.Sum(s => s.Available),
                 MinSize = _options.MinPoolSize,
@@ -625,7 +605,7 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
                 // 检查泄露
                 if (w.IsBorrowed && now - w.LastBorrowedAt > _options.LeakDetectionThreshold)
                 {
-                    leakTraces.Add(w.BorrowTrace ?? "No stack trace available");
+                    leakTraces.Add(w.AcquireTrace ?? "No stack trace available");
                     Interlocked.Increment(ref _leakDetectedCount);
                 }
             }
@@ -651,9 +631,9 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
     {
         if (configure is null) throw new ArgumentNullException(nameof(configure));
 
-        configure(_options);
+        lock (_lock) configure(_options);
 
-        _logger?.LogInformation("Pool configuration reloaded. Type: {Type} NewConfig: {@Config}", typeof(T).Name, _options);
+        _logger.LogInformation("Pool configuration reloaded. Type: {Type} NewConfig: {@Config}", typeof(T).Name, _options);
     }
 
     #endregion
@@ -662,13 +642,9 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
 
     public void Clear()
     {
-        foreach (var shard in _shards)
-        {
-            shard.Clear();
-        }
-
-        _objectMap.Clear();
-        _logger?.LogInformation("Clearing object pool. Type: {Type}", typeof(T).Name);
+        foreach (var shard in _shards) shard.Clear();
+        lock (_logger) _objectMap.Clear();
+        _logger.LogInformation("Clearing object pool. Type: {Type}", typeof(T).Name);
     }
 
     public HayatePoolOptions GetOptions()
@@ -677,7 +653,6 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
         {
             MinPoolSize = _options.MinPoolSize,
             MaxPoolSize = _options.MaxPoolSize,
-            MaxConcurrent = _options.MaxConcurrent,
             EnableMetrics = _options.EnableMetrics,
             ScalingIntervalMs = _options.ScalingIntervalMs,
             ScaleUpThreshold = _options.ScaleUpThreshold,
@@ -691,8 +666,8 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
             SoftMinEvictableIdleTime = _options.SoftMinEvictableIdleTime,
             EvictionIntervalMs = _options.EvictionIntervalMs,
             NumTestsPerEvictionRun = _options.NumTestsPerEvictionRun,
-            DefaultGetTimeout = _options.DefaultGetTimeout,
-            UseFairSemaphore = _options.UseFairSemaphore,
+            DefaultAcquireTimeout = _options.DefaultAcquireTimeout,
+            UseFairMode = _options.UseFairMode,
             LeakDetectionThreshold = _options.LeakDetectionThreshold,
             EnableLeakDetection = _options.EnableLeakDetection,
             RejectPolicy = _options.RejectPolicy,
@@ -710,49 +685,48 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
         _evictionTimer?.Dispose();
         _scalingTimer?.Dispose();
         _validateTimer?.Dispose();
-        _logger?.LogInformation("Object pool disposed. Type: {Type}", typeof(T).Name);
+        _logger.LogInformation("Object pool disposed. Type: {Type}", typeof(T).Name);
     }
 
     #endregion
 
     #region Shard
 
-    private class Shard
+    internal class Shard
     {
         public int Index { get; }
 
         private readonly ConcurrentQueue<HayateObject<T>> _queue = new();
         private readonly int _maxSize;
-        //private long _availableCount;
-        private SpinWait _spinWait = new();
+        private readonly SpinWait _spinWait = new();
+        private readonly IHayateLogger _logger;
 
         // 公平锁
         private long _ticketCounter = 0;
         private long _nextTicket = 0;
 
-        public Shard(HayatePoolOptions options, int index)
+        public Shard(HayatePoolOptions options, int index, IHayateLogger logger)
         {
             Index = index;
             _maxSize = options.MaxPoolSize / options.ShardCount;
-            //_availableCount = 0;
+            _logger = logger;
         }
 
         public int Count => _queue.Count;
 
         public int Capacity => _maxSize;
 
-        public int Available => _queue.Count;// (int)Interlocked.Read(ref _availableCount);
+        public int Available => _queue.Count;
 
         public int BorrowedCount => _queue.Count(x => x.IsBorrowed);
 
-        public void Add(HayateObject<T> w, ILogger logger = null)
+        public void Add(HayateObject<T> w)
         {
             if (w is null) throw new ArgumentNullException(nameof(w));
 
             if (_queue.Count >= _maxSize)
             {
-                logger?.LogWarning("[Shard {Index}] capacity exceeded, object will be destroyed (shard size: {Size}, max: {Max})",
-                    Index, _queue.Count, _maxSize);
+                _logger.LogWarning("[Shard {Index}] capacity exceeded, object will be destroyed (shard size: {Size}, max: {Max})", Index, _queue.Count, _maxSize);
 
                 try
                 {
@@ -760,7 +734,7 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
                 }
                 catch (Exception ex)
                 {
-                    logger?.LogError(ex, "Failed to dispose object when [shard {Index}] is full", Index);
+                    _logger.LogError(ex, "Failed to dispose object when [shard {Index}] is full", Index);
                 }
 
                 return;
@@ -768,11 +742,11 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
 
             _queue.Enqueue(w);
             //Interlocked.Increment(ref _availableCount);
-            logger?.LogDebug("[Shard {Index}] Object added to shard (current size: {Size})", Index, _queue.Count);
+            _logger.LogDebug("[Shard {Index}] Object added to shard (current size: {Size})", Index, _queue.Count);
         }
 
         //public bool TryTake(out HayateObject<T> w, TimeSpan timeout, bool useFair, ILogger logger = null)
-        public bool TryTake(out HayateObject<T> w, bool useFair, ILogger logger = null)
+        public bool TryTake(out HayateObject<T> w, bool useFair)
         {
             w = null;
             //var sw = ValueStopwatch.StartNew();
@@ -803,7 +777,7 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
                         Interlocked.Increment(ref _nextTicket);
                     }
 
-                    logger?.LogDebug("[Shard {Index}] Object taken from shard (current size: {Size})", Index, _queue.Count);
+                    _logger.LogDebug("[Shard {Index}] Object taken from shard (current size: {Size})", Index, _queue.Count);
                     return true;
                 }
 
@@ -828,7 +802,7 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
             }
         }
 
-        public void Remove(HayateObject<T> w, ILogger logger = null)
+        public void Remove(HayateObject<T> w)
         {
             if (w == null) return;
 
@@ -840,17 +814,14 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
 
                 // 重建队列
                 _queue.Clear();
-                foreach (var l in ww)
-                {
-                    _queue.Enqueue(l);
-                }
-                logger?.LogDebug("[Shard {Index}] Object removed from shard (current size: {Size})", Index, _queue.Count);
+                foreach (var l in ww) _queue.Enqueue(l);
+                _logger.LogDebug("[Shard {Index}] Object removed from shard (current size: {Size})", Index, _queue.Count);
             }
         }
 
         public IEnumerable<HayateObject<T>> GetAll() => _queue.ToArray();
 
-        public void Clear(ILogger logger = null)
+        public void Clear()
         {
             int clearedCount = 0;
             while (_queue.TryDequeue(out var w))
@@ -867,7 +838,7 @@ public class HayateObjectPool<T> : IHayateObjectPool<T>, IDisposable
             }
 
             //Interlocked.Exchange(ref _availableCount, 0);
-            logger?.LogInformation("[Shard {Index}] Shard cleared, {Count} objects destroyed", Index, clearedCount);
+            _logger.LogInformation("[Shard {Index}] Shard cleared, {Count} objects destroyed", Index, clearedCount);
         }
     }
 

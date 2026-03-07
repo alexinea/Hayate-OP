@@ -8,7 +8,7 @@ public class DefaultHayateObjectPolicy<T> : IHayateObjectPolicy<T> where T : cla
 {
     public T Create() => new T();
 
-    public bool Return(T item)
+    public bool OnRelease(T item)
     {
         if (item is IHayateResettable r) r.Reset();
         return true;
@@ -20,15 +20,15 @@ public class DefaultHayateObjectPolicy<T> : IHayateObjectPolicy<T> where T : cla
         return true;
     }
 
-    public void ActivateObject(T item)
+    public void OnAcquire(T item)
     {
     }
 
-    public void PassivateObject(T item)
+    public void OnPassivate(T item)
     {
     }
 
-    public void DestroyObject(T item)
+    public void OnDestroy(T item)
     {
     }
 }

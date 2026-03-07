@@ -7,9 +7,9 @@
 public interface IHayateObjectPolicy<T> where T : class
 {
     T Create();
-    bool Return(T item);
+    bool OnRelease(T item);
     bool Validate(T item);
-    void ActivateObject(T item);
-    void PassivateObject(T item);
-    void DestroyObject(T item);
+    void OnAcquire(T item);
+    void OnPassivate(T item);
+    void OnDestroy(T item);
 }

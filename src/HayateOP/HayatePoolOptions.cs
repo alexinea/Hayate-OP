@@ -12,21 +12,21 @@ namespace DotNetCore.HayateOP;
 /// </remarks>
 public class HayatePoolOptions
 {
-    /// <summary>
-    /// 池允许的最大并发借用数。<br />
-    /// 默认值：<see cref="HayateConsts.DEFAULT_MAX_CONCURRENT"/>（32）。
-    /// </summary>
-    /// <remarks>
-    /// 用途：限制同一时刻可借出的对象总量。<br />
-    /// 特例：突发流量下会更早触发拒绝策略。<br />
-    /// 边界：建议大于等于 1。<br />
-    /// 推荐值区间：16~512。
-    /// </remarks>
-    public int MaxConcurrent { get; set; } = HayateConsts.DEFAULT_MAX_CONCURRENT;
+    ///// <summary>
+    ///// 池允许的最大并发借用数。<br />
+    ///// 默认值：<see cref="HayateConstant.DEFAULT_MAX_CONCURRENT"/>（32）。
+    ///// </summary>
+    ///// <remarks>
+    ///// 用途：限制同一时刻可借出的对象总量。<br />
+    ///// 特例：突发流量下会更早触发拒绝策略。<br />
+    ///// 边界：建议大于等于 1。<br />
+    ///// 推荐值区间：16~512。
+    ///// </remarks>
+    //public int MaxConcurrent { get; set; } = HayateConstant.DEFAULT_MAX_CONCURRENT;
 
     /// <summary>
     /// 池预热的最小对象数。<br />
-    /// 默认值：<see cref="HayateConsts.DEFAULT_MIN_POOL_SIZE"/>（5）。
+    /// 默认值：<see cref="HayateConstant.DEFAULT_MIN_POOL_SIZE"/>（5）。
     /// </summary>
     /// <remarks>
     /// 用途：启动阶段预创建对象，降低冷启动抖动。<br />
@@ -34,11 +34,11 @@ public class HayatePoolOptions
     /// 边界：建议大于等于 0，且不大于 <see cref="MaxPoolSize"/>。<br />
     /// 推荐值区间：0~64。
     /// </remarks>
-    public int MinPoolSize { get; set; } = HayateConsts.DEFAULT_MIN_POOL_SIZE;
+    public int MinPoolSize { get; set; } = HayateConstant.DEFAULT_MIN_POOL_SIZE;
 
     /// <summary>
     /// 池允许维护的最大对象数。<br />
-    /// 默认值：<see cref="HayateConsts.DEFAULT_MAX_POOL_SIZE"/>（50）。
+    /// 默认值：<see cref="HayateConstant.DEFAULT_MAX_POOL_SIZE"/>（50）。
     /// </summary>
     /// <remarks>
     /// 用途：限制内存与下游资源上限。<br />
@@ -46,7 +46,7 @@ public class HayatePoolOptions
     /// 边界：建议大于等于 1，且不小于 <see cref="MinPoolSize"/>。<br />
     /// 推荐值区间：32~2048。
     /// </remarks>
-    public int MaxPoolSize { get; set; } = HayateConsts.DEFAULT_MAX_POOL_SIZE;
+    public int MaxPoolSize { get; set; } = HayateConstant.DEFAULT_MAX_POOL_SIZE;
 
     /// <summary>
     /// 是否启用指标采集。<br />
@@ -60,9 +60,13 @@ public class HayatePoolOptions
     /// </remarks>
     public bool EnableMetrics { get; set; } = false;
 
+    /*
+     * Scaling
+     */
+
     /// <summary>
     /// 伸缩策略检查周期（毫秒）。<br />
-    /// 默认值：<see cref="HayateConsts.DEFAULT_SCALING_INTERVAL_MILLISECONDS"/>（5000ms）。
+    /// 默认值：<see cref="HayateConstant.DEFAULT_SCALING_INTERVAL_MILLISECONDS"/>（5000ms）。
     /// </summary>
     /// <remarks>
     /// 用途：控制扩缩容决策频率。<br />
@@ -70,11 +74,11 @@ public class HayatePoolOptions
     /// 边界：建议大于 0。<br />
     /// 推荐值区间：1000~10000ms。
     /// </remarks>
-    public int ScalingIntervalMs { get; set; } = HayateConsts.DEFAULT_SCALING_INTERVAL_MILLISECONDS;
+    public int ScalingIntervalMs { get; set; } = HayateConstant.DEFAULT_SCALING_INTERVAL_MILLISECONDS;
 
     /// <summary>
     /// 扩容触发阈值（使用率）。<br />
-    /// 默认值：<see cref="HayateConsts.DEFAULT_SCALE_UP_THRESHOLD"/>（0.8）。
+    /// 默认值：<see cref="HayateConstant.DEFAULT_SCALE_UP_THRESHOLD"/>（0.8）。
     /// </summary>
     /// <remarks>
     /// 用途：当使用率达到阈值时倾向扩容。<br />
@@ -82,11 +86,11 @@ public class HayatePoolOptions
     /// 边界：建议在 0~1 之间，且大于缩容阈值。<br />
     /// 推荐值区间：0.70~0.90。
     /// </remarks>
-    public double ScaleUpThreshold { get; set; } = HayateConsts.DEFAULT_SCALE_UP_THRESHOLD;
+    public double ScaleUpThreshold { get; set; } = HayateConstant.DEFAULT_SCALE_UP_THRESHOLD;
 
     /// <summary>
     /// 缩容触发阈值（使用率）。<br />
-    /// 默认值：<see cref="HayateConsts.DEFAULT_SCALE_DOWN_THRESHOLD"/>（0.2）。
+    /// 默认值：<see cref="HayateConstant.DEFAULT_SCALE_DOWN_THRESHOLD"/>（0.2）。
     /// </summary>
     /// <remarks>
     /// 用途：当使用率长期低于阈值时倾向缩容。<br />
@@ -94,7 +98,14 @@ public class HayatePoolOptions
     /// 边界：建议在 0~1 之间，且小于扩容阈值。<br />
     /// 推荐值区间：0.10~0.40。
     /// </remarks>
-    public double ScaleDownThreshold { get; set; } = HayateConsts.DEFAULT_SCALE_DOWN_THRESHOLD;
+    public double ScaleDownThreshold { get; set; } = HayateConstant.DEFAULT_SCALE_DOWN_THRESHOLD;
+
+
+    public int ScaleUpCooldownSeconds { get; set; } = HayateConstant.DEFAULT_SCALE_UP_COOLDOWN_SECONDS;
+
+    public int ScaleDownCooldownSeconds { get; set; } = HayateConstant.DEFAULT_SCALE_DOWN_COOLDOWN_SECONDS;
+
+    public int ScaleUpStep { get; set; } = HayateConstant.DEFAULT_SCALE_UP_STEP;
 
     /*
      * Validate
@@ -105,7 +116,7 @@ public class HayatePoolOptions
     /// 默认值：<c>false</c>。
     /// </summary>
     /// <remarks>
-    /// 用途：在 <c>Get</c> 前剔除失效对象。<br />
+    /// 用途：在 <c>Acquire</c> 前剔除失效对象。<br />
     /// 特例：启用后会增加借出路径延迟。<br />
     /// 边界：布尔开关。<br />
     /// 推荐值区间：对象易失效时开启；纯内存轻对象可关闭。
@@ -138,7 +149,7 @@ public class HayatePoolOptions
 
     /// <summary>
     /// 周期校验间隔（毫秒）。<br />
-    /// 默认值：<see cref="HayateConsts.DEFAULT_VALIDATE_INTERVAL_MILLISECONDS"/>（30000ms）。
+    /// 默认值：<see cref="HayateConstant.DEFAULT_VALIDATE_INTERVAL_MILLISECONDS"/>（30000ms）。
     /// </summary>
     /// <remarks>
     /// 用途：控制后台校验任务频率。<br />
@@ -146,8 +157,8 @@ public class HayatePoolOptions
     /// 边界：建议大于 0。<br />
     /// 推荐值区间：10000~60000ms。
     /// </remarks>
-    public int ValidateIntervalMs { get; set; } = HayateConsts.DEFAULT_VALIDATE_INTERVAL_MILLISECONDS;
-
+    public int ValidateIntervalMs { get; set; } = HayateConstant.DEFAULT_VALIDATE_INTERVAL_MILLISECONDS;
+    
     /*
      * Eviction
      */
@@ -162,7 +173,7 @@ public class HayatePoolOptions
     /// 边界：建议大于 <see cref="TimeSpan.Zero"/>。<br />
     /// 推荐值区间：5~60 分钟。
     /// </remarks>
-    public TimeSpan MaxLifeTime { get; set; } = TimeSpan.FromMinutes(HayateConsts.DEFAULT_MAX_LIFE_TIME_MINUTES);
+    public TimeSpan MaxLifeTime { get; set; } = TimeSpan.FromMinutes(HayateConstant.DEFAULT_MAX_LIFE_TIME_MINUTES);
 
     /// <summary>
     /// 对象最大空闲时长。<br />
@@ -174,7 +185,7 @@ public class HayatePoolOptions
     /// 边界：建议大于等于 <see cref="TimeSpan.Zero"/>。<br />
     /// 推荐值区间：1~30 分钟。
     /// </remarks>
-    public TimeSpan MaxIdleTime { get; set; } = TimeSpan.FromMinutes(HayateConsts.DEFAULT_MAX_IDLE_TIME_MINUTES);
+    public TimeSpan MaxIdleTime { get; set; } = TimeSpan.FromMinutes(HayateConstant.DEFAULT_MAX_IDLE_TIME_MINUTES);
 
     /// <summary>
     /// 软最小可驱逐空闲时长。<br />
@@ -186,11 +197,11 @@ public class HayatePoolOptions
     /// 边界：建议大于等于 <see cref="TimeSpan.Zero"/>，且不大于 <see cref="MaxIdleTime"/>。<br />
     /// 推荐值区间：0.5~10 分钟。
     /// </remarks>
-    public TimeSpan SoftMinEvictableIdleTime { get; set; } = TimeSpan.FromMinutes(HayateConsts.DEFAULT_MIN_EVICTION_IDLE_TIME_MINUTES);
+    public TimeSpan SoftMinEvictableIdleTime { get; set; } = TimeSpan.FromMinutes(HayateConstant.DEFAULT_MIN_EVICTION_IDLE_TIME_MINUTES);
     
     /// <summary>
     /// 驱逐扫描周期（毫秒）。<br />
-    /// 默认值：<see cref="HayateConsts.DEFAULT_EVICTION_INTERVAL_MILLISECONDS"/>（30000ms）。
+    /// 默认值：<see cref="HayateConstant.DEFAULT_EVICTION_INTERVAL_MILLISECONDS"/>（30000ms）。
     /// </summary>
     /// <remarks>
     /// 用途：控制驱逐任务执行频率。<br />
@@ -198,11 +209,11 @@ public class HayatePoolOptions
     /// 边界：建议大于 0。<br />
     /// 推荐值区间：10000~60000ms。
     /// </remarks>
-    public int EvictionIntervalMs { get; set; } = HayateConsts.DEFAULT_EVICTION_INTERVAL_MILLISECONDS;
+    public int EvictionIntervalMs { get; set; } = HayateConstant.DEFAULT_EVICTION_INTERVAL_MILLISECONDS;
 
     /// <summary>
     /// 每次驱逐扫描的样本数。<br />
-    /// 默认值：<see cref="HayateConsts.DEFAULT_EVICTION_RUNS_PER_EVICTION"/>（10）。
+    /// 默认值：<see cref="HayateConstant.DEFAULT_EVICTION_RUNS_PER_EVICTION"/>（10）。
     /// </summary>
     /// <remarks>
     /// 用途：控制单次驱逐开销与清理力度。<br />
@@ -210,7 +221,7 @@ public class HayatePoolOptions
     /// 边界：建议大于等于 1。<br />
     /// 推荐值区间：5~128。
     /// </remarks>
-    public int NumTestsPerEvictionRun { get; set; } = HayateConsts.DEFAULT_EVICTION_RUNS_PER_EVICTION;
+    public int NumTestsPerEvictionRun { get; set; } = HayateConstant.DEFAULT_EVICTION_RUNS_PER_EVICTION;
     
     /*
      * Timeout
@@ -221,12 +232,12 @@ public class HayatePoolOptions
     /// 默认值：<c>TimeSpan.FromSeconds(5)</c>。
     /// </summary>
     /// <remarks>
-    /// 用途：作为无参 <c>Get</c> 的等待上限。<br />
+    /// 用途：作为无参 <c>Acquire</c> 的等待上限。<br />
     /// 特例：在阻塞策略下，超时后会进入拒绝策略分支。<br />
     /// 边界：建议大于 <see cref="TimeSpan.Zero"/>。<br />
     /// 推荐值区间：1~30 秒。
     /// </remarks>
-    public TimeSpan DefaultGetTimeout { get; set; } = TimeSpan.FromSeconds(HayateConsts.DEFAULT_GET_TIMEOUT_SECONDS);
+    public TimeSpan DefaultAcquireTimeout { get; set; } = TimeSpan.FromSeconds(HayateConstant.DEFAULT_ACQUIRE_TIMEOUT_SECONDS);
 
     /*
      * Fair Semaphore
@@ -241,7 +252,7 @@ public class HayatePoolOptions
     /// 特例：当前版本主流程未使用该开关，可视为预留配置。<br />
     /// 边界：布尔开关。推荐值区间：保持默认。
     /// </remarks>
-    public bool UseFairSemaphore { get; set; } = false;
+    public bool UseFairMode { get; set; } = false;
 
     /*
      * Leak Detection
@@ -249,7 +260,7 @@ public class HayatePoolOptions
 
     /// <summary>
     /// 泄漏检测阈值。<br />
-    /// 默认值：<c>TimeSpan.FromMinutes(30)</c>（由 <see cref="HayateConsts.DEFAULT_LEAK_DETECTION_THRESHOLD_SECONDS"/> 构造）。
+    /// 默认值：<c>TimeSpan.FromMinutes(30)</c>（由 <see cref="HayateConstant.DEFAULT_LEAK_DETECTION_THRESHOLD_SECONDS"/> 构造）。
     /// </summary>
     /// <remarks>
     /// 用途：定义借出对象多久未归还才视为疑似泄漏。<br />
@@ -257,7 +268,7 @@ public class HayatePoolOptions
     /// 边界：建议大于 <see cref="TimeSpan.Zero"/>。<br />
     /// 推荐值区间：10 秒~10 分钟（请按实际耗时调整）。
     /// </remarks>
-    public TimeSpan LeakDetectionThreshold { get; set; } = TimeSpan.FromMinutes(HayateConsts.DEFAULT_LEAK_DETECTION_THRESHOLD_SECONDS);
+    public TimeSpan LeakDetectionThreshold { get; set; } = TimeSpan.FromMinutes(HayateConstant.DEFAULT_LEAK_DETECTION_THRESHOLD_SECONDS);
 
     /// <summary>
     /// 是否启用泄漏检测。<br />
@@ -293,7 +304,7 @@ public class HayatePoolOptions
 
     /// <summary>
     /// 创建失败后的最大重试次数。<br />
-    /// 默认值：<see cref="HayateConsts.DEFAULT_CREATION_RETRY_COUNT"/>（3）。
+    /// 默认值：<see cref="HayateConstant.DEFAULT_CREATION_RETRY_COUNT"/>（3）。
     /// </summary>
     /// <remarks>
     /// 用途：提高瞬时失败时的创建成功率。<br />
@@ -301,11 +312,11 @@ public class HayatePoolOptions
     /// 边界：建议大于等于 0。<br />
     /// 推荐值区间：1~5。
     /// </remarks>
-    public int CreationRetryCount { get; set; } = HayateConsts.DEFAULT_CREATION_RETRY_COUNT;
+    public int CreationRetryCount { get; set; } = HayateConstant.DEFAULT_CREATION_RETRY_COUNT;
 
     /// <summary>
     /// 创建重试间隔。<br />
-    /// 默认值：<c>TimeSpan.FromMilliseconds(100)</c>（当前使用 <see cref="HayateConsts.DEFAULT_CREATION_RETRY_DELAY_MILLISECONDS"/>）。
+    /// 默认值：<c>TimeSpan.FromMilliseconds(100)</c>（当前使用 <see cref="HayateConstant.DEFAULT_CREATION_RETRY_DELAY_MILLISECONDS"/>）。
     /// </summary>
     /// <remarks>
     /// 用途：控制连续重试之间的退避时间。<br />
@@ -313,14 +324,14 @@ public class HayatePoolOptions
     /// 边界：建议大于等于 <see cref="TimeSpan.Zero"/>。<br />
     /// 推荐值区间：50~1000ms。
     /// </remarks>
-    public TimeSpan CreationRetryDelay { get; set; } = TimeSpan.FromMilliseconds(HayateConsts.DEFAULT_CREATION_RETRY_DELAY_MILLISECONDS);
+    public TimeSpan CreationRetryDelay { get; set; } = TimeSpan.FromMilliseconds(HayateConstant.DEFAULT_CREATION_RETRY_DELAY_MILLISECONDS);
     
     /*
      * Sharding
      */
 
     /// <summary>
-    /// 分片数量。默认值：<see cref="HayateConsts.DEFAULT_SHARD_COUNT"/>（4）。
+    /// 分片数量。默认值：<see cref="HayateConstant.DEFAULT_SHARD_COUNT"/>（4）。
     /// </summary>
     /// <remarks>
     /// 用途：通过多分片降低并发争用。<br />
@@ -328,7 +339,7 @@ public class HayatePoolOptions
     /// 边界：建议大于等于 1。<br />
     /// 推荐值区间：2~16。
     /// </remarks>
-    public int ShardCount { get; set; } = HayateConsts.DEFAULT_SHARD_COUNT;
+    public int ShardCount { get; set; } = HayateConstant.DEFAULT_SHARD_COUNT;
     
     /*
      * Generational pool
@@ -336,7 +347,7 @@ public class HayatePoolOptions
     
     /// <summary>
     /// 对象晋升代际的阈值（毫秒）。<br />
-    /// 默认值：<see cref="HayateConsts.DEFAULT_GEN_THRESHOLD_MILLISECONDS"/>（30000ms）。
+    /// 默认值：<see cref="HayateConstant.DEFAULT_GEN_THRESHOLD_MILLISECONDS"/>（30000ms）。
     /// </summary>
     /// <remarks>
     /// 用途：标记长期存活对象，供策略层做分代管理。<br />
@@ -344,7 +355,7 @@ public class HayatePoolOptions
     /// 边界：建议大于等于 0。<br />
     /// 推荐值区间：5000~120000ms。
     /// </remarks>
-    public int GenerationThresholdMs { get; set; } = HayateConsts.DEFAULT_GEN_THRESHOLD_MILLISECONDS;
+    public int GenerationThresholdMs { get; set; } = HayateConstant.DEFAULT_GEN_THRESHOLD_MILLISECONDS;
     
     /// <summary>
     /// 老年代数据验证的间隔次数配置项
@@ -368,13 +379,12 @@ public class HayatePoolOptions
     /// - 高性能低一致性场景：6 ~ 10；
     /// - 高一致性低性能场景：1 ~ 2；
     /// </remarks>
-    public int OldGenerationValidationInterval { get; set; } = HayateConsts.DEFAULT_OLD_GEN_VALIDATION_INTERVAL;
+    public int OldGenerationValidationInterval { get; set; } = HayateConstant.DEFAULT_OLD_GEN_VALIDATION_INTERVAL;
     
     public bool IsValid()
     {
      // 基础数值验证
      if (MinPoolSize < 0 || MaxPoolSize < MinPoolSize) return false;
-     if (MaxConcurrent < 1) return false;
      if (ScalingIntervalMs < 100) return false;
      if (ScaleUpThreshold < 0 || ScaleUpThreshold > 1) return false;
      if (ScaleDownThreshold < 0 || ScaleDownThreshold > 1) return false;
@@ -384,7 +394,7 @@ public class HayatePoolOptions
      if (MaxLifeTime <= TimeSpan.Zero) return false;
      if (MaxIdleTime <= TimeSpan.Zero) return false;
      if (SoftMinEvictableIdleTime <= TimeSpan.Zero) return false;
-     if (DefaultGetTimeout <= TimeSpan.Zero) return false;
+     if (DefaultAcquireTimeout <= TimeSpan.Zero) return false;
      if (LeakDetectionThreshold <= TimeSpan.Zero) return false;
 
      // 分片/分代验证

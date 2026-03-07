@@ -5,5 +5,5 @@
 /// </summary>
 public interface IHayateScalingStrategy
 {
-    int CalculateNewSize(int currentSize, int poolCount, HayatePoolOptions options);
+    int CalculateNewSize(int currentSize, int idleCount, HayatePoolOptions options);
 }

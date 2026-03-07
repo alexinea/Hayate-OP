@@ -24,7 +24,7 @@ public class HayatePoolStats
     /// 累计归还到池中的对象总数
     /// Total number of objects returned to the pool
     /// </summary>
-    public long TotalReturned { get; set; }
+    public long TotalReleased { get; set; }
 
     /// <summary>
     /// 累计未命中次数（需要创建新对象的次数）
@@ -123,7 +123,7 @@ public class HayatePoolStats
   可用槽位数(AvailableSlots): {AvailableSlots}
 [对象生命周期统计]
   累计创建总数(TotalCreated): {TotalCreated}
-  累计归还总数(TotalReturned): {TotalReturned}
+  累计归还总数(TotalReleased): {TotalReleased}
   累计未命中次数(TotalMissed): {TotalMissed}
   检测到的泄漏次数(LeakDetectedCount): {LeakDetectedCount}
 [等待时间统计(毫秒)]

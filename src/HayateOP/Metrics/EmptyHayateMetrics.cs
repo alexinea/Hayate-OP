@@ -6,7 +6,7 @@ public class EmptyHayateMetrics : IHayateMetrics
     {
     }
 
-    public void RecordObjectReturned(string poolName, object item, bool isValid)
+    public void RecordObjectReleased(string poolName, object item, bool isValid)
     {
     }
 

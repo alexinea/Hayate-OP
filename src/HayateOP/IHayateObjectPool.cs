@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 
 namespace DotNetCore.HayateOP;
 
-public interface IHayateObjectPool
+public interface IHayateObjectPool : IDisposable
 {
     HayatePoolStats GetStats();
     HayatePoolSnapshot TakeSnapshot();
@@ -19,8 +19,8 @@ public interface IHayateObjectPool
 /// <typeparam name="T"></typeparam>
 public interface IHayateObjectPool<T> : IHayateObjectPool where T : class
 {
-    T Get();
-    T Get(TimeSpan timeout);
-    Task<T> GetAsync(CancellationToken cancellationToken = default);
-    void Return(T item);
+    T Acquire();
+    T Acquire(TimeSpan timeout);
+    Task<T> AcquireAsync(CancellationToken cancellationToken = default);
+    void Release(T item);
 }

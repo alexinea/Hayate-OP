@@ -52,5 +52,46 @@ internal readonly struct ValueStopwatch
     /// 获取从秒表启动到现在的经过时间。
     /// </summary>
     /// <value>从启动到现在所经过的时间跨度。</value>
-    public TimeSpan Elapsed => Stopwatch.GetElapsedTime(_start, Stopwatch.GetTimestamp());
+    public TimeSpan Elapsed => StopwatchUtil.GetElapsedTime(_start, Stopwatch.GetTimestamp());
+}
+
+file static class StopwatchUtil
+{
+
+#if NET7_0_OR_GREATER
+
+    public static TimeSpan GetElapsedTime(long startingTimestamp)
+    {
+        return GetElapsedTime(startingTimestamp, Stopwatch.GetTimestamp());
+    }
+
+    public static TimeSpan GetElapsedTime(long startingTimestamp, long endingTimestamp)
+    {
+        return Stopwatch.GetElapsedTime(startingTimestamp, endingTimestamp);
+    }
+
+#else
+
+    public static TimeSpan GetElapsedTime(long startingTimestamp)
+    {
+        return GetElapsedTime(startingTimestamp, Stopwatch.GetTimestamp());
+    }
+
+    public static TimeSpan GetElapsedTime(long startingTimestamp, long endingTimestamp)
+    {
+        // 防止时间戳回绕（虽然 Stopwatch 通常是递增的，但做健壮性处理）
+        long timestampDelta = endingTimestamp - startingTimestamp;
+        if (timestampDelta < 0)
+        {
+            timestampDelta = 0;
+        }
+
+        // 核心算法：将 Stopwatch 滴答数转换为 TimeSpan
+        // 公式来源：Stopwatch 类的内部实现逻辑
+        long ticks = timestampDelta * TimeSpan.TicksPerSecond / Stopwatch.Frequency;
+        return new TimeSpan(ticks);
+    }
+
+#endif
+
 }
