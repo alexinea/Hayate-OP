@@ -1,9 +1,10 @@
 ﻿using DotNetCore.HayateOP.Modules;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace DotNetCore.HayateOP;
 
-internal class MSDIHayateServiceCollection<T> : IHayateServiceCollection<T> where T : class, new()
+internal class MSDIHayateServiceCollection : IHayateServiceCollection
 {
     private readonly IServiceCollection _services;
 
@@ -12,41 +13,43 @@ internal class MSDIHayateServiceCollection<T> : IHayateServiceCollection<T> wher
         _services = services ?? throw new ArgumentNullException(nameof(services));
     }
 
-    public IHayateServiceCollection<T> AddModule<TModule>() where TModule : class, IHayateOpModule
-    {
-        _services.AddSingleton<TModule>();
+    //public IHayateServiceCollection AddModule<TModule>() where TModule : class, IHayateOpModule
+    //{
+    //    _services.TryAddSingleton<TModule>();
 
-        return this;
-    }
+    //    return this;
+    //}
 
-    public IHayateServiceCollection<T> AddModule<TModule>(TModule module) where TModule : class, IHayateOpModule
-    {
-        if (module is null) throw new ArgumentNullException(nameof(module));
+    //public IHayateServiceCollection AddModule<TModule>(TModule module) where TModule : class, IHayateOpModule
+    //{
+    //    if (module is null) throw new ArgumentNullException(nameof(module));
 
-        _services.AddSingleton(module);
+    //    _services.TryAddSingleton(module);
 
-        return this;
-    }
+    //    return this;
+    //}
 
-    public IHayateServiceCollection<T> AddModule<TModule>(Func<TModule> func) where TModule : class, IHayateOpModule
-    {
-        if (func is null) throw new ArgumentNullException(nameof(func));
+    //public IHayateServiceCollection AddModule<TModule>(Func<TModule> func) where TModule : class, IHayateOpModule
+    //{
+    //    if (func is null) throw new ArgumentNullException(nameof(func));
 
-        var module = func.Invoke();
+    //    var module = func.Invoke();
 
-        if (module is null) throw new ArgumentNullException(nameof(module));
+    //    if (module is null) throw new ArgumentNullException(nameof(module));
 
-        _services.AddSingleton(module);
+    //    _services.TryAddSingleton(module);
 
-        return this;
-    }
+    //    return this;
+    //}
 
-    public IHayateServiceCollection<T> AddModule(Action<IServiceCollection> action)
-    {
-        if (action is null) throw new ArgumentNullException(nameof(action));
+    //public IHayateServiceCollection AddModule(Action<IServiceCollection> action)
+    //{
+    //    if (action is null) throw new ArgumentNullException(nameof(action));
 
-        action.Invoke(_services);
+    //    action.Invoke(_services);
 
-        return this;
-    }
+    //    return this;
+    //}
+
+    public IServiceCollection Services => _services;
 }

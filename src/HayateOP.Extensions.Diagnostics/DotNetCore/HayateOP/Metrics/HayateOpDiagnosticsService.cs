@@ -3,7 +3,7 @@ using Microsoft.Extensions.Options;
 
 namespace DotNetCore.HayateOP.Metrics;
 
-public class HayateOpDiagnosticsService : IHayateOpModule
+public class HayateOpDiagnosticsService : IHayateMetrics, IHayateOpModule
 {
     private readonly IHayateMetrics _metrics;
     private readonly HayatePoolOptions _options;
@@ -16,25 +16,21 @@ public class HayateOpDiagnosticsService : IHayateOpModule
     
     public void RecordObjectAcquired(string poolName, object item, double elapsedMilliseconds)
     {
-        if (_options.EnableMetrics && HayateDiagnostics.Source.IsEnabled(HayateDiagnostics.ObjectGet))
-        {
-            HayateDiagnostics.Source.Write($"{poolName}_{HayateDiagnostics.ObjectGet}", item);
-        }
+        _metrics.RecordObjectAcquired(poolName, item, elapsedMilliseconds);
     }
 
-    public void RecordObjectReturned(string poolName, object item, bool isValid)
+    public void RecordObjectReleased(string poolName, object item, bool isValid)
     {
-        if (_options.EnableMetrics && HayateDiagnostics.Source.IsEnabled(HayateDiagnostics.ObjectReturn))
-        {
-            HayateDiagnostics.Source.Write($"{poolName}_{HayateDiagnostics.ObjectReturn}", item);
-        }
+        _metrics.RecordObjectReleased(poolName, item, isValid);
     }
 
     public void RecordObjectMiss(string poolName, object item)
     {
-        if (_options.EnableMetrics && HayateDiagnostics.Source.IsEnabled(HayateDiagnostics.ObjectMiss))
-        {
-            HayateDiagnostics.Source.Write($"{poolName}_{HayateDiagnostics.ObjectMiss}", item);
-        }
+        _metrics.RecordObjectMiss(poolName, item);
+    }
+
+    public void RecordPoolScaled(string poolName, string action, int oldSize, int newSize)
+    {
+        _metrics.RecordPoolScaled(poolName, action, oldSize, newSize);
     }
 }

@@ -1,15 +1,14 @@
 ﻿using System.Diagnostics;
-using DotNetCore.HayateOP.Modules;
 using Microsoft.Extensions.Options;
 
 namespace DotNetCore.HayateOP.Metrics;
 
-public class HayateDiagnostics : IHayateMetrics, IHayateOpModule
+public class HayateDiagnostics : IHayateMetrics
 {
     public static readonly DiagnosticSource Source = new DiagnosticListener("HayateOP");
 
-    public const string ObjectGet = "HayateOP.Object.Get";
-    public const string ObjectReturn = "HayateOP.Object.Return";
+    public const string ObjectGet = "HayateOP.Object.Acquire";
+    public const string ObjectReturn = "HayateOP.Object.OnRelease";
     public const string ObjectMiss = "HayateOP.Object.Miss";
     public const string PoolScaled = "HayateOp.Pool.Scaled";
 
@@ -28,7 +27,7 @@ public class HayateDiagnostics : IHayateMetrics, IHayateOpModule
         }
     }
 
-    public void RecordObjectReturned(string poolName, object item, bool isValid)
+    public void RecordObjectReleased(string poolName, object item, bool isValid)
     {
         if (_options.EnableMetrics && Source.IsEnabled(ObjectReturn))
         {

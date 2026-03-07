@@ -21,7 +21,7 @@ public class HayateOpHealthCheck<T> : IHealthCheck, IHayateOpModule where T : cl
             { "PooledCount", stats.PooledCount },
             { "MinPoolSize", stats.MinSize },
             { "TotalCreated", stats.TotalCreated },
-            { "TotalReturned", stats.TotalReturned },
+            { "TotalReleased", stats.TotalReleased },
             { "TotalMissed", stats.TotalMissed },
             { "AvailableSlots", stats.AvailableSlots }
         };

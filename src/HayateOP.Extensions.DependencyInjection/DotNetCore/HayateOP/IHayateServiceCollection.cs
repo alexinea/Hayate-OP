@@ -5,13 +5,9 @@ namespace DotNetCore.HayateOP;
 
 public interface IHayateServiceCollection
 {
-}
-
-public interface IHayateServiceCollection<T> : IHayateServiceCollection
-    where T : class, new()
-{
-    IHayateServiceCollection<T> AddModule<TModule>() where TModule : class, IHayateOpModule;
-    IHayateServiceCollection<T> AddModule<TModule>(TModule module) where TModule : class, IHayateOpModule;
-    IHayateServiceCollection<T> AddModule<TModule>(Func<TModule> func) where TModule : class, IHayateOpModule;
-    IHayateServiceCollection<T> AddModule(Action<IServiceCollection> action);
+    //IHayateServiceCollection AddModule<TModule>() where TModule : class, IHayateOpModule;
+    //IHayateServiceCollection AddModule<TModule>(TModule module) where TModule : class, IHayateOpModule;
+    //IHayateServiceCollection AddModule<TModule>(Func<TModule> func) where TModule : class, IHayateOpModule;
+    //IHayateServiceCollection AddModule(Action<IServiceCollection> action);
+    IServiceCollection Services { get; }
 }

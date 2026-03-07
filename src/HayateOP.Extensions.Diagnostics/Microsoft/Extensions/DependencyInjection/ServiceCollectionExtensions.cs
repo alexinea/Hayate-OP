@@ -5,7 +5,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class ServiceCollectionExtensions
 {
-    public static IHayateServiceCollection<T> AddDiagnostics<T>(this IHayateServiceCollection<T> services)
+    public static IHayateServiceCollection RegisterDiagnostics<T>(this IHayateServiceCollection services)
         where T : class, new()
     {
         services.AddModule<HayateOpDiagnosticsService>();
