@@ -7,11 +7,12 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class EndpointsExtensions
 {
-    public static IEndpointConventionBuilder MapHayateOpEndpoints(this IEndpointRouteBuilder endpoints)
+    public static IEndpointConventionBuilder MapHayatePoolEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints.MapGroup("/hayateop")
             .WithTags("Hayate Object Pool Management")
-            .WithGroupName("HayateOP");
+            .WithGroupName("HayateOP")
+            .WithOpenApi();
 
         // 概览
         group.MapGet("/", GetOverviewAsync)
