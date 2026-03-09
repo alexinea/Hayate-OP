@@ -466,10 +466,6 @@ public class HayatePoolBuilder<T> where T : class, new()
             _logger,
             _poolName);
 
-        pool.PreWarm();
-
-        pool.StartBackgroundTasks();
-
         _logger.LogInformation("HayatePool [{PoolName}] initialized successfully", _poolName);
 
         return pool;

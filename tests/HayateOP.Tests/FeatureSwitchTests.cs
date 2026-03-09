@@ -10,10 +10,6 @@ public class FeatureSwitchTests
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithEnableSharding(false)
             .WithShardCount(4)
-
-            .WithMaxSize(5)
-            .WithMinSize(5)
-
             .Build();
 
         var stats = pool.GetStats(); 
@@ -23,20 +19,27 @@ public class FeatureSwitchTests
     [Fact]
     public void DisableAutoScaling_ShouldFixPoolSize()
     {
+        // Arrange
+        var options = new HayatePoolOptions
+        {
+            EnableAutoScaling = false,
+            MinPoolSize = 2,
+            MaxPoolSize = 8
+        };
+        options.ApplyFeatureSwitches();
+
+        // Assert：MaxPoolSize被强制覆盖为MinSize=2
+        Assert.Equal(2, options.MaxPoolSize);
+
+        // 构建池验证
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithEnableAutoScaling(false)
-            .WithMinSize(10)
-            .WithMaxSize(100)
+            .WithMinSize(2)
+            .WithMaxSize(8)
             .Build();
 
-        // current = maxPoolSize / shardCount
-        var options = pool.GetOptions();
-        var current = options.MaxPoolSize / options.ShardCount;
-
         var stats = pool.GetStats();
-        Assert.Equal(10, stats.MinSize);
-        //Assert.Equal(10, stats.CurrentSize); // MaxPoolSize被强制覆盖为MinSize
-        Assert.Equal(current, stats.CurrentSize); // MaxPoolSize被强制覆盖为MinSize
+        Assert.Equal(2, stats.CurrentSize); // 池大小固定为2，不再是8
     }
 
     [Fact]

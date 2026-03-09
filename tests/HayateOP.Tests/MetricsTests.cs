@@ -42,13 +42,23 @@ public class MetricsTests
     [Fact]
     public void GetStats_ShouldReturnCorrectValues()
     {
+        // Arrange
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithEnableMetrics(true)
             .WithMinSize(5)
+            .WithMaxSize(100)
             .Build();
 
+        // 强制触发一次统计，让池完成初始化
+        var dummy = pool.Acquire();
+        pool.Release(dummy);
+
+        // Act
         var stats = pool.GetStats();
+
+        // Assert
         Assert.Equal(5, stats.PooledCount);
+        Assert.Equal(5, stats.CurrentSize);
         Assert.Equal(5, stats.TotalCreated);
     }
 }

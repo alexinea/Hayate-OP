@@ -4,6 +4,7 @@
     <Project Path="samples/HayateOP.Samples/HayateOP.Samples.csproj" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/HayateOP.Extensions.Configuration/HayateOP.Extensions.Configuration.csproj" Id="197d2007-2165-43c8-b7d5-eb26153b7185" />
     <Project Path="src/HayateOP.Extensions.DependencyInjection/HayateOP.Extensions.DependencyInjection.csproj" />
     <Project Path="src/HayateOP.Extensions.Diagnostics/HayateOP.Extensions.Diagnostics.csproj" />
     <Project Path="src/HayateOP.Extensions.Endpoints/HayateOP.Extensions.Endpoints.csproj" />
@@ -13,6 +14,9 @@
   <Folder Name="/tests/">
     <Project Path="tests/HayateOP.Benchmarks/HayateOP.Benchmarks.csproj" />
     <Project Path="tests/HayateOP.PressureTests/HayateOP.PressureTests.csproj" />
+    <Project Path="tests/HayateOP.Tests.Configuration/HayateOP.Tests.Configuration.csproj" Id="748f7e1e-6f62-41c9-a6e8-da895c38e923" />
+    <Project Path="tests/HayateOP.Tests.DI/HayateOP.Tests.DI.csproj" Id="8f3ce109-b0c9-4181-9a2c-1e1d38893ee5" />
+    <Project Path="tests/HayateOP.Tests.Endpoints/HayateOP.Tests.Endpoints.csproj" Id="6cc9b753-68e3-4a3f-b30f-de4884a44ab5" />
     <Project Path="tests/HayateOP.Tests/HayateOP.Tests.csproj" />
   </Folder>
 </Solution>
