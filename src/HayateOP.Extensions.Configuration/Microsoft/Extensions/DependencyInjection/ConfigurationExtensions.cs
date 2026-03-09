@@ -1,12 +1,13 @@
 ﻿using DotNetCore.HayateOP;
+using DotNetCore.HayateOP.Logging;
 using DotNetCore.HayateOP.Metrics;
 using DotNetCore.HayateOP.Policies;
 using DotNetCore.HayateOP.Scaling;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
-using DotNetCore.HayateOP.Logging;
 
 namespace Microsoft.Extensions.DependencyInjection;
 
@@ -39,6 +40,8 @@ public static class ConfigurationExtensions
         // 注册池的命名配置（覆盖全局配置）
         services.Services.Configure<HayatePoolOptions>(poolName, poolConfigSection);
 
+        services.Services.TryAddSingleton<IHayateObjectPolicy<T>, DefaultHayateObjectPolicy<T>>();
+
         // 注册实例
         services.Services.AddSingleton<IHayateObjectPool<T>>(sp =>
         {
@@ -64,42 +67,14 @@ public static class ConfigurationExtensions
                 .WithScalingStrategy(scalingStrategy)
                 .WithMetrics(metrics)
                 .WithLogger(logger)
-                .Configure(opt =>
-                {
-                    // 合并后的配置全量覆盖
-                    opt.MinPoolSize = mergedOptions.MinPoolSize;
-                    opt.MaxPoolSize = mergedOptions.MaxPoolSize;
-                    opt.ShardCount = mergedOptions.ShardCount;
-                    opt.UseFairMode = mergedOptions.UseFairMode;
-                    opt.DefaultAcquireTimeout = mergedOptions.DefaultAcquireTimeout;
-                    opt.ScaleUpThreshold = mergedOptions.ScaleUpThreshold;
-                    opt.ScaleDownThreshold = mergedOptions.ScaleDownThreshold;
-                    opt.ScaleUpCooldownSeconds = mergedOptions.ScaleUpCooldownSeconds;
-                    opt.ScaleDownCooldownSeconds = mergedOptions.ScaleDownCooldownSeconds;
-                    opt.ScaleUpStep = mergedOptions.ScaleUpStep;
-                    opt.ValidateOnBorrow = mergedOptions.ValidateOnBorrow;
-                    opt.ValidateOnReturn = mergedOptions.ValidateOnReturn;
-                    opt.ValidateWhileIdle = mergedOptions.ValidateWhileIdle;
-                    opt.ValidateIntervalMs = mergedOptions.ValidateIntervalMs;
-                    opt.OldGenerationValidationInterval = mergedOptions.OldGenerationValidationInterval;
-                    opt.GenerationThresholdMs = mergedOptions.GenerationThresholdMs;
-                    opt.MaxLifeTime = mergedOptions.MaxLifeTime;
-                    opt.MaxIdleTime = mergedOptions.MaxIdleTime;
-                    opt.SoftMinEvictableIdleTime = mergedOptions.SoftMinEvictableIdleTime;
-                    opt.EvictionIntervalMs = mergedOptions.EvictionIntervalMs;
-                    opt.NumTestsPerEvictionRun = mergedOptions.NumTestsPerEvictionRun;
-                    opt.CreationRetryCount = mergedOptions.CreationRetryCount;
-                    opt.CreationRetryDelay = mergedOptions.CreationRetryDelay;
-                    opt.LeakDetectionThreshold = mergedOptions.LeakDetectionThreshold;
-                    opt.EnableLeakDetection = mergedOptions.EnableLeakDetection;
-                    opt.RejectPolicy = mergedOptions.RejectPolicy;
-                })
+                .Configure(opt => mergedOptions.CopyTo(opt))
                 .Build();
 
             // 注册配置变更监听，热更新池配置
             var changeToken = optionsMonitor.OnChange((newOptions, changedPoolName) =>
             {
-                if (changedPoolName != poolName && changedPoolName != "") return;
+                
+                if (changedPoolName != poolName && changedPoolName != Options.Options.DefaultName) return;
 
                 try
                 {
@@ -112,35 +87,7 @@ public static class ConfigurationExtensions
                     }
 
                     // 同步更新到池
-                    pool.ReloadConfig(opt =>
-                    {
-                        opt.MinPoolSize = latestOptions.MinPoolSize;
-                        opt.MaxPoolSize = latestOptions.MaxPoolSize;
-                        opt.ShardCount = latestOptions.ShardCount;
-                        opt.UseFairMode = latestOptions.UseFairMode;
-                        opt.DefaultAcquireTimeout = latestOptions.DefaultAcquireTimeout;
-                        opt.ScaleUpThreshold = latestOptions.ScaleUpThreshold;
-                        opt.ScaleDownThreshold = latestOptions.ScaleDownThreshold;
-                        opt.ScaleUpCooldownSeconds = latestOptions.ScaleUpCooldownSeconds;
-                        opt.ScaleDownCooldownSeconds = latestOptions.ScaleDownCooldownSeconds;
-                        opt.ScaleUpStep = latestOptions.ScaleUpStep;
-                        opt.ValidateOnBorrow = latestOptions.ValidateOnBorrow;
-                        opt.ValidateOnReturn = latestOptions.ValidateOnReturn;
-                        opt.ValidateWhileIdle = latestOptions.ValidateWhileIdle;
-                        opt.ValidateIntervalMs = latestOptions.ValidateIntervalMs;
-                        opt.OldGenerationValidationInterval = latestOptions.OldGenerationValidationInterval;
-                        opt.GenerationThresholdMs = latestOptions.GenerationThresholdMs;
-                        opt.MaxLifeTime = latestOptions.MaxLifeTime;
-                        opt.MaxIdleTime = latestOptions.MaxIdleTime;
-                        opt.SoftMinEvictableIdleTime = latestOptions.SoftMinEvictableIdleTime;
-                        opt.EvictionIntervalMs = latestOptions.EvictionIntervalMs;
-                        opt.NumTestsPerEvictionRun = latestOptions.NumTestsPerEvictionRun;
-                        opt.CreationRetryCount = latestOptions.CreationRetryCount;
-                        opt.CreationRetryDelay = latestOptions.CreationRetryDelay;
-                        opt.LeakDetectionThreshold = latestOptions.LeakDetectionThreshold;
-                        opt.EnableLeakDetection = latestOptions.EnableLeakDetection;
-                        opt.RejectPolicy = latestOptions.RejectPolicy;
-                    });
+                    pool.ReloadConfig(opt => latestOptions.CopyTo(opt));
 
                     logger?.LogInformation("HayatePool [{PoolName}] 配置热更新成功", poolName);
                 }
@@ -165,58 +112,34 @@ public static class ConfigurationExtensions
         var merged = new HayatePoolOptions();
 
         // 先应用全局配置
-        ApplyOptions(globalOptions, merged);
+        globalOptions.CopyTo(merged);
 
         // 再应用池配置（覆盖全局）
-        ApplyOptions(poolOptions, merged, overrideOnly: true);
+        ApplyPoolOptionsOverrides(merged, poolOptions);
+
+        merged.ApplyFeatureSwitches();
 
         return merged;
     }
 
-    private static void ApplyOptions(HayatePoolOptions source, HayatePoolOptions target, bool overrideOnly = false)
+    private static void ApplyPoolOptionsOverrides(HayatePoolOptions target, HayatePoolOptions poolOptions)
     {
-        // 基础配置
-        if (!overrideOnly || source.MinPoolSize != 5) target.MinPoolSize = source.MinPoolSize;
-        if (!overrideOnly || source.MaxPoolSize != 50) target.MaxPoolSize = source.MaxPoolSize;
-        if (!overrideOnly || source.ShardCount != 4) target.ShardCount = source.ShardCount;
-        if (!overrideOnly || source.UseFairMode != true) target.UseFairMode = source.UseFairMode;
+        var defaultOptions = new HayatePoolOptions();
+        var properties = typeof(HayatePoolOptions).GetProperties();
 
-        // 超时配置
-        if (!overrideOnly || source.DefaultAcquireTimeout != TimeSpan.FromSeconds(5))
-            target.DefaultAcquireTimeout = source.DefaultAcquireTimeout;
+        foreach (var prop in properties)
+        {
+            if (!prop.CanRead || !prop.CanWrite) continue;
 
-        // 扩缩容配置
-        if (!overrideOnly || source.ScaleUpThreshold != 0.8) target.ScaleUpThreshold = source.ScaleUpThreshold;
-        if (!overrideOnly || source.ScaleDownThreshold != 0.2) target.ScaleDownThreshold = source.ScaleDownThreshold;
-        if (!overrideOnly || source.ScaleUpCooldownSeconds != 3) target.ScaleUpCooldownSeconds = source.ScaleUpCooldownSeconds;
-        if (!overrideOnly || source.ScaleDownCooldownSeconds != 15) target.ScaleDownCooldownSeconds = source.ScaleDownCooldownSeconds;
-        if (!overrideOnly || source.ScaleUpStep != 5) target.ScaleUpStep = source.ScaleUpStep;
+            var poolValue = prop.GetValue(poolOptions);
+            var defaultValue = prop.GetValue(defaultOptions);
 
-        // 验证配置
-        if (!overrideOnly || source.ValidateOnBorrow != true) target.ValidateOnBorrow = source.ValidateOnBorrow;
-        if (!overrideOnly || source.ValidateOnReturn != true) target.ValidateOnReturn = source.ValidateOnReturn;
-        if (!overrideOnly || source.ValidateWhileIdle != true) target.ValidateWhileIdle = source.ValidateWhileIdle;
-        if (!overrideOnly || source.ValidateIntervalMs != 30000) target.ValidateIntervalMs = source.ValidateIntervalMs;
-        if (!overrideOnly || source.OldGenerationValidationInterval != 3) target.OldGenerationValidationInterval = source.OldGenerationValidationInterval;
-        if (!overrideOnly || source.GenerationThresholdMs != 30000) target.GenerationThresholdMs = source.GenerationThresholdMs;
-
-        // 驱逐配置
-        if (!overrideOnly || source.MaxLifeTime != TimeSpan.FromMinutes(10)) target.MaxLifeTime = source.MaxLifeTime;
-        if (!overrideOnly || source.MaxIdleTime != TimeSpan.FromMinutes(5)) target.MaxIdleTime = source.MaxIdleTime;
-        if (!overrideOnly || source.SoftMinEvictableIdleTime != TimeSpan.FromMinutes(2)) target.SoftMinEvictableIdleTime = source.SoftMinEvictableIdleTime;
-        if (!overrideOnly || source.EvictionIntervalMs != 30000) target.EvictionIntervalMs = source.EvictionIntervalMs;
-        if (!overrideOnly || source.NumTestsPerEvictionRun != 10) target.NumTestsPerEvictionRun = source.NumTestsPerEvictionRun;
-
-        // 创建配置
-        if (!overrideOnly || source.CreationRetryCount != 3) target.CreationRetryCount = source.CreationRetryCount;
-        if (!overrideOnly || source.CreationRetryDelay != TimeSpan.FromMilliseconds(100)) target.CreationRetryDelay = source.CreationRetryDelay;
-
-        // 泄漏检测
-        if (!overrideOnly || source.LeakDetectionThreshold != TimeSpan.FromSeconds(30)) target.LeakDetectionThreshold = source.LeakDetectionThreshold;
-        if (!overrideOnly || source.EnableLeakDetection != true) target.EnableLeakDetection = source.EnableLeakDetection;
-
-        // 拒绝策略
-        if (!overrideOnly || source.RejectPolicy != HayatePoolRejectPolicy.BlockTimeout) target.RejectPolicy = source.RejectPolicy;
+            // 只有池配置的值不等于默认值时，才覆盖目标配置
+            if (!Equals(poolValue, defaultValue))
+            {
+                prop.SetValue(target, poolValue);
+            }
+        }
     }
 
     internal class HayatePoolConfigurationCleanup : IDisposable
