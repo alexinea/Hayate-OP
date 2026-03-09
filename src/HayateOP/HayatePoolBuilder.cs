@@ -24,6 +24,71 @@ public class HayatePoolBuilder<T> where T : class, new()
         _poolName = typeof(T).Name;
     }
 
+    #region 功能开关配置
+    /// <summary>
+    /// 启用/禁用分片功能
+    /// </summary>
+    public HayatePoolBuilder<T> WithEnableSharding(bool enable = true)
+    {
+        _options.EnableSharding = enable;
+        return this;
+    }
+
+    /// <summary>
+    /// 启用/禁用自动扩缩容
+    /// </summary>
+    public HayatePoolBuilder<T> WithEnableAutoScaling(bool enable = true)
+    {
+        _options.EnableAutoScaling = enable;
+        return this;
+    }
+
+    /// <summary>
+    /// 启用/禁用对象验证
+    /// </summary>
+    public HayatePoolBuilder<T> WithEnableValidation(bool enable = true)
+    {
+        _options.EnableValidation = enable;
+        return this;
+    }
+
+    /// <summary>
+    /// 启用/禁用空闲对象驱逐
+    /// </summary>
+    public HayatePoolBuilder<T> WithEnableEviction(bool enable = true)
+    {
+        _options.EnableEviction = enable;
+        return this;
+    }
+
+    /// <summary>
+    /// 启用/禁用分代优化
+    /// </summary>
+    public HayatePoolBuilder<T> WithEnableGenerationOptimization(bool enable = true)
+    {
+        _options.EnableGenerationOptimization = enable;
+        return this;
+    }
+
+    /// <summary>
+    /// 启用/禁用泄漏检测
+    /// </summary>
+    public HayatePoolBuilder<T> WithEnableLeakDetection(bool enable = true)
+    {
+        _options.EnableLeakDetection = enable;
+        return this;
+    }
+
+    /// <summary>
+    /// 启用/禁用指标统计
+    /// </summary>
+    public HayatePoolBuilder<T> WithEnableMetrics(bool enable = true)
+    {
+        _options.EnableMetrics = enable;
+        return this;
+    }
+    #endregion
+    
     #region 基础配置
     /// <summary>
     /// 设置池名称

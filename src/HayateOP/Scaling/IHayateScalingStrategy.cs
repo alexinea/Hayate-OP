@@ -5,5 +5,12 @@
 /// </summary>
 public interface IHayateScalingStrategy
 {
+    /// <summary>
+    /// 计算新的池大小
+    /// </summary>
+    /// <param name="currentSize"></param>
+    /// <param name="idleCount"></param>
+    /// <param name="options"></param>
+    /// <returns></returns>
     int CalculateNewSize(int currentSize, int idleCount, HayatePoolOptions options);
 }

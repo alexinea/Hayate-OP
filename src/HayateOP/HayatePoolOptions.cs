@@ -12,18 +12,6 @@ namespace DotNetCore.HayateOP;
 /// </remarks>
 public class HayatePoolOptions
 {
-    ///// <summary>
-    ///// 池允许的最大并发借用数。<br />
-    ///// 默认值：<see cref="HayateConstant.DEFAULT_MAX_CONCURRENT"/>（32）。
-    ///// </summary>
-    ///// <remarks>
-    ///// 用途：限制同一时刻可借出的对象总量。<br />
-    ///// 特例：突发流量下会更早触发拒绝策略。<br />
-    ///// 边界：建议大于等于 1。<br />
-    ///// 推荐值区间：16~512。
-    ///// </remarks>
-    //public int MaxConcurrent { get; set; } = HayateConstant.DEFAULT_MAX_CONCURRENT;
-
     /// <summary>
     /// 池预热的最小对象数。<br />
     /// 默认值：<see cref="HayateConstant.DEFAULT_MIN_POOL_SIZE"/>（5）。
@@ -48,21 +36,107 @@ public class HayatePoolOptions
     /// </remarks>
     public int MaxPoolSize { get; set; } = HayateConstant.DEFAULT_MAX_POOL_SIZE;
 
+    #region 超时
+
     /// <summary>
-    /// 是否启用指标采集。<br />
+    /// 默认借用超时时间。<br />
+    /// 默认值：<c>TimeSpan.FromSeconds(5)</c>。
+    /// </summary>
+    /// <remarks>
+    /// 用途：作为无参 <c>Acquire</c> 的等待上限。<br />
+    /// 特例：在阻塞策略下，超时后会进入拒绝策略分支。<br />
+    /// 边界：建议大于 <see cref="TimeSpan.Zero"/>。<br />
+    /// 推荐值区间：1~30 秒。
+    /// </remarks>
+    public TimeSpan DefaultAcquireTimeout { get; set; } = TimeSpan.FromSeconds(HayateConstant.DEFAULT_ACQUIRE_TIMEOUT_SECONDS);
+
+    #endregion
+
+    #region 拒绝策略
+
+    /// <summary>
+    /// 借用失败时的拒绝策略。<br />
+    /// 默认值：<see cref="HayatePoolRejectPolicy.BlockTimeout"/>。
+    /// </summary>
+    /// <remarks>
+    /// 用途：定义等待超时后的处理动作。<br />
+    /// 特例：当前实现对 <c>Abort</c> 与 <c>CreateNew</c> 有显式分支，其他值会抛出 <see cref="InvalidOperationException"/>。<br />
+    /// 边界：必须是有效枚举值。<br />
+    /// 推荐值区间：通用场景使用 <c>BlockTimeout</c>，降级兜底可选 <c>CreateNew</c>。
+    /// </remarks>
+    public HayatePoolRejectPolicy RejectPolicy { get; set; } = HayatePoolRejectPolicy.BlockTimeout;
+
+    #endregion
+
+    #region 创建重试
+
+    /*
+     * Creation retry
+     */
+
+    /// <summary>
+    /// 创建失败后的最大重试次数。<br />
+    /// 默认值：<see cref="HayateConstant.DEFAULT_CREATION_RETRY_COUNT"/>（3）。
+    /// </summary>
+    /// <remarks>
+    /// 用途：提高瞬时失败时的创建成功率。<br />
+    /// 特例：设置为 0 将直接失败不重试。<br />
+    /// 边界：建议大于等于 0。<br />
+    /// 推荐值区间：1~5。
+    /// </remarks>
+    public int CreationRetryCount { get; set; } = HayateConstant.DEFAULT_CREATION_RETRY_COUNT;
+
+    /// <summary>
+    /// 创建重试间隔。<br />
+    /// 默认值：<c>TimeSpan.FromMilliseconds(100)</c>（当前使用 <see cref="HayateConstant.DEFAULT_CREATION_RETRY_DELAY_MILLISECONDS"/>）。
+    /// </summary>
+    /// <remarks>
+    /// 用途：控制连续重试之间的退避时间。<br />
+    /// 特例：当前默认值较大（30s），与“创建重试延迟”常见预期不一致。<br />
+    /// 边界：建议大于等于 <see cref="TimeSpan.Zero"/>。<br />
+    /// 推荐值区间：50~1000ms。
+    /// </remarks>
+    public TimeSpan CreationRetryDelay { get; set; } = TimeSpan.FromMilliseconds(HayateConstant.DEFAULT_CREATION_RETRY_DELAY_MILLISECONDS);
+
+    #endregion
+
+    #region 分片策略
+
+    /// <summary>
+    /// 启用分片功能（关闭后强制单分片，所有分片相关配置失效）
+    /// </summary>
+    public bool EnableSharding { get; set; } = true;
+
+    /// <summary>
+    /// 分片数量。默认值：<see cref="HayateConstant.DEFAULT_SHARD_COUNT"/>（4）。
+    /// </summary>
+    /// <remarks>
+    /// 用途：通过多分片降低并发争用。<br />
+    /// 特例：分片过多会提升管理成本并放大预热偏差。<br />
+    /// 边界：建议大于等于 1。<br />
+    /// 推荐值区间：2~16。
+    /// </remarks>
+    public int ShardCount { get; set; } = HayateConstant.DEFAULT_SHARD_COUNT;
+
+    /// <summary>
+    /// 是否启用公平信号量语义。<br />
     /// 默认值：<c>false</c>。
     /// </summary>
     /// <remarks>
-    /// 用途：输出池运行指标用于观测。<br />
-    /// 特例：高频路径下开启会增加少量开销。<br />
-    /// 边界：布尔开关。<br />
-    /// 推荐值区间：测试/生产建议开启，极限性能压测可关闭。
+    /// 用途：用于控制排队公平性策略。<br />
+    /// 特例：当前版本主流程未使用该开关，可视为预留配置。<br />
+    /// 边界：布尔开关。推荐值区间：保持默认。
     /// </remarks>
-    public bool EnableMetrics { get; set; } = false;
+    public bool UseFairMode { get; set; } = false;
 
-    /*
-     * Scaling
-     */
+    #endregion
+
+    #region 扩缩容策略
+
+    /// <summary>
+    /// 启用自动扩缩容（关闭后池大小固定为MinPoolSize，所有扩缩容相关配置失效）
+    /// </summary>
+    public bool EnableAutoScaling { get; set; } = true;
 
     /// <summary>
     /// 伸缩策略检查周期（毫秒）。<br />
@@ -99,17 +173,20 @@ public class HayatePoolOptions
     /// 推荐值区间：0.10~0.40。
     /// </remarks>
     public double ScaleDownThreshold { get; set; } = HayateConstant.DEFAULT_SCALE_DOWN_THRESHOLD;
-
-
     public int ScaleUpCooldownSeconds { get; set; } = HayateConstant.DEFAULT_SCALE_UP_COOLDOWN_SECONDS;
 
     public int ScaleDownCooldownSeconds { get; set; } = HayateConstant.DEFAULT_SCALE_DOWN_COOLDOWN_SECONDS;
 
     public int ScaleUpStep { get; set; } = HayateConstant.DEFAULT_SCALE_UP_STEP;
 
-    /*
-     * Validate
-     */
+    #endregion
+
+    #region 对象验证
+
+    /// <summary>
+    /// 启用对象验证（关闭后所有借出/归还/空闲验证逻辑失效）
+    /// </summary>
+    public bool EnableValidation { get; set; } = true;
 
     /// <summary>
     /// 借出前是否校验对象有效性。<br />
@@ -158,10 +235,16 @@ public class HayatePoolOptions
     /// 推荐值区间：10000~60000ms。
     /// </remarks>
     public int ValidateIntervalMs { get; set; } = HayateConstant.DEFAULT_VALIDATE_INTERVAL_MILLISECONDS;
-    
-    /*
-     * Eviction
-     */
+
+
+    #endregion
+
+    #region 驱逐策略
+
+    /// <summary>
+    /// 启用空闲对象驱逐（关闭后不执行驱逐逻辑，所有驱逐相关配置失效）
+    /// </summary>
+    public bool EnableEviction { get; set; } = true;
 
     /// <summary>
     /// 对象最大存活时长。<br />
@@ -198,7 +281,7 @@ public class HayatePoolOptions
     /// 推荐值区间：0.5~10 分钟。
     /// </remarks>
     public TimeSpan SoftMinEvictableIdleTime { get; set; } = TimeSpan.FromMinutes(HayateConstant.DEFAULT_MIN_EVICTION_IDLE_TIME_MINUTES);
-    
+
     /// <summary>
     /// 驱逐扫描周期（毫秒）。<br />
     /// 默认值：<see cref="HayateConstant.DEFAULT_EVICTION_INTERVAL_MILLISECONDS"/>（30000ms）。
@@ -222,129 +305,16 @@ public class HayatePoolOptions
     /// 推荐值区间：5~128。
     /// </remarks>
     public int NumTestsPerEvictionRun { get; set; } = HayateConstant.DEFAULT_EVICTION_RUNS_PER_EVICTION;
-    
-    /*
-     * Timeout
-     */
+
+    #endregion
+
+    #region 分代策略
 
     /// <summary>
-    /// 默认借用超时时间。<br />
-    /// 默认值：<c>TimeSpan.FromSeconds(5)</c>。
+    /// 启用分代优化（关闭后所有对象均为年轻代，不跳过验证）
     /// </summary>
-    /// <remarks>
-    /// 用途：作为无参 <c>Acquire</c> 的等待上限。<br />
-    /// 特例：在阻塞策略下，超时后会进入拒绝策略分支。<br />
-    /// 边界：建议大于 <see cref="TimeSpan.Zero"/>。<br />
-    /// 推荐值区间：1~30 秒。
-    /// </remarks>
-    public TimeSpan DefaultAcquireTimeout { get; set; } = TimeSpan.FromSeconds(HayateConstant.DEFAULT_ACQUIRE_TIMEOUT_SECONDS);
+    public bool EnableGenerationOptimization { get; set; } = true;
 
-    /*
-     * Fair Semaphore
-     */
-
-    /// <summary>
-    /// 是否启用公平信号量语义。<br />
-    /// 默认值：<c>false</c>。
-    /// </summary>
-    /// <remarks>
-    /// 用途：用于控制排队公平性策略。<br />
-    /// 特例：当前版本主流程未使用该开关，可视为预留配置。<br />
-    /// 边界：布尔开关。推荐值区间：保持默认。
-    /// </remarks>
-    public bool UseFairMode { get; set; } = false;
-
-    /*
-     * Leak Detection
-     */
-
-    /// <summary>
-    /// 泄漏检测阈值。<br />
-    /// 默认值：<c>TimeSpan.FromMinutes(30)</c>（由 <see cref="HayateConstant.DEFAULT_LEAK_DETECTION_THRESHOLD_SECONDS"/> 构造）。
-    /// </summary>
-    /// <remarks>
-    /// 用途：定义借出对象多久未归还才视为疑似泄漏。<br />
-    /// 特例：常量名为“SECONDS”，但当前默认表达式按“分钟”构造。<br />
-    /// 边界：建议大于 <see cref="TimeSpan.Zero"/>。<br />
-    /// 推荐值区间：10 秒~10 分钟（请按实际耗时调整）。
-    /// </remarks>
-    public TimeSpan LeakDetectionThreshold { get; set; } = TimeSpan.FromMinutes(HayateConstant.DEFAULT_LEAK_DETECTION_THRESHOLD_SECONDS);
-
-    /// <summary>
-    /// 是否启用泄漏检测。<br />
-    /// 默认值：<c>false</c>。
-    /// </summary>
-    /// <remarks>
-    /// 用途：记录借出调用栈等信息用于排查未归还对象。<br />
-    /// 特例：开启后会增加少量内存与字符串开销。<br />
-    /// 边界：布尔开关。<br />
-    /// 推荐值区间：联调和排障阶段开启，稳定高压生产可按需关闭。
-    /// </remarks>
-    public bool EnableLeakDetection { get; set; } = false;
-
-    /*
-     * Reject policy
-     */
-
-    /// <summary>
-    /// 借用失败时的拒绝策略。<br />
-    /// 默认值：<see cref="HayatePoolRejectPolicy.BlockTimeout"/>。
-    /// </summary>
-    /// <remarks>
-    /// 用途：定义等待超时后的处理动作。<br />
-    /// 特例：当前实现对 <c>Abort</c> 与 <c>CreateNew</c> 有显式分支，其他值会抛出 <see cref="InvalidOperationException"/>。<br />
-    /// 边界：必须是有效枚举值。<br />
-    /// 推荐值区间：通用场景使用 <c>BlockTimeout</c>，降级兜底可选 <c>CreateNew</c>。
-    /// </remarks>
-    public HayatePoolRejectPolicy RejectPolicy { get; set; } = HayatePoolRejectPolicy.BlockTimeout;
-
-    /*
-     * Creation retry
-     */
-
-    /// <summary>
-    /// 创建失败后的最大重试次数。<br />
-    /// 默认值：<see cref="HayateConstant.DEFAULT_CREATION_RETRY_COUNT"/>（3）。
-    /// </summary>
-    /// <remarks>
-    /// 用途：提高瞬时失败时的创建成功率。<br />
-    /// 特例：设置为 0 将直接失败不重试。<br />
-    /// 边界：建议大于等于 0。<br />
-    /// 推荐值区间：1~5。
-    /// </remarks>
-    public int CreationRetryCount { get; set; } = HayateConstant.DEFAULT_CREATION_RETRY_COUNT;
-
-    /// <summary>
-    /// 创建重试间隔。<br />
-    /// 默认值：<c>TimeSpan.FromMilliseconds(100)</c>（当前使用 <see cref="HayateConstant.DEFAULT_CREATION_RETRY_DELAY_MILLISECONDS"/>）。
-    /// </summary>
-    /// <remarks>
-    /// 用途：控制连续重试之间的退避时间。<br />
-    /// 特例：当前默认值较大（30s），与“创建重试延迟”常见预期不一致。<br />
-    /// 边界：建议大于等于 <see cref="TimeSpan.Zero"/>。<br />
-    /// 推荐值区间：50~1000ms。
-    /// </remarks>
-    public TimeSpan CreationRetryDelay { get; set; } = TimeSpan.FromMilliseconds(HayateConstant.DEFAULT_CREATION_RETRY_DELAY_MILLISECONDS);
-    
-    /*
-     * Sharding
-     */
-
-    /// <summary>
-    /// 分片数量。默认值：<see cref="HayateConstant.DEFAULT_SHARD_COUNT"/>（4）。
-    /// </summary>
-    /// <remarks>
-    /// 用途：通过多分片降低并发争用。<br />
-    /// 特例：分片过多会提升管理成本并放大预热偏差。<br />
-    /// 边界：建议大于等于 1。<br />
-    /// 推荐值区间：2~16。
-    /// </remarks>
-    public int ShardCount { get; set; } = HayateConstant.DEFAULT_SHARD_COUNT;
-    
-    /*
-     * Generational pool
-     */
-    
     /// <summary>
     /// 对象晋升代际的阈值（毫秒）。<br />
     /// 默认值：<see cref="HayateConstant.DEFAULT_GEN_THRESHOLD_MILLISECONDS"/>（30000ms）。
@@ -356,7 +326,7 @@ public class HayatePoolOptions
     /// 推荐值区间：5000~120000ms。
     /// </remarks>
     public int GenerationThresholdMs { get; set; } = HayateConstant.DEFAULT_GEN_THRESHOLD_MILLISECONDS;
-    
+
     /// <summary>
     /// 老年代数据验证的间隔次数配置项
     /// </summary>
@@ -380,28 +350,195 @@ public class HayatePoolOptions
     /// - 高一致性低性能场景：1 ~ 2；
     /// </remarks>
     public int OldGenerationValidationInterval { get; set; } = HayateConstant.DEFAULT_OLD_GEN_VALIDATION_INTERVAL;
-    
+
+    #endregion
+
+    #region 泄露检测
+
+    /// <summary>
+    /// 启用对象泄漏检测（关闭后不记录调用堆栈，不执行泄漏扫描）
+    /// </summary>
+    public bool EnableLeakDetection { get; set; } = true;
+
+    /// <summary>
+    /// 泄漏检测阈值。<br />
+    /// 默认值：<c>TimeSpan.FromMinutes(30)</c>（由 <see cref="HayateConstant.DEFAULT_LEAK_DETECTION_THRESHOLD_SECONDS"/> 构造）。
+    /// </summary>
+    /// <remarks>
+    /// 用途：定义借出对象多久未归还才视为疑似泄漏。<br />
+    /// 特例：常量名为“SECONDS”，但当前默认表达式按“分钟”构造。<br />
+    /// 边界：建议大于 <see cref="TimeSpan.Zero"/>。<br />
+    /// 推荐值区间：10 秒~10 分钟（请按实际耗时调整）。
+    /// </remarks>
+    public TimeSpan LeakDetectionThreshold { get; set; } = TimeSpan.FromMinutes(HayateConstant.DEFAULT_LEAK_DETECTION_THRESHOLD_SECONDS);
+
+    #endregion
+
+    #region 统计指标
+
+    /// <summary>
+    /// 是否启用指标采集。<br />
+    /// 默认值：<c>false</c>。
+    /// </summary>
+    /// <remarks>
+    /// 用途：输出池运行指标用于观测。<br />
+    /// 特例：高频路径下开启会增加少量开销。<br />
+    /// 边界：布尔开关。<br />
+    /// 推荐值区间：测试/生产建议开启，极限性能压测可关闭。
+    /// </remarks>
+    public bool EnableMetrics { get; set; } = false;
+
+    #endregion
+
+    public HayatePoolOptions CopyTo()
+    {
+        var options = new HayatePoolOptions();
+        return CopyTo(options);
+    }
+
+    public HayatePoolOptions CopyTo(HayatePoolOptions options)
+    {
+        // 空值校验，保证方法健壮性
+        if (options == null)
+        {
+            throw new ArgumentNullException(nameof(options), "目标配置实例不能为 null");
+        }
+
+        // 基础池大小配置
+        options.MinPoolSize = this.MinPoolSize;
+        options.MaxPoolSize = this.MaxPoolSize;
+
+        // 超时配置
+        options.DefaultAcquireTimeout = this.DefaultAcquireTimeout;
+
+        // 拒绝策略
+        options.RejectPolicy = this.RejectPolicy;
+
+        // 创建重试配置
+        options.CreationRetryCount = this.CreationRetryCount;
+        options.CreationRetryDelay = this.CreationRetryDelay;
+
+        // 分片策略
+        options.EnableSharding = this.EnableSharding;
+        options.ShardCount = this.ShardCount;
+        options.UseFairMode = this.UseFairMode;
+
+        // 扩缩容策略
+        options.EnableAutoScaling = this.EnableAutoScaling;
+        options.ScalingIntervalMs = this.ScalingIntervalMs;
+        options.ScaleUpThreshold = this.ScaleUpThreshold;
+        options.ScaleDownThreshold = this.ScaleDownThreshold;
+        options.ScaleUpCooldownSeconds = this.ScaleUpCooldownSeconds;
+        options.ScaleDownCooldownSeconds = this.ScaleDownCooldownSeconds;
+        options.ScaleUpStep = this.ScaleUpStep;
+
+        // 对象验证配置
+        options.EnableValidation = this.EnableValidation;
+        options.ValidateOnBorrow = this.ValidateOnBorrow;
+        options.ValidateOnReturn = this.ValidateOnReturn;
+        options.ValidateWhileIdle = this.ValidateWhileIdle;
+        options.ValidateIntervalMs = this.ValidateIntervalMs;
+
+        // 驱逐策略
+        options.EnableEviction = this.EnableEviction;
+        options.MaxLifeTime = this.MaxLifeTime;
+        options.MaxIdleTime = this.MaxIdleTime;
+        options.SoftMinEvictableIdleTime = this.SoftMinEvictableIdleTime;
+        options.EvictionIntervalMs = this.EvictionIntervalMs;
+        options.NumTestsPerEvictionRun = this.NumTestsPerEvictionRun;
+
+        // 分代策略
+        options.EnableGenerationOptimization = this.EnableGenerationOptimization;
+        options.GenerationThresholdMs = this.GenerationThresholdMs;
+        options.OldGenerationValidationInterval = this.OldGenerationValidationInterval;
+
+        // 泄露检测
+        options.EnableLeakDetection = this.EnableLeakDetection;
+        options.LeakDetectionThreshold = this.LeakDetectionThreshold;
+
+        // 统计指标
+        options.EnableMetrics = this.EnableMetrics;
+
+        return options;
+    }
+
+    //public HayatePoolOptions AutoCopy(HayatePoolOptions options)
+    //{
+    //    options ??= new();
+
+    //    var properties = typeof(HayatePoolOptions).GetProperties();
+    //    foreach (var prop in properties)
+    //    {
+    //        if (!prop.CanRead || !prop.CanWrite) continue;
+    //        prop.SetValue(options, prop.GetValue(this));
+    //    }
+
+    //    return options;
+    //}
+
+    public void ApplyFeatureSwitches()
+    {
+        // 关闭分片：弹性单分片 + 非公平模式
+        if (!EnableSharding)
+        {
+            ShardCount = 1;
+            UseFairMode = false;
+        }
+
+        // 关闭自动扩缩容：强制池大小固定
+        if (!EnableAutoScaling)
+        {
+            MaxPoolSize = MinPoolSize;
+        }
+
+        // 关闭验证：强制所有验证开关关闭
+        if (!EnableValidation)
+        {
+            ValidateOnBorrow = false;
+            ValidateOnReturn = false;
+            ValidateWhileIdle = false;
+        }
+    }
+
     public bool IsValid()
     {
-     // 基础数值验证
-     if (MinPoolSize < 0 || MaxPoolSize < MinPoolSize) return false;
-     if (ScalingIntervalMs < 100) return false;
-     if (ScaleUpThreshold < 0 || ScaleUpThreshold > 1) return false;
-     if (ScaleDownThreshold < 0 || ScaleDownThreshold > 1) return false;
-     if (ScaleDownThreshold >= ScaleUpThreshold) return false;
+        ApplyFeatureSwitches();
 
-     // 时间验证
-     if (MaxLifeTime <= TimeSpan.Zero) return false;
-     if (MaxIdleTime <= TimeSpan.Zero) return false;
-     if (SoftMinEvictableIdleTime <= TimeSpan.Zero) return false;
-     if (DefaultAcquireTimeout <= TimeSpan.Zero) return false;
-     if (LeakDetectionThreshold <= TimeSpan.Zero) return false;
+        // 基础配置校验
+        if (MinPoolSize < 0 || MaxPoolSize < MinPoolSize) return false;
+        if (DefaultAcquireTimeout <= TimeSpan.Zero) return false;
+        if (ShardCount < 1 || ShardCount > 32) return false;
+        if (CreationRetryCount < 0) return false;
+        if (DefaultAcquireTimeout <= TimeSpan.Zero) return false;
 
-     // 分片/分代验证
-     if (ShardCount < 1 || ShardCount > 32) return false;
-     if (GenerationThresholdMs < 1000) return false;
-     if (OldGenerationValidationInterval < 1) return false;
+        // 开启扩缩容时的校验
+        if (EnableAutoScaling)
+        {
+            if (ScaleUpThreshold <= ScaleDownThreshold) return false;
+            if (ScaleUpThreshold < 0 || ScaleUpThreshold > 1) return false;
+            if (ScaleDownThreshold < 0 || ScaleDownThreshold > 1) return false;
+            if (ScaleUpStep < 1) return false;
+        }
 
-     return true;
+        // 时间验证
+        if (EnableEviction)
+        {
+            if (MaxLifeTime <= TimeSpan.Zero) return false;
+            if (MaxIdleTime <= TimeSpan.Zero) return false;
+            if (SoftMinEvictableIdleTime <= TimeSpan.Zero) return false;
+        }
+
+        if (EnableSharding)
+        {
+            if (GenerationThresholdMs < 1000) return false;
+            if (OldGenerationValidationInterval < 1) return false;
+        }
+
+        if (EnableLeakDetection)
+        {
+            if (LeakDetectionThreshold <= TimeSpan.Zero) return false;
+        }
+
+        return true;
     }
 }

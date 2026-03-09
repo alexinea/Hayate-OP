@@ -22,9 +22,43 @@ public static class HayateConstant
     /// </summary>
     public const int DEFAULT_MAX_POOL_SIZE = 50;
 
+    #region 超时
+
     /*
-     * Scaling
+     * Timeout
      */
+
+    /// <summary>
+    /// 默认获取超时时间，单位：秒（对应 <see cref="HayatePoolOptions.DefaultAcquireTimeout"/>）。
+    /// </summary>
+    public const int DEFAULT_ACQUIRE_TIMEOUT_SECONDS = 5;
+
+    #endregion
+
+    #region 创建重试
+
+    /// <summary>
+    /// 默认创建失败重试次数（对应 <see cref="HayatePoolOptions.CreationRetryCount"/>）。
+    /// </summary>
+    public const int DEFAULT_CREATION_RETRY_COUNT = 3;
+
+    /// <summary>
+    /// 默认创建重试延迟，单位：毫秒（建议用于 <see cref="HayatePoolOptions.CreationRetryDelay"/>）。
+    /// </summary>
+    public const int DEFAULT_CREATION_RETRY_DELAY_MILLISECONDS = 100;
+
+    #endregion
+
+    #region 分片策略
+
+    /// <summary>
+    /// 默认分片数量（对应 <see cref="HayatePoolOptions.ShardCount"/>）。
+    /// </summary>
+    public const int DEFAULT_SHARD_COUNT = 4;
+
+    #endregion
+
+    #region 扩缩容策略
 
     /// <summary>
     /// 默认伸缩检查间隔，单位：毫秒（对应 <see cref="HayatePoolOptions.ScalingIntervalMs"/>）。
@@ -47,18 +81,18 @@ public static class HayateConstant
 
     public const int DEFAULT_SCALE_UP_STEP = 5;
 
-    /*
-     * Validate
-     */
+    #endregion
+
+    #region 对象验证
 
     /// <summary>
     /// 默认校验扫描间隔，单位：毫秒（对应 <see cref="HayatePoolOptions.ValidateIntervalMs"/>）。
     /// </summary>
     public const int DEFAULT_VALIDATE_INTERVAL_MILLISECONDS = 30000;
 
-    /*
-     * Eviction
-     */
+    #endregion
+
+    #region 驱逐策略
 
     /// <summary>
     /// 默认对象最大存活时间，单位：分钟（对应 <see cref="HayatePoolOptions.MaxLifeTime"/>）。
@@ -69,7 +103,7 @@ public static class HayateConstant
     /// 默认对象最大空闲时间，单位：分钟（对应 <see cref="HayatePoolOptions.MaxIdleTime"/>）。
     /// </summary>
     public const int DEFAULT_MAX_IDLE_TIME_MINUTES = 5;
-    
+
     /// <summary>
     /// 默认软最小可驱逐空闲时间，单位：分钟（对应 <see cref="HayatePoolOptions.SoftMinEvictableIdleTime"/>）。
     /// </summary>
@@ -84,52 +118,10 @@ public static class HayateConstant
     /// 默认每次驱逐检查的样本数量（对应 <see cref="HayatePoolOptions.NumTestsPerEvictionRun"/>）。
     /// </summary>
     public const int DEFAULT_EVICTION_RUNS_PER_EVICTION = 10;
-    
-    /*
-     * Timeout
-     */
 
-    /// <summary>
-    /// 默认获取超时时间，单位：秒（对应 <see cref="HayatePoolOptions.DefaultAcquireTimeout"/>）。
-    /// </summary>
-    public const int DEFAULT_ACQUIRE_TIMEOUT_SECONDS = 5;
+    #endregion
 
-    /*
-     * Leak Detection
-     */
-
-    /// <summary>
-    /// 默认泄漏检测阈值常量，单位：秒（用于 <see cref="HayatePoolOptions.LeakDetectionThreshold"/>）。
-    /// </summary>
-    public const int DEFAULT_LEAK_DETECTION_THRESHOLD_SECONDS = 30;
-
-
-    /*
-     * Creation retry
-     */
-
-    /// <summary>
-    /// 默认创建失败重试次数（对应 <see cref="HayatePoolOptions.CreationRetryCount"/>）。
-    /// </summary>
-    public const int DEFAULT_CREATION_RETRY_COUNT = 3;
-
-    /// <summary>
-    /// 默认创建重试延迟，单位：毫秒（建议用于 <see cref="HayatePoolOptions.CreationRetryDelay"/>）。
-    /// </summary>
-    public const int DEFAULT_CREATION_RETRY_DELAY_MILLISECONDS = 100;
-
-    /*
-     * Sharding
-     */
-
-    /// <summary>
-    /// 默认分片数量（对应 <see cref="HayatePoolOptions.ShardCount"/>）。
-    /// </summary>
-    public const int DEFAULT_SHARD_COUNT = 4;
-
-    /*
-     * Generational pool
-     */
+    #region 分代策略
 
     /// <summary>
     /// 默认代际升级阈值，单位：毫秒（对应 <see cref="HayatePoolOptions.GenerationThresholdMs"/>）。
@@ -140,4 +132,15 @@ public static class HayateConstant
     ///  默认老年代校验间隔，单位：次（对应 <see cref="HayatePoolOptions.OldGenerationValidationInterval"/>）。
     /// </summary>
     public const int DEFAULT_OLD_GEN_VALIDATION_INTERVAL = 3;
+
+    #endregion
+
+    #region 泄露检测
+
+    /// <summary>
+    /// 默认泄漏检测阈值常量，单位：秒（用于 <see cref="HayatePoolOptions.LeakDetectionThreshold"/>）。
+    /// </summary>
+    public const int DEFAULT_LEAK_DETECTION_THRESHOLD_SECONDS = 30;
+
+    #endregion
 }
