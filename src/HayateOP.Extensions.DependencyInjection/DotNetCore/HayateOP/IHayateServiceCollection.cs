@@ -1,5 +1,4 @@
-﻿using DotNetCore.HayateOP.Modules;
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 
 namespace DotNetCore.HayateOP;
 
