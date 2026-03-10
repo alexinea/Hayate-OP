@@ -13,7 +13,7 @@ public class CustomPolicy : IHayateObjectPolicy<MyPooledObject>
         };
     }
 
-    public bool Return(MyPooledObject item)
+    public bool OnRelease(MyPooledObject item)
     {
         item.Id = 0;
         item.Data = string.Empty;
@@ -27,15 +27,15 @@ public class CustomPolicy : IHayateObjectPolicy<MyPooledObject>
         return true;
     }
 
-    public void ActivateObject(MyPooledObject item)
+    public void OnAcquire(MyPooledObject item)
     {
     }
 
-    public void PassivateObject(MyPooledObject item)
+    public void OnPassivate(MyPooledObject item)
     {
     }
 
-    public void DestroyObject(MyPooledObject item)
+    public void OnDestroy(MyPooledObject item)
     {
     }
 }

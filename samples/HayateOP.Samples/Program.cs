@@ -19,9 +19,8 @@ var services = new ServiceCollection();
 //     config.MaxPoolSize = 30;
 // });
 
-services.AddHayateObjectPool<MyPooledObject, CustomPolicy>(config =>
+services.AddHayatePoolSupport().RegisterHayatePool<MyPooledObject>(config =>
 {
-    config.MaxConcurrent = 15;
     config.MaxPoolSize = 30;
 });
 
@@ -29,7 +28,7 @@ var provider = services.BuildServiceProvider();
 
 var pool = provider.GetRequiredService<IHayateObjectPool<MyPooledObject>>();
 
-var obj = pool.Get();
+var obj = pool.Acquire();
 
 try
 {
@@ -38,12 +37,12 @@ try
     obj.Data = "Test";
 
     var stat1 = pool.GetStats();
-    Console.WriteLine($"池中数量：{stat1.PooledCount}， 总创建：{stat1.TotalCreated}，总归还：{stat1.TotalReturned}，总未命中：{stat1.TotalMissed}");
+    Console.WriteLine($"池中数量：{stat1.PooledCount}， 总创建：{stat1.TotalCreated}，总归还：{stat1.TotalReleased}，总未命中：{stat1.TotalMissed}");
 }
 finally
 {
-    pool.Return(obj);
+    pool.Release(obj);
 
     var stat2 = pool.GetStats();
-    Console.WriteLine($"池中数量：{stat2.PooledCount}， 总创建：{stat2.TotalCreated}，总归还：{stat2.TotalReturned}，总未命中：{stat2.TotalMissed}");
+    Console.WriteLine($"池中数量：{stat2.PooledCount}， 总创建：{stat2.TotalCreated}，总归还：{stat2.TotalReleased}，总未命中：{stat2.TotalMissed}");
 }

@@ -9,15 +9,15 @@ var builder = WebApplication.CreateBuilder(args);
 Console.OutputEncoding = Encoding.UTF8;
 Console.InputEncoding = Encoding.UTF8;
 
-builder.Services.AddHayateObjectPool<MyBizObj>(opt =>
+builder.Services.AddHayatePoolSupport().RegisterHayatePool<MyBizObj>(opt =>
 {
     opt.MinPoolSize = 10;
     opt.MaxPoolSize = 100;
-    opt.UseFairSemaphore = true;
+    opt.UseFairMode = true;
     opt.EnableMetrics = true;
     opt.ShardCount = 4;
     //opt.ScalingIntervalMs = 1000 * 60 * 60;
-    //opt.DefaultGetTimeout = TimeSpan.FromMinutes(5);
+    //opt.DefaultAcquireTimeout = TimeSpan.FromMinutes(5);
 });
 
 builder.Services.AddLogging(b =>
@@ -43,24 +43,19 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.MapHayateOpEndpoints();
+app.MapHayatePoolEndpoints();
 
-app.MapGet("/test-hayateop", async (IHayateObjectPoolFactory factory, ILogger<HayateObjectPool<MyBizObj>> logger) =>
+app.MapGet("/test-hayateop", async (IHayateObjectPool<MyBizObj> pool, ILogger<HayatePoolBasic<MyBizObj>> logger) =>
 {
     MyBizObj? obj = null;
-    IHayateObjectPool<MyBizObj>? pool = null;
-
-    var options = app.Services.GetRequiredService<IOptions<HayatePoolOptions>>();
-
 
     try
     {
-        pool = factory.GetPool<MyBizObj>(policy: null, options.Value, logger, null);
         logger.LogInformation("获取对象池，当前统计：{Stats}", pool.GetStats());
 
         // 显式指定获取对象的超时时间（便于排查）
-        obj = pool.Get(TimeSpan.FromSeconds(5)); // 覆盖默认BlockTimeout，临时排查
-        //obj = pool.Get(); // 覆盖默认BlockTimeout，临时排查
+        obj = pool.Acquire(TimeSpan.FromSeconds(5)); // 覆盖默认BlockTimeout，临时排查
+        //obj = pool.Acquire(); // 覆盖默认BlockTimeout，临时排查
         if (obj == null)
         {
             logger.LogError("从对象池获取MyBizObj失败，对象为null");
@@ -103,7 +98,7 @@ app.MapGet("/test-hayateop", async (IHayateObjectPoolFactory factory, ILogger<Ha
         {
             try
             {
-                pool.Return(obj);
+                pool.Release(obj);
                 logger.LogInformation("成功归还对象，ID：{ObjId}，归还后池统计：{Stats}",
                     obj.Id, pool.GetStats());
             }
