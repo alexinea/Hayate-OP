@@ -1,10 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <LangVersion>default</LangVersion>
-        <RootNamespace>DotNetCore.HayateOP</RootNamespace>
-        <Nullable>disable</Nullable>
         <TargetFrameworks>net6.0;net7.0;net8.0;net9.0;net10.0</TargetFrameworks>
+        <LangVersion>default</LangVersion>
+	    <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>disable</Nullable>
+        <RootNamespace>DotNetCore.HayateOP</RootNamespace>
     </PropertyGroup>
 
 </Project>

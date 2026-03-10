@@ -14,7 +14,7 @@ public class HayateDiagnostics : IHayateMetrics
 
     private readonly HayatePoolOptions _options;
 
-    public HayateDiagnostics(IOptions<HayatePoolOptions>? options)
+    public HayateDiagnostics(IOptions<HayatePoolOptions> options)
     {
         _options = options?.Value ?? new HayatePoolOptions();
     }

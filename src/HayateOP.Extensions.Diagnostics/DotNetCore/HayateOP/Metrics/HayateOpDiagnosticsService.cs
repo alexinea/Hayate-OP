@@ -8,7 +8,7 @@ public class HayateOpDiagnosticsService : IHayateMetrics, IHayateOpModule
     private readonly IHayateMetrics _metrics;
     private readonly HayatePoolOptions _options;
 
-    public HayateOpDiagnosticsService(IOptions<HayatePoolOptions>? options)
+    public HayateOpDiagnosticsService(IOptions<HayatePoolOptions> options)
     {
         _options = options?.Value ?? new HayatePoolOptions();
         _metrics = _options.EnableMetrics ? new HayateDiagnostics(options) : EmptyHayateMetrics.Instance;
