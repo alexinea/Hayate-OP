@@ -31,6 +31,11 @@ public class HayatePoolStats
     /// Total number of cache misses (times when new objects had to be created)
     /// </summary>
     public long TotalMissed { get; set; }
+    
+    /// <summary>
+    /// 累计被租用的对象总数
+    /// </summary>
+    public long TotalAcquired { get; set; }
 
     /// <summary>
     /// 可用槽位数量

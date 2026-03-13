@@ -1,9 +1,4 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
+﻿using System.Collections.Concurrent;
 using DotNetCore.HayateOP.Common;
 using DotNetCore.HayateOP.Logging;
 using DotNetCore.HayateOP.Metrics;
@@ -40,6 +35,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private long _totalCreated;
     private long _totalReleased;
     private long _totalMissed;
+    private long _totalAcquired;
     private long _leakDetectedCount;
     private readonly HayatePoolStats _stats = new();
     private readonly object _statsLock = new();
@@ -247,6 +243,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         w.Generation = 1;
                     }
 
+                    Interlocked.Increment(ref _totalAcquired);
+
                     #endregion
 
                     #region 指标统计，仅开启指标时执行
@@ -386,6 +384,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     {
                         w.LastBorrowedAt = DateTime.UtcNow;
                     }
+                    
+                    Interlocked.Increment(ref _totalAcquired);
 
                     return w.Value;
                 }
@@ -820,6 +820,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 TotalCreated = Interlocked.Read(ref _totalCreated),
                 TotalReleased = Interlocked.Read(ref _totalReleased),
                 TotalMissed = Interlocked.Read(ref _totalMissed),
+                TotalAcquired = Interlocked.Read(ref _totalAcquired),
                 AvailableSlots = totalIdle,
                 MinSize = _options.MinPoolSize,
                 CurrentSize = totalObjects,
@@ -867,6 +868,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             BorrowedCount = _shards.Sum(s => s.BorrowedCount),
             TotalCreated = Interlocked.Read(ref _totalCreated),
             TotalMissed = Interlocked.Read(ref _totalMissed),
+            TotalAcquired = Interlocked.Read(ref _totalAcquired),
             LeakCount = Interlocked.Read(ref _leakDetectedCount),
             LeakTraces = leakTraces.AsReadOnly()
         };

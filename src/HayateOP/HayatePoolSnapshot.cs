@@ -10,6 +10,7 @@ public class HayatePoolSnapshot
     public int BorrowedCount { get; set; }
     public long TotalCreated { get; set; }
     public long TotalMissed { get; set; }
+    public long TotalAcquired { get; set; }
     public long LeakCount { get; set; }
     public IReadOnlyList<string> LeakTraces { get; set; } = [];
 }
