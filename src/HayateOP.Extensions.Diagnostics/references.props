@@ -1,0 +1,8 @@
+<Project>
+
+    <ItemGroup>
+      <ProjectReference Include="..\HayateOP.Extensions.DependencyInjection\HayateOP.Extensions.DependencyInjection.csproj" />
+      <ProjectReference Include="..\HayateOP\HayateOP.csproj" />
+    </ItemGroup>
+    
+</Project>

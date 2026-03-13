@@ -1,0 +1,19 @@
+<Project>
+
+    <PropertyGroup Label="Package">
+        <Product>DotNetCore.HayateOP</Product>
+        <Authors>AlexLEWIS;</Authors>
+        <RepositoryUrl>https://github.com/alexinea/Hayate-OP</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+        <PackageProjectUrl>https://github.com/alexinea/Hayate-OP</PackageProjectUrl>
+        <PackageIcon>icon.png</PackageIcon>
+        <PackageLicenseFile>LICENSE</PackageLicenseFile>
+        <PackageTags>Object Pool</PackageTags>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    </PropertyGroup>
+
+</Project>

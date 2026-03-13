@@ -1,41 +1,24 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFrameworks>net6.0;net7.0;net8.0;net9.0;net10.0</TargetFrameworks>
-        <LangVersion>default</LangVersion>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>disable</Nullable>
-        <RootNamespace />
+        <Configurations>Debug;Release</Configurations>
+        <Platforms>AnyCPU</Platforms>
     </PropertyGroup>
 
-    <ItemGroup>
-        <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    </ItemGroup>
+    <PropertyGroup>
+        <AssemblyName>DotNetCore.HayateOP.Extensions.Endpoints</AssemblyName>
+        <PackageId>DotNetCore.HayateOP.Extensions.Endpoints</PackageId>
+        <Description>DotNetCore Hayate Object Pool Endpoints Extensions</Description>
+    </PropertyGroup>
 
-    <ItemGroup>
-      <ProjectReference Include="..\HayateOP.Extensions.DependencyInjection\HayateOP.Extensions.DependencyInjection.csproj" />
-      <ProjectReference Include="..\HayateOP\HayateOP.csproj" />
-    </ItemGroup>
+	<PropertyGroup>
+		<RootNamespace />
+	</PropertyGroup>
 
-    <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
-		<PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.3" />
-	</ItemGroup>
+    <Import Project="..\..\common.props" />
 
-    <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
-        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.13" />
-    </ItemGroup>
+    <Import Project="dependency.props" />
 
-    <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
-        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.24" />
-    </ItemGroup>
-
-    <ItemGroup Condition="'$(TargetFramework)' == 'net7.0'">
-        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="7.0.20" />
-    </ItemGroup>
-
-    <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
-        <PackageReference Include="Swashbuckle.AspNetCore.Annotations" Version="6.5.0" />
-        <PackageReference Include="Swashbuckle.AspNetCore.SwaggerGen" Version="6.5.0" />
-    </ItemGroup>
+    <Import Project="references.props" />
     
 </Project>

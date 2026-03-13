@@ -1,0 +1,7 @@
+<Project>
+
+    <ItemGroup>
+        <ProjectReference Include="..\HayateOP\HayateOP.csproj" />
+    </ItemGroup>
+
+</Project>

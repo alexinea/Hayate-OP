@@ -1,16 +1,22 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFrameworks>net6.0;net7.0;net8.0;net9.0;net10.0</TargetFrameworks>
-        <LangVersion>default</LangVersion>
-        <Nullable>disable</Nullable>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <RootNamespace/>
+        <Configurations>Debug;Release</Configurations>
+        <Platforms>AnyCPU</Platforms>
     </PropertyGroup>
 
-    <ItemGroup>
-      <ProjectReference Include="..\HayateOP.Extensions.DependencyInjection\HayateOP.Extensions.DependencyInjection.csproj" />
-      <ProjectReference Include="..\HayateOP\HayateOP.csproj" />
-    </ItemGroup>
+    <PropertyGroup>
+        <AssemblyName>DotNetCore.HayateOP.Extensions.Diagnostics</AssemblyName>
+        <PackageId>DotNetCore.HayateOP.Extensions.Diagnostics</PackageId>
+        <Description>DotNetCore Hayate Object Pool Diagnostics Extensions</Description>
+    </PropertyGroup>
+
+	<PropertyGroup>
+		<RootNamespace />
+	</PropertyGroup>
+
+    <Import Project="..\..\common.props" />
+
+    <Import Project="references.props" />
 
 </Project>

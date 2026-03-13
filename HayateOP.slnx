@@ -13,6 +13,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/HayateOP.Benchmarks/HayateOP.Benchmarks.csproj" />
+    <Project Path="tests/HayateOP.EnvironmentChecker/HayateOP.EnvironmentChecker.csproj" />
     <Project Path="tests/HayateOP.PressureTests/HayateOP.PressureTests.csproj" />
     <Project Path="tests/HayateOP.Tests.Configuration/HayateOP.Tests.Configuration.csproj" Id="748f7e1e-6f62-41c9-a6e8-da895c38e923" />
     <Project Path="tests/HayateOP.Tests.DI/HayateOP.Tests.DI.csproj" Id="8f3ce109-b0c9-4181-9a2c-1e1d38893ee5" />

@@ -34,7 +34,7 @@ public class RejectPolicyTests
             .Build();
 
         var obj1 = pool.Acquire();
-        TestObject? obj2 = null;
+        TestObject obj2 = null;
 
         // Act：100ms后归还对象
         _ = Task.Run(async () =>
