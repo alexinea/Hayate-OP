@@ -25,6 +25,7 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     #region 功能开关配置
+
     /// <summary>
     /// 启用/禁用分片功能
     /// </summary>
@@ -49,6 +50,12 @@ public class HayatePoolBuilder<T> where T : class, new()
     public HayatePoolBuilder<T> WithEnableValidation(bool enable = true)
     {
         _options.EnableValidation = enable;
+        if (!enable)
+        {
+            _options.ValidateOnBorrow = false;
+            _options.ValidateOnReturn = false;
+        }
+
         return this;
     }
 
@@ -87,9 +94,11 @@ public class HayatePoolBuilder<T> where T : class, new()
         _options.EnableMetrics = enable;
         return this;
     }
+
     #endregion
-    
+
     #region 基础配置
+
     /// <summary>
     /// 设置池名称
     /// </summary>
@@ -138,9 +147,11 @@ public class HayatePoolBuilder<T> where T : class, new()
         _options.UseFairMode = enable;
         return this;
     }
+
     #endregion
 
     #region 超时配置
+
     /// <summary>
     /// 设置默认获取超时时间
     /// </summary>
@@ -151,9 +162,11 @@ public class HayatePoolBuilder<T> where T : class, new()
         _options.DefaultAcquireTimeout = timeout;
         return this;
     }
+
     #endregion
 
     #region 扩缩容配置
+
     /// <summary>
     /// 设置扩缩容检查间隔
     /// </summary>
@@ -219,15 +232,18 @@ public class HayatePoolBuilder<T> where T : class, new()
         _options.ScaleUpStep = step;
         return this;
     }
+
     #endregion
 
     #region 验证配置
+
     /// <summary>
     /// 设置是否在借出时验证对象
     /// </summary>
     public HayatePoolBuilder<T> WithValidateOnBorrow(bool enable = true)
     {
-        _options.ValidateOnBorrow = enable;
+        if (_options.EnableValidation)
+            _options.ValidateOnBorrow = enable;
         return this;
     }
 
@@ -236,7 +252,8 @@ public class HayatePoolBuilder<T> where T : class, new()
     /// </summary>
     public HayatePoolBuilder<T> WithValidateOnReturn(bool enable = true)
     {
-        _options.ValidateOnReturn = enable;
+        if (_options.EnableValidation)
+            _options.ValidateOnReturn = enable;
         return this;
     }
 
@@ -245,7 +262,8 @@ public class HayatePoolBuilder<T> where T : class, new()
     /// </summary>
     public HayatePoolBuilder<T> WithValidateWhileIdle(bool enable = true)
     {
-        _options.ValidateWhileIdle = enable;
+        if (_options.EnableValidation)
+            _options.ValidateWhileIdle = enable;
         return this;
     }
 
@@ -256,7 +274,10 @@ public class HayatePoolBuilder<T> where T : class, new()
     {
         if (intervalMs < 1000)
             throw new ArgumentOutOfRangeException(nameof(intervalMs), "ValidateInterval must be at least 1000ms");
-        _options.ValidateIntervalMs = intervalMs;
+
+        if (_options.EnableValidation)
+            _options.ValidateIntervalMs = intervalMs;
+
         return this;
     }
 
@@ -267,7 +288,10 @@ public class HayatePoolBuilder<T> where T : class, new()
     {
         if (interval < 1)
             throw new ArgumentOutOfRangeException(nameof(interval), "OldGenerationValidationInterval must be at least 1");
-        _options.OldGenerationValidationInterval = interval;
+
+        if (_options.EnableValidation)
+            _options.OldGenerationValidationInterval = interval;
+
         return this;
     }
 
@@ -278,12 +302,17 @@ public class HayatePoolBuilder<T> where T : class, new()
     {
         if (thresholdMs < 1000)
             throw new ArgumentOutOfRangeException(nameof(thresholdMs), "GenerationThreshold must be at least 1000ms");
-        _options.GenerationThresholdMs = thresholdMs;
+
+        if (_options.EnableValidation)
+            _options.GenerationThresholdMs = thresholdMs;
+
         return this;
     }
+
     #endregion
 
     #region 驱逐配置
+
     /// <summary>
     /// 设置对象最大生命周期
     /// </summary>
@@ -338,9 +367,11 @@ public class HayatePoolBuilder<T> where T : class, new()
         _options.NumTestsPerEvictionRun = count;
         return this;
     }
+
     #endregion
 
     #region 创建配置
+
     /// <summary>
     /// 设置对象创建重试次数
     /// </summary>
@@ -362,9 +393,11 @@ public class HayatePoolBuilder<T> where T : class, new()
         _options.CreationRetryDelay = delay;
         return this;
     }
+
     #endregion
 
     #region 泄漏检测配置
+
     /// <summary>
     /// 设置泄漏检测阈值
     /// </summary>
@@ -384,9 +417,11 @@ public class HayatePoolBuilder<T> where T : class, new()
         _options.EnableLeakDetection = enable;
         return this;
     }
+
     #endregion
 
     #region 拒绝策略配置
+
     /// <summary>
     /// 设置拒绝策略
     /// </summary>
@@ -395,9 +430,11 @@ public class HayatePoolBuilder<T> where T : class, new()
         _options.RejectPolicy = policy;
         return this;
     }
+
     #endregion
 
     #region 依赖注入配置
+
     /// <summary>
     /// 设置对象池策略
     /// </summary>
@@ -433,9 +470,11 @@ public class HayatePoolBuilder<T> where T : class, new()
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         return this;
     }
+
     #endregion
 
     #region 全量配置
+
     /// <summary>
     /// 全量配置（覆盖所有选项）
     /// </summary>
@@ -444,6 +483,7 @@ public class HayatePoolBuilder<T> where T : class, new()
         configure(_options);
         return this;
     }
+
     #endregion
 
     public IHayateObjectPool<T> Build()

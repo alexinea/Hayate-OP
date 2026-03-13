@@ -38,6 +38,64 @@ public class BasicFunctionTests
     }
 
     [Fact]
+    public void Acquire_ShouldIncrementTotalAcquired()
+    {
+        // Arrange
+        using var pool = new HayatePoolBuilder<TestObject>()
+            .WithMinSize(5)
+            .WithMaxSize(10)
+            .Build();
+
+        // Act
+        var obj1 = pool.Acquire();
+        var obj2 = pool.Acquire();
+        var obj3 = pool.Acquire();
+        var stats = pool.GetStats();
+
+        // Assert
+        Assert.Equal(3, stats.TotalAcquired);
+
+        // 归还后再次借出，验证累计次数继续累加
+        pool.Release(obj1);
+        var obj4 = pool.Acquire();
+        stats = pool.GetStats();
+        Assert.Equal(4, stats.TotalAcquired);
+    }
+    
+    [Fact]
+    public async Task ConcurrentAcquire_ShouldCorrectlyIncrementTotalAcquired()
+    {
+        // Arrange
+        using var pool = new HayatePoolBuilder<TestObject>()
+            .WithMinSize(10)
+            .WithMaxSize(100)
+            .Build();
+
+        const int threadCount = 10;
+        const int acquirePerThread = 100;
+        var tasks = new Task[threadCount];
+
+        // Act
+        for (int i = 0; i < threadCount; i++)
+        {
+            tasks[i] = Task.Run(() =>
+            {
+                for (int j = 0; j < acquirePerThread; j++)
+                {
+                    var obj = pool.Acquire();
+                    pool.Release(obj);
+                }
+            });
+        }
+        await Task.WhenAll(tasks);
+
+        var stats = pool.GetStats();
+
+        // Assert：累计借出次数 = 线程数 × 每个线程借出次数
+        Assert.Equal(threadCount * acquirePerThread, stats.TotalAcquired);
+    }
+    
+    [Fact]
     public void Release_ShouldReturnObjectToPool()
     {
         // Arrange
