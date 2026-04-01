@@ -1,11 +1,8 @@
 # Hayate Object Pool
 
-
 A high-performance, feature-rich object pool implementation for .NET, designed to optimize resource management and reduce garbage collection overhead.
 
-
 ## Features
-
 
 - **High Performance Core**: Optimized for both single-threaded and multi-threaded scenarios.
 - **Sharding Support**: Reduces lock contention through sharded architecture.
@@ -20,12 +17,9 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 - **ASP.NET Core Endpoints**: Built-in management endpoints for monitoring and configuration.
 - **Cross-Version Compatibility**: Supports .NET 6, .NET 8 and .NET 10.
 
-
 ## Installation
 
-
 ### NuGet Packages
-
 
 | Package                                                | Description                                                                                          |
 | :----------------------------------------------------- | :--------------------------------------------------------------------------------------------------- |
@@ -36,9 +30,7 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 | `DotNetCore.HayateOP.Extensions.Endpoints`           | Built-in management endpoints for monitoring and configuration.                                      |
 | `DotNetCore.HayateOP.Extensions.Diagnostics`         | Integration with System.Diagnostics for advanced performance monitoring and telemetry.               |
 
-
 ### .NET CLI
-
 
 ```bash
 # Core package
@@ -52,12 +44,9 @@ dotnet add package DotNetCore.HayateOP.Extensions.Endpoints
 dotnet add package DotNetCore.HayateOP.Extensions.Diagnostics
 ```
 
-
 ## Quick Start
 
-
 ### Basic Usage
-
 
 ```csharp
 using Hayate.ObjectPool;
@@ -92,18 +81,14 @@ pool.Release(obj);
 pool.Dispose();
 ```
 
-
 ### With Dependency Injection
-
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 
 // Register Hayate Object Pool services
-builder.Services.AddHayatePoolCore();
-
-// Register a typed pool
-builder.Services.AddHayatePool<MyPooledObject>(options =>
+builder.Services.AddHayatePoolSupport()
+       .RegisterHayatePool<MyPooledObject>(options =>
 {
     options.MinPoolSize = 10;
     options.MaxPoolSize = 100;
@@ -131,16 +116,13 @@ app.MapGet("/", (IHayateObjectPool<MyPooledObject> pool) =>
 app.Run();
 ```
 
-
 ### With Management Endpoints
-
-
 
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddHayatePoolCore();
-builder.Services.AddHayatePool<MyPooledObject>();
+builder.Services.AddHayatePoolSupport()
+                 .RegisterHayatePool<MyPooledObject>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -158,8 +140,6 @@ app.MapHayatePoolEndpoints();
 app.Run();
 ```
 
-
-
 **Available Endpoints**:
 
 * `GET /hayateop` **- Pool overview**
@@ -168,9 +148,7 @@ app.Run();
 * `GET /hayateop/{poolName}/stats` **- Pool statistics**
 * `POST /hayateop/{poolName}/clear` **- Clear all objects from pool**
 
-
 ### Configuration Options
-
 
 ```csharp
 var options = new HayatePoolOptions
@@ -231,13 +209,9 @@ var options = new HayatePoolOptions
 };
 ```
 
-
 ### Advanced Usage
 
-
-
 #### Custom Object Policy
-
 
 ```csharp
 public class CustomPooledObjectPolicy : IHayatePooledObjectPolicy<MyCustomObject>
@@ -286,12 +260,9 @@ var pool = new HayatePoolBuilder<MyCustomObject>()
     .Build();
 ```
 
-
 ### Monitoring and Diagnostics
 
-
 #### Get current statistics
-
 
 ```csharp
 var stats = pool.GetStats();
@@ -304,9 +275,7 @@ Console.WriteLine( $ "Total missed: {stats.TotalMissed}");
 Console.WriteLine( $ "Leak detected: {stats.LeakDetectedCount}");
 ```
 
-
 #### Take a snapshot for diagnostics
-
 
 ```csharp
 var snapshot = pool.TakeSnapshot();
@@ -321,9 +290,7 @@ foreach (var leakTrace in snapshot.LeakTraces)
 }
 ```
 
-
 #### Reload configuration at runtime
-
 
 ```csharp
 pool.ReloadConfig(config => {
@@ -332,35 +299,25 @@ pool.ReloadConfig(config => {
 })'
 ```
 
-
 #### Clear all objects
-
 
 ```csharp
 pool.Clear();
 ```
 
-
 ## Contributing
-
 
 Contributions are welcome.
 
-
 Please feel free to submit issues, feature requests, or pull requests.
 
-
 ### Development Requirements
-
 
 - .NET 10 SDK (for development)
 - .NET 6 SDK (for compatibility testing)
 - Visual Studio 2026, VS Code, or Rider
 
-
-
 ### Building the Project
-
 
 ```bash
 # Restore dependencies
@@ -373,8 +330,6 @@ dotnet build
 dotnet test
 ```
 
-
 ## License
-
 
 This project is licensed under the MIT License - see the [LICENSE] file for details.
