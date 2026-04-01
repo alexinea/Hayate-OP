@@ -41,8 +41,8 @@ echo.
 
 ::push nuget packages to server
 for /R "nuget_packages" %%s in (*.nupkg) do (
-::    dotnet nuget push "%%s" -s "Release" --skip-duplicate --no-symbols
-    dotnet nuget push "%%s" -s "Release" --skip-duplicate
+::    dotnet nuget push "%%s" -s "nuget.org" --skip-duplicate --no-symbols
+    dotnet nuget push "%%s" -s "nuget.org" --skip-duplicate
     echo.
 )
 
