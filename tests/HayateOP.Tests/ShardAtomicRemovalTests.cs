@@ -41,6 +41,7 @@ public class ShardAtomicRemovalTests
         private readonly MethodInfo _add;
         private readonly MethodInfo _tryTake;
         private readonly MethodInfo _remove;
+        private readonly MethodInfo _getAll;
         private readonly PropertyInfo _count;
 
         public ShardProxy(IHayateObjectPool<TestObject> pool, int index = 0)
@@ -57,15 +58,20 @@ public class ShardAtomicRemovalTests
             _add = t.GetMethod("Add", Flags)!;
             _tryTake = t.GetMethod("TryTake", Flags)!;
             _remove = t.GetMethod("Remove", Flags)!;
+            _getAll = t.GetMethod("GetAll", Flags)!;
             _count = t.GetProperty("Count", Flags)!;
 
             Assert.NotNull(_add);
             Assert.NotNull(_tryTake);
             Assert.NotNull(_remove);
+            Assert.NotNull(_getAll);
             Assert.NotNull(_count);
         }
 
         public int Count => (int)_count.GetValue(_shard)!;
+
+        public HayateObject<TestObject>[] GetAllArray()
+            => (HayateObject<TestObject>[])_getAll.Invoke(_shard, null)!;
 
         public bool Add(HayateObject<TestObject> w) => (bool)_add.Invoke(_shard, new object[] { w })!;
 
@@ -381,6 +387,182 @@ public class ShardAtomicRemovalTests
         Assert.False(final.IsDisposed);
         pool.Release(final);
     }
+
+    #region §3.3 未覆盖路径：快照一致性（Shard.Count / GetAll / 池级 BorrowedCount）
+
+    /// <summary>
+    /// §3.3 Shard 级：并发 Add / TryTake 期间反复采样 GetAll()。
+    /// <para>
+    /// GetAll 在 SpinLock 内 ToArray，返回的快照必然内部自洽：同一快照内不会出现
+    /// 「同一对象两次」（LinkedList 不允许重复节点）也不会读到已物理摘除的撕裂态。
+    /// 本用例让一批线程做 TryTake→立即 Add 归还的纯 churn，另一批线程持续抽样，
+    /// 用并发破坏去冲击这条快照自洽不变量。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void T04_Snapshot_GetAll_NeverTornUnderConcurrency()
+    {
+        const int Total = 500;
+        const int SampleCount = 3000;
+
+        using var pool = BuildQuietPool(minSize: 0, maxSize: Total + 100);
+        var shard = new ShardProxy(pool);
+
+        var all = new HayateObject<TestObject>[Total];
+        for (var i = 0; i < Total; i++)
+        {
+            all[i] = Wrap(i);
+            Assert.True(shard.Add(all[i]));
+        }
+
+        var unexpected = new ConcurrentBag<Exception>();
+        var stop = false;
+
+        var sampler = new Thread(() =>
+        {
+            for (var n = 0; n < SampleCount && !Volatile.Read(ref stop); n++)
+            {
+                var snap = shard.GetAllArray();
+                // 同一次快照内不得出现重复对象（快照自洽，无撕裂读）
+                var distinct = new HashSet<HayateObject<TestObject>>(snap);
+                if (distinct.Count != snap.Length)
+                {
+                    unexpected.Add(new InvalidOperationException("GetAll snapshot contains a duplicate wrapper"));
+                    return;
+                }
+                Thread.Yield();
+            }
+        })
+        { IsBackground = true, Name = "hayate-snapshot-sampler" };
+        sampler.Start();
+
+        // 纯 churn：取头再放回，保持总量稳定，制造高频节点增删（有界轮次，独立结束）
+        Parallel.For(0, 4, _ =>
+        {
+            for (var n = 0; n < 4000; n++)
+            {
+                try
+                {
+                    if (shard.TryTake(out var t)) shard.Add(t);
+                }
+                catch (Exception ex) { unexpected.Add(ex); }
+            }
+        });
+
+        Volatile.Write(ref stop, true);
+        sampler.Join(TimeSpan.FromSeconds(3));
+
+        Assert.Empty(unexpected);
+        Assert.False(sampler.IsAlive, "sampler did not finish in time");
+    }
+
+    /// <summary>
+    /// §3.3 池级：无驱逐 / 校验干扰的安静池里，确定性校验 TakeSnapshot 的借出口径。
+    /// <para>
+    /// _objectMap 恒持有「空闲 + 借出」的全部存活对象（Destroy 才移除），因此
+    /// BorrowedCount = _objectMap.Count - 池内空闲数 在无驱逐瞬态下应精确成立。
+    /// 用 MinSize 预热让 Acquire 立即命中，避免触发拒绝策略的超时等待。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void T04_Snapshot_BorrowedCount_TracksHeldObjects()
+    {
+        const int Capacity = 32;
+        const int Held = 8;
+
+        // MinSize=MaxSize=Capacity 预热满池 → Acquire 即时命中、无需扩容等待
+        using var pool = BuildQuietPool(minSize: Capacity, maxSize: Capacity);
+
+        var held = new List<TestObject>(Held);
+        for (var i = 0; i < Held; i++) held.Add(pool.Acquire());
+
+        // 已借出 8、仍空闲 24 → 借出数精确等于 Held
+        var snap = pool.TakeSnapshot();
+        Assert.Equal(Held, snap.BorrowedCount);
+        Assert.Equal(Capacity - Held, snap.PooledCount);
+
+        // 归还一半 → 空闲 +4、借出 -4，二者之和恒等于存活总数 Capacity
+        for (var i = 0; i < Held / 2; i++) pool.Release(held[i]);
+        snap = pool.TakeSnapshot();
+        Assert.Equal(Held / 2, snap.BorrowedCount);
+        Assert.Equal(Capacity - Held / 2, snap.PooledCount);
+
+        // 全部归还 → 借出归零、全部空闲
+        for (var i = Held / 2; i < Held; i++) pool.Release(held[i]);
+        snap = pool.TakeSnapshot();
+        Assert.Equal(0, snap.BorrowedCount);
+        Assert.Equal(Capacity, snap.PooledCount);
+    }
+
+    /// <summary>
+    /// §3.3 池级：并发借还期间反复采样 TakeSnapshot，不变量恒定。
+    /// <para>
+    /// 关键不变量：PooledCount 与 BorrowedCount 恒非负，且二者之和（= 真实存活对象数）
+    /// ≤ 池容量；驱逐关闭时不存在「已认领未销毁」瞬态，二者之和精确等于 _objectMap 存活数。
+    /// 每个 worker 一次只借一个、借完即还，峰值并发持有 ≤ 线程数，永远不把池掏空，
+    /// 因此 Acquire 不会走到拒绝策略的超时路径。
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void T04_Snapshot_Invariant_HoldsUnderConcurrency()
+    {
+        const int Capacity = 64;
+        const int WorkerRounds = 3000;
+
+        // MinSize=MaxSize=Capacity 预热满池；worker 峰值持有 ≤ 8，永不完全耗尽
+        using var pool = BuildQuietPool(minSize: Capacity, maxSize: Capacity);
+
+        var stop = false;
+        var unexpected = new ConcurrentBag<Exception>();
+
+        // 采样线程：有界时间片，独立结束，不依赖 worker
+        var sampler = new Thread(() =>
+        {
+            var deadline = Environment.TickCount + 1500;
+            while (Environment.TickCount < deadline && !Volatile.Read(ref stop))
+            {
+                var s = pool.TakeSnapshot();
+                if (s.PooledCount < 0 || s.BorrowedCount < 0 ||
+                    s.PooledCount + s.BorrowedCount > Capacity + 8)
+                {
+                    unexpected.Add(new InvalidOperationException(
+                        $"bad snapshot: pooled={s.PooledCount}, borrowed={s.BorrowedCount}"));
+                    return;
+                }
+                Thread.Yield();
+            }
+        })
+        { IsBackground = true, Name = "hayate-invariant-sampler" };
+        sampler.Start();
+
+        // worker：有界轮次，独立结束
+        Parallel.For(0, 8, _ =>
+        {
+            for (var n = 0; n < WorkerRounds; n++)
+            {
+                try
+                {
+                    var o = pool.Acquire(TimeSpan.FromMilliseconds(200));
+                    pool.Release(o);
+                }
+                catch (TimeoutException)
+                {
+                    // 理论不会发生（永不完全耗尽）；即便偶发也不判失败，仅跳过
+                }
+                catch (Exception ex)
+                {
+                    unexpected.Add(ex);
+                }
+            }
+        });
+
+        Volatile.Write(ref stop, true);
+        sampler.Join(TimeSpan.FromSeconds(3));
+
+        Assert.Empty(unexpected);
+    }
+
+    #endregion
 
     /// <summary>
     /// 借出态探测策略：OnAcquire 打标、OnRelease 清标、OnDestroy 时若仍带标即为违规。

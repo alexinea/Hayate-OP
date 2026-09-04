@@ -70,17 +70,55 @@ namespace HayateOP.Tests.Endpoints
                 });
 
             using var host = await hostBuilder.StartAsync();
+
+            // T05：池工厂是懒解析的——先解析一次以触发其把自身注册进 IHayateObjectPoolRegistry，
+            // 这样管理端点才能按逻辑池名 "TestObject" 找到它（替代 Type.GetType 反射寻址）。
+            var svc = host.Services.GetRequiredService<IHayateObjectPool<TestObject>>();
+            Assert.NotNull(svc);
+
             var client = host.GetTestClient();
 
-            // Act
-            // 注意：这里简化测试，实际需要正确的池名称
+            // Act：池名 = typeof(TestObject).Name = "TestObject"
             var response = await client.GetAsync("/hayateop/TestObject/stats");
 
-            // Assert
-            // 404是预期的，因为Type.GetType("TestObject")找不到
-            // 这里主要验证端点能正常映射
-            Assert.True(response.StatusCode == System.Net.HttpStatusCode.NotFound ||
-                        response.StatusCode == System.Net.HttpStatusCode.OK);
+            // Assert：注册表寻址应命中并返回 200 + stats 明细
+            response.EnsureSuccessStatusCode();
+            var content = await response.Content.ReadAsStringAsync();
+            Assert.Contains("stats", content, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("pooledCount", content, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task MapHayatePoolEndpoints_Detail_Returns404_WhenPoolNotRegistered()
+        {
+            // Arrange
+            var hostBuilder = Host.CreateDefaultBuilder()
+                .ConfigureWebHost(webHost =>
+                {
+                    webHost.UseTestServer();
+                    webHost.Configure(app =>
+                    {
+                        app.UseRouting();
+                        app.UseEndpoints(endpoints =>
+                        {
+                            endpoints.MapHayatePoolEndpoints();
+                        });
+                    });
+                    webHost.ConfigureServices(services =>
+                    {
+                        services.AddRouting();
+                        services.AddHayatePoolSupport();
+                    });
+                });
+
+            using var host = await hostBuilder.StartAsync();
+            var client = host.GetTestClient();
+
+            // Act：一个从未注册过的池名
+            var response = await client.GetAsync("/hayateop/DoesNotExist");
+
+            // Assert：注册表未命中 → 404
+            Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
         }
 
         [Fact]

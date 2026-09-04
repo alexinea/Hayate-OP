@@ -916,11 +916,22 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             }
         }
 
+        var pooledCount = _shards.Sum(s => s.Count);
+
+        // 借出数由「真实存活包装对象总数 - 池内空闲数」派生（与 GetStats 的
+        // totalObjects - totalIdle 口径一致），而不是依赖 Shard.BorrowedCount。
+        // 原因：TryTake 先把对象物理摘出分片链表、再置 Borrowed，借出的对象根本不在
+        // 分片链表中，因此 Shard.BorrowedCount（统计链表内 IsBorrowed）结构上恒为 0。
+        // _objectMap 始终持有所有存活包装对象（空闲 + 借出），直到 Destroy 才移除；
+        // 驱逐「已认领未销毁」的极短瞬态会被计入，但被 Destroy 的快速执行所限，可忽略。
+        var borrowedCount = _objectMap.Count - pooledCount;
+        if (borrowedCount < 0) borrowedCount = 0;
+
         return new HayatePoolSnapshot
         {
             Timestamp = now,
-            PooledCount = _shards.Sum(s => s.Count),
-            BorrowedCount = _shards.Sum(s => s.BorrowedCount),
+            PooledCount = pooledCount,
+            BorrowedCount = borrowedCount,
             TotalCreated = Interlocked.Read(ref _totalCreated),
             TotalMissed = Interlocked.Read(ref _totalMissed),
             TotalAcquired = Interlocked.Read(ref _totalAcquired),

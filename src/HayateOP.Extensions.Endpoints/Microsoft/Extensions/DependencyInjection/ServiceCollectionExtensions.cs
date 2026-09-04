@@ -135,17 +135,12 @@ public static class EndpointsExtensions
     private static async Task<IResult> GetPoolDetailAsync(string poolName, IServiceProvider sp)
     {
         await Task.CompletedTask;
-        var poolType = Type.GetType(poolName);
-        if (poolType == null)
+        // T05：从注册表按「逻辑池名」寻址，替代 Type.GetType 反射（后者无法解析纯类型名）
+        if (!TryResolve(sp, poolName, out var pool))
             return Results.Problem($"池 {poolName} 不存在", statusCode: StatusCodes.Status404NotFound);
 
-        var poolInterface = typeof(IHayateObjectPool<>).MakeGenericType(poolType);
-        var pool = sp.GetService(poolInterface);
-        if (pool == null)
-            return Results.Problem($"池 {poolName} 不存在", statusCode: StatusCodes.Status404NotFound);
-
-        var stats = (HayatePoolStats)poolInterface.GetMethod("GetStats").Invoke(pool, null);
-        return Results.Ok(new HayatePoolDetail(poolName, new HayatePoolOptions(), stats));
+        var stats = pool.GetStats();
+        return Results.Ok(new HayatePoolDetail(poolName, pool.GetOptions(), stats));
     }
 
     private static async Task<IResult> UpdatePoolConfigAsync(string poolName, HayatePoolOptions newConfig, IServiceProvider sp)
@@ -154,23 +149,14 @@ public static class EndpointsExtensions
         if (!newConfig.IsValid())
             return Results.Problem("无效的配置", statusCode: StatusCodes.Status400BadRequest);
 
-        var poolType = Type.GetType(poolName);
-        if (poolType == null)
+        if (!TryResolve(sp, poolName, out var pool))
             return Results.Problem($"池 {poolName} 不存在", statusCode: StatusCodes.Status404NotFound);
 
-        var poolInterface = typeof(IHayateObjectPool<>).MakeGenericType(poolType);
-        var pool = sp.GetService(poolInterface);
-        if (pool == null)
-            return Results.Problem($"池 {poolName} 不存在", statusCode: StatusCodes.Status404NotFound);
-
-        poolInterface.GetMethod("ReloadConfig").Invoke(pool, new object[]
+        pool.ReloadConfig(opt =>
         {
-            new Action<HayatePoolOptions>(opt =>
-            {
-                opt.MinPoolSize = newConfig.MinPoolSize;
-                opt.MaxPoolSize = newConfig.MaxPoolSize;
-                // 其他配置项...
-            })
+            opt.MinPoolSize = newConfig.MinPoolSize;
+            opt.MaxPoolSize = newConfig.MaxPoolSize;
+            // 其他配置项...
         });
 
         return Results.Ok(new HayatePoolOperationResult(poolName, "配置更新成功", DateTime.UtcNow));
@@ -179,33 +165,48 @@ public static class EndpointsExtensions
     private static async Task<IResult> GetPoolStatsAsync(string poolName, IServiceProvider sp)
     {
         await Task.CompletedTask;
-        var poolType = Type.GetType(poolName);
-        if (poolType == null)
+        if (!TryResolve(sp, poolName, out var pool))
             return Results.Problem($"池 {poolName} 不存在", statusCode: StatusCodes.Status404NotFound);
 
-        var poolInterface = typeof(IHayateObjectPool<>).MakeGenericType(poolType);
-        var pool = sp.GetService(poolInterface);
-        if (pool == null)
-            return Results.Problem($"池 {poolName} 不存在", statusCode: StatusCodes.Status404NotFound);
-
-        var stats = (HayatePoolStats)poolInterface.GetMethod("GetStats").Invoke(pool, null);
-        var snapshot = (HayatePoolSnapshot)poolInterface.GetMethod("TakeSnapshot").Invoke(pool, null);
+        var stats = pool.GetStats();
+        var snapshot = pool.TakeSnapshot();
         return Results.Ok(new HayatePoolStatsDetail(poolName, stats, snapshot));
     }
 
     private static async Task<IResult> ClearPoolAsync(string poolName, IServiceProvider sp)
     {
         await Task.CompletedTask;
-        var poolType = Type.GetType(poolName);
-        if (poolType == null)
+        if (!TryResolve(sp, poolName, out var pool))
             return Results.Problem($"池 {poolName} 不存在", statusCode: StatusCodes.Status404NotFound);
 
-        var poolInterface = typeof(IHayateObjectPool<>).MakeGenericType(poolType);
-        var pool = sp.GetService(poolInterface);
-        if (pool == null)
-            return Results.Problem($"池 {poolName} 不存在", statusCode: StatusCodes.Status404NotFound);
-
-        poolInterface.GetMethod("Clear").Invoke(pool, null);
+        pool.Clear();
         return Results.Ok(new HayatePoolOperationResult(poolName, "池清空成功", DateTime.UtcNow));
+    }
+
+    /// <summary>
+    /// T05：优先按逻辑池名查注册表；若未注入注册表（例如直接用 Builder 而非 DI 注册），
+    /// 退回按类型名解析 DI 中注册的 IHayateObjectPool&lt;T&gt;。
+    /// </summary>
+    private static bool TryResolve(IServiceProvider sp, string poolName, out IHayateObjectPool pool)
+    {
+        var registry = sp.GetService<IHayateObjectPoolRegistry>();
+        if (registry != null && registry.TryGet(poolName, out pool!))
+            return true;
+
+        // 兜底：注册表缺失或尚未填充时，按类型名做 DI 解析（兼容历史注册方式）
+        var poolType = Type.GetType(poolName);
+        if (poolType != null)
+        {
+            var poolInterface = typeof(IHayateObjectPool<>).MakeGenericType(poolType);
+            var resolved = sp.GetService(poolInterface) as IHayateObjectPool;
+            if (resolved != null)
+            {
+                pool = resolved;
+                return true;
+            }
+        }
+
+        pool = null!;
+        return false;
     }
 }

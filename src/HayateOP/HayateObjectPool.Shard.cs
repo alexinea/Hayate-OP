@@ -24,6 +24,12 @@ public partial class HayatePoolBasic<T>
 
         private int _maxSize;
 
+        // 借出计数说明（为何 Shard 不维护 BorrowedCount）：
+        // TryTake 先把对象物理摘出本分片链表、再置 Borrowed，借出的对象根本不在
+        // 链表中，因此「链表内 IsBorrowed 计数」结构上恒为 0；且归还时若被 Release
+        // 拒绝（OnRelease=false）会直接销毁、不经过本分片 Add，增减无法一一配对。
+        // 池级借出数由 TakeSnapshot 以 _objectMap.Count - 各分片 Count 之和 派生。
+
         // 公平模式票号机制
         private long _ticketCounter = 0;
         private long _nextTicket = 0;
@@ -58,20 +64,6 @@ public partial class HayatePoolBasic<T>
             if (newMaxSize < 0)
                 throw new ArgumentOutOfRangeException(nameof(newMaxSize));
             Interlocked.Exchange(ref _maxSize, newMaxSize);
-        }
-
-        public int BorrowedCount
-        {
-            get
-            {
-                var taken = false;
-                try
-                {
-                    _lock.Enter(ref taken);
-                    return _list.Count(x => x.IsBorrowed);
-                }
-                finally { if (taken) _lock.Exit(); }
-            }
         }
 
         /// <summary>
