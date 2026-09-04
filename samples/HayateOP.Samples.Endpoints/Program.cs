@@ -1,8 +1,6 @@
 ﻿using DotNetCore.HayateOP;
 using HayateOP.Samples.Endpoints;
 using System.Text;
-using Microsoft.AspNetCore.OutputCaching;
-using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 

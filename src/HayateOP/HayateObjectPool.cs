@@ -69,7 +69,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         // 计算每个分片的初始最大空闲容量
         var shardCount = _options.ShardCount;
-        var perShardMax = _options.MaxPoolSize;
+        var perShardMax = _options.MaxPoolSize / shardCount;   // FIX: 之前直接赋值 MaxPoolSize，分片容量从未被均分
         var remainderMax = _options.MaxPoolSize % shardCount;
 
         // 功能开关只读字段（用于JIT死代码消除）
@@ -200,6 +200,14 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                             w.ValidationSkipCount = 0;
                         }
                     }
+
+                    #endregion
+
+                    #region 记录源分片索引（Release 时按此 round-trip，避免 ProcessorId 落到 max=0 分片）
+
+                    // 关键：Acquire 命中即记录来源 shard。同一对象 Release 时回到原 shard，
+                    // 杜绝 Thread.GetCurrentProcessorId() % ShardCount 命中 max=0 分片导致对象静默 dispose。
+                    w.ShardIndex = shard.Index;
 
                     #endregion
 
@@ -379,12 +387,15 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                     w.IsBorrowed = true;
 
+                    // D3：记录源分片索引，Release round-trip 用
+                    w.ShardIndex = shard.Index;
+
                     //if (_options.EnableEviction || _options.EnableLeakDetection)
                     if (_enableEviction || _enableLeakDetection)
                     {
                         w.LastBorrowedAt = DateTime.UtcNow;
                     }
-                    
+
                     Interlocked.Increment(ref _totalAcquired);
 
                     return w.Value;
@@ -450,8 +461,27 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 w.LeaseTimeMs = (long)(w.LastReleasedAt - w.LastBorrowedAt).TotalMilliseconds;
             }
 
-            // 重置对象
-            _policy.OnRelease(item);
+            // 重置对象；策略层可通过返回 false 拒绝回池（例如对象已损坏或不可复用）
+            if (!_policy.OnRelease(item))
+            {
+                _logger.LogWarning(
+                    "Policy rejected object on release. Disposing. Type: {Type}",
+                    typeof(T).Name);
+
+                Destroy(w);
+
+                _metrics.RecordObjectReleased(_name, item, false);
+
+                // 维持最小空闲水位：策略层拒绝后池被掏空，主动补充。
+                // 仅在开启了自动扩缩容且 MinPoolSize > 0 时触发，避免无意义的开销。
+                if (_enableAutoScaling && _options.MinPoolSize > 0 &&
+                    _objectMap.Count < _options.MinPoolSize)
+                {
+                    ForceScaleUpOneStep();
+                }
+
+                return;
+            }
 
             #endregion
 
@@ -469,13 +499,25 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
             #region 归还到分片
 
-            // 归还到当前对应分片
-            var shardIndex = _options.EnableSharding
-                ? Thread.GetCurrentProcessorId() % _shards.Length
-                : 0;
-
+            // 关键修复（D3）：按 Acquire 时记录的 ShardIndex round-trip，
+            // 严禁改回 Thread.GetCurrentProcessorId() % _shards.Length——
+            // 后者在 MaxPoolSize < ShardCount 时会让 2/3 分片因 max=0 静默 dispose 对象。
+            var shardIndex = (uint)w.ShardIndex < (uint)_shards.Length ? w.ShardIndex : 0;
             var shard = _shards[shardIndex];
-            shard.Add(w);
+            if (!shard.Add(w))
+            {
+                // 分片拒绝接收，两种可能：
+                // 1) 分片已满 —— Add 内部已负责释放该对象；
+                // 2) 对象已被驱逐 / 空闲校验流程认领 —— 对端线程正在销毁它。
+                // 无论哪种，对象都已不可复用，这里只需把它从全局索引中摘除；
+                // Destroy 自带幂等保护，不会二次 Dispose。
+                _logger.LogWarning("Object rejected by shard on release. Removing from pool. Type: {Type}, shard: {ShardIndex}",
+                    typeof(T).Name, shardIndex);
+
+                Destroy(w);
+                _objectMap.TryRemove(w.Value, out _);
+                return;
+            }
 
             #endregion
 
@@ -571,7 +613,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         var perShardMax = _options.MaxPoolSize / shardCount;
         var remainderMax = _options.MaxPoolSize % shardCount;
 
-        for (var i = 0; i < perShardMax; i++)
+        // FIX: 之前循环 bound 用了 perShardMax，会在 MaxPoolSize > ShardCount 时越界 _shards[i]
+        for (var i = 0; i < shardCount; i++)
         {
             var newMax = perShardMax + ((i < remainderMax ? 1 : 0));
             _shards[i].UpdateMaxSize(newMax);
@@ -582,11 +625,16 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     {
         if (w == null) return;
 
+        // 幂等保护：驱逐、空闲校验、归还拒绝三条路径可能并发命中同一个包装对象，
+        // 只有第一个通过 CAS 的调用方真正执行销毁，其余直接返回，避免二次 Dispose。
+        if (Interlocked.Exchange(ref w.Destroyed, 1) == 1) return;
+
         try
         {
             _policy.OnDestroy(w.Value);
             if (w.Value is IDisposable d) d.Dispose();
             _objectMap.TryRemove(w.Value, out _);
+            w.Location = HayateObjectLocation.Destroyed;
             _logger.LogDebug("Wrapped object destroyed. Type: {Type}", typeof(T).Name);
         }
         catch (Exception ex)
@@ -667,12 +715,16 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                     if (isExpired || isIdleTooLong || shouldEvictSoft)
                     {
-                        shard.Remove(w);
-                        Destroy(w);
-                        evictedCount++;
+                        // 只有认领成功的调用方才有权销毁：若对象此刻已被借出（Remove 返回 false），
+                        // 绝不能销毁它，否则会破坏正在使用它的业务线程。
+                        if (shard.Remove(w))
+                        {
+                            Destroy(w);
+                            evictedCount++;
 
-                        _logger.LogInformation("[Shard {Index}] Evicting object. Type: {Type} Expired: {Expired} IdleTooLong: {IdleTooLong} SoftIdle: {SoftIdle}",
-                            shard.Index, typeof(T).Name, isExpired, isIdleTooLong, shouldEvictSoft);
+                            _logger.LogInformation("[Shard {Index}] Evicting object. Type: {Type} Expired: {Expired} IdleTooLong: {IdleTooLong} SoftIdle: {SoftIdle}",
+                                shard.Index, typeof(T).Name, isExpired, isIdleTooLong, shouldEvictSoft);
+                        }
                     }
                 }
 
@@ -784,10 +836,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 {
                     if (!w.IsBorrowed && !_policy.Validate(w.Value))
                     {
-                        shard.Remove(w);
-                        Destroy(w);
-                        invalidCount++;
-                        _logger.LogWarning("Idle object failed validation and was evicted. Type: {Type}", typeof(T).Name);
+                        // 认领失败说明对象已被借出或已被其他线程认领，此时不得销毁
+                        if (shard.Remove(w))
+                        {
+                            Destroy(w);
+                            invalidCount++;
+                            _logger.LogWarning("Idle object failed validation and was evicted. Type: {Type}", typeof(T).Name);
+                        }
                     }
                 }
             }

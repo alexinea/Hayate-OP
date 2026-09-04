@@ -5,6 +5,7 @@ namespace DotNetCore.HayateOP.Tests;
 /// <summary>
 /// 优化回归用例集：所有优化步骤必须100%通过此用例
 /// </summary>
+[Collection(OptimizationRegressionCollection.Name)]
 public class OptimizationRegressionTests
 {
     private class TestObject : IHayateResettable, IHayateValidatable, IDisposable

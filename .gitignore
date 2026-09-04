@@ -332,3 +332,6 @@ ASALocalRun/
 # MFractors (Xamarin productivity tool) working folder 
 .mfractor/
 NuGet.config
+
+# 损坏的 git 备份（2026-09-04 历史恢复）
+.git.broken-2026-09-04-23h33/

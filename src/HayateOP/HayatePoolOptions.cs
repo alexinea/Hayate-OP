@@ -179,6 +179,16 @@ public class HayatePoolOptions
 
     public int ScaleUpStep { get; set; } = HayateConstant.DEFAULT_SCALE_UP_STEP;
 
+    /// <summary>
+    /// 缩容步长（每次缩容减少的对象数）。<br />
+    /// 默认值：<see cref="HayateConstant.DEFAULT_SCALE_DOWN_STEP"/>（5）。
+    /// </summary>
+    /// <remarks>
+    /// 用途：与 <see cref="ScaleUpStep"/> 解耦，便于业务侧"扩容激进、缩容保守"调优。<br />
+    /// 边界：必须 ≥ 1；若超过当前可用对象数，结果会被钳制为 <see cref="MinPoolSize"/>。
+    /// </remarks>
+    public int ScaleDownStep { get; set; } = HayateConstant.DEFAULT_SCALE_DOWN_STEP;
+
     #endregion
 
     #region 对象验证
@@ -431,6 +441,7 @@ public class HayatePoolOptions
         options.ScaleUpCooldownSeconds = this.ScaleUpCooldownSeconds;
         options.ScaleDownCooldownSeconds = this.ScaleDownCooldownSeconds;
         options.ScaleUpStep = this.ScaleUpStep;
+        options.ScaleDownStep = this.ScaleDownStep;
 
         // 对象验证配置
         options.EnableValidation = this.EnableValidation;
@@ -518,6 +529,7 @@ public class HayatePoolOptions
             if (ScaleUpThreshold < 0 || ScaleUpThreshold > 1) return false;
             if (ScaleDownThreshold < 0 || ScaleDownThreshold > 1) return false;
             if (ScaleUpStep < 1) return false;
+            if (ScaleDownStep < 1) return false;
         }
 
         // 时间验证

@@ -1,6 +1,5 @@
 ﻿using DotNetCore.HayateOP.Logging;
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -12,7 +11,17 @@ public partial class HayatePoolBasic<T>
     internal class Shard
     {
         private readonly IHayateLogger _logger;
-        private readonly ConcurrentQueue<HayateObject<T>> _queue = new();
+
+        // 空闲对象链表：Add 尾插、TryTake 头取，天然保持 FIFO；
+        // Remove 通过 HayateObject<T>.Node 做 O(1) 摘除。
+        // 旧实现是 ConcurrentQueue + "ToList → Remove → Clear → Enqueue" 重建队列，
+        // 重建窗口内并发的 TryTake / Add 会丢对象或产生重复项，本次彻底替换为链表。
+        private readonly LinkedList<HayateObject<T>> _list = new();
+
+        // 保护 _list 以及对象位置状态迁移。临界区只做若干指针操作，极短。
+        // 硬约束：临界区内绝不回调用户代码（Dispose / policy 一律在锁外执行），避免重入死锁。
+        private SpinLock _lock = new(enableThreadOwnerTracking: false);
+
         private int _maxSize;
 
         // 公平模式票号机制
@@ -21,65 +30,125 @@ public partial class HayatePoolBasic<T>
 
         public int Index { get; }
 
-        public int Count => _queue.Count;
-
-        //public int Available => _queue.Count;
-
-        //public int Capacity => Volatile.Read(ref _maxSize);
+        public int Count
+        {
+            get
+            {
+                var taken = false;
+                try
+                {
+                    _lock.Enter(ref taken);
+                    return _list.Count;
+                }
+                finally { if (taken) _lock.Exit(); }
+            }
+        }
 
         public int MaxSize => Volatile.Read(ref _maxSize);
 
         public Shard(HayatePoolOptions options, int index, int maxSize, IHayateLogger logger)
         {
             Index = index;
-            //_maxSize = options.MaxPoolSize / options.ShardCount;
             _maxSize = maxSize;
             _logger = logger;
         }
 
         public void UpdateMaxSize(int newMaxSize)
         {
-            if(newMaxSize < 0)
+            if (newMaxSize < 0)
                 throw new ArgumentOutOfRangeException(nameof(newMaxSize));
             Interlocked.Exchange(ref _maxSize, newMaxSize);
         }
-        
-        public int BorrowedCount => _queue.Count(x => x.IsBorrowed);
 
-        public void Add(HayateObject<T> w)
+        public int BorrowedCount
+        {
+            get
+            {
+                var taken = false;
+                try
+                {
+                    _lock.Enter(ref taken);
+                    return _list.Count(x => x.IsBorrowed);
+                }
+                finally { if (taken) _lock.Exit(); }
+            }
+        }
+
+        /// <summary>
+        /// Appends an object to the shard free list.
+        /// </summary>
+        /// <returns>
+        /// <c>true</c> when the object was accepted; <c>false</c> when it was rejected —
+        /// either the shard is at capacity (the object is disposed by this method), or the
+        /// object was already claimed by eviction / validation / destroy and must not be
+        /// handed out again.
+        /// </returns>
+        public bool Add(HayateObject<T> w)
         {
             if (w is null) throw new ArgumentNullException(nameof(w));
 
             var currentMax = Volatile.Read(ref _maxSize);
+            HayateObject<T> overflow = null;
+            var accepted = false;
+            var size = 0;
 
-            //if (_queue.Count >= _maxSize)
-            if (_queue.Count >= currentMax)
+            var taken = false;
+            try
             {
-                //_logger.LogWarning("[Shard {Index}] capacity exceeded, object will be destroyed (shard size: {Size}, max: {Max})", Index, _queue.Count, _maxSize);
-                _logger.LogWarning("[Shard {Index}] capacity exceeded, object will be destroyed (shard size: {Size}, max: {Max})", Index, _queue.Count, currentMax);
+                _lock.Enter(ref taken);
 
-                try
+                // 只接收「刚创建」或「已借出后归还」两种状态。
+                // 被驱逐 / 校验 / 销毁流程认领过（Removing / Destroyed）的对象一律拒绝，
+                // 否则 Dispose 过的对象会被重新放回池中——这是上一轮 T04 回归的直接根因。
+                var location = w.Location;
+                if (location != HayateObjectLocation.None && location != HayateObjectLocation.Borrowed)
+                    return false;
+
+                // 兜底：理论上对象归还时 Node 必为 null，若因异常路径残留则先摘除再尾插，
+                // 保证同一个对象在链表中最多只出现一次。
+                var stale = w.Node;
+                if (stale != null && ReferenceEquals(stale.List, _list))
+                    _list.Remove(stale);
+
+                size = _list.Count;
+                if (size >= currentMax)
                 {
-                    if (w.Value is IDisposable d) d.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to dispose object when [shard {Index}] is full", Index);
+                    overflow = w;
+                    return false;
                 }
 
-                return;
+                w.Node = _list.AddLast(w);
+                w.Location = HayateObjectLocation.InPool;
+                size++;
+                accepted = true;
+            }
+            finally
+            {
+                if (taken) _lock.Exit();
             }
 
-            _queue.Enqueue(w);
-            //Interlocked.Increment(ref _availableCount);
-            _logger.LogDebug("[Shard {Index}] Object added to shard (current size: {Size})", Index, _queue.Count);
+            // Dispose 在锁外执行，避免用户代码重入本分片导致自旋锁自死锁
+            if (overflow != null)
+            {
+                _logger.LogWarning("[Shard {Index}] capacity exceeded, object will be destroyed (shard size: {Size}, max: {Max})",
+                    Index, size, currentMax);
+
+                // 标记终态，使后续任何 Destroy 调用成为幂等空操作（此处已负责释放）
+                Interlocked.Exchange(ref overflow.Destroyed, 1);
+                overflow.Location = HayateObjectLocation.Destroyed;
+                SafeDispose(overflow, "shard is full");
+            }
+            else if (accepted)
+            {
+                _logger.LogDebug("[Shard {Index}] Object added to shard (current size: {Size})", Index, size);
+            }
+
+            return accepted;
         }
 
-        //public bool TryTake(out HayateObject<T> w, TimeSpan timeout, bool useFair, ILogger logger = null)
         public bool TryTake(out HayateObject<T> w, bool useFairMode)
         {
             w = null;
-            //var sw = ValueStopwatch.StartNew();
             long myTicket = 0;
 
             if (useFairMode)
@@ -89,41 +158,42 @@ public partial class HayatePoolBasic<T>
 
             try
             {
-                //while (sw.Elapsed < timeout)
-                //{
                 if (useFairMode && Interlocked.Read(ref _nextTicket) != myTicket)
                 {
-                    //_spinWait.SpinOnce();
-                    //continue;
+                    // 还没轮到自己，本次直接放弃；票号由下面的 finally 归还给下一位
                     return false;
                 }
 
-                //if (Interlocked.Read(ref _availableCount) > 0 && _queue.TryDequeue(out w))
-                if (_queue.TryDequeue(out w))
+                var taken = false;
+                try
                 {
-                    //Interlocked.Decrement(ref _availableCount);
+                    _lock.Enter(ref taken);
+
+                    var node = _list.First;
+                    if (node == null) return false;
+
+                    w = node.Value;
+                    _list.Remove(node);
+                    w.Node = null;
+
+                    // 关键顺序：先摘链再置 Borrowed。
+                    // 此后 Remove 无法再认领该对象（其 Node 已不属于任何链表），
+                    // 因此驱逐线程不可能销毁一个已经交到调用方手里的对象。
+                    w.Location = HayateObjectLocation.Borrowed;
+
                     if (useFairMode)
                     {
                         Interlocked.Increment(ref _nextTicket);
                     }
 
-                    _logger.LogDebug("[Shard {Index}] Object taken from shard (current size: {Size})", Index, _queue.Count);
+                    _logger.LogDebug("[Shard {Index}] Object taken from shard (current size: {Size})", Index, _list.Count);
                     return true;
                 }
-
-                //_spinWait.SpinOnce();
-                //}
-
-                //if (useFair && Interlocked.Read(ref _nextTicket) == myTicket)
-                //{
-                //    Interlocked.Increment(ref _nextTicket);
-                //}
-
-                return false;
+                finally { if (taken) _lock.Exit(); }
             }
             finally
             {
-                // 公平模式：如果拿到了票但没获取到对象，归还票
+                // 公平模式：拿到了票却没取到对象，把票让给下一位
                 if (useFairMode && Interlocked.Read(ref _nextTicket) == myTicket)
                 {
                     Interlocked.Increment(ref _nextTicket);
@@ -131,45 +201,107 @@ public partial class HayatePoolBasic<T>
             }
         }
 
-        public void Remove(HayateObject<T> w)
+        /// <summary>
+        /// Claims an idle object for destruction and physically unlinks it from the shard.
+        /// </summary>
+        /// <returns>
+        /// <c>true</c> only for the single caller that won the claim — that caller owns the
+        /// object and is responsible for destroying it. <c>false</c> means the object is
+        /// currently borrowed, lives in another shard, or has already been claimed, and the
+        /// caller MUST NOT destroy it.
+        /// </returns>
+        public bool Remove(HayateObject<T> w)
         {
-            if (w == null) return;
+            if (w == null) return false;
 
-            var ww = _queue.ToList();
-            
-            if (ww.Remove(w))
+            var claimed = false;
+            var size = 0;
+
+            var taken = false;
+            try
             {
-                //Interlocked.Decrement(ref _availableCount);
+                _lock.Enter(ref taken);
 
-                // 重建队列
-                _queue.Clear();
-                foreach (var l in ww) _queue.Enqueue(l);
-                _logger.LogDebug("[Shard {Index}] Object removed from shard (current size: {Size})", Index, _queue.Count);
+                // 双重确认：状态为 InPool 且节点确实挂在本分片的链表上。
+                // 二者缺一都说明对象此刻不在"可安全销毁"的位置（已借出 / 已认领 / 在他分片）。
+                if (w.Location != HayateObjectLocation.InPool) return false;
+
+                var node = w.Node;
+                if (node == null || !ReferenceEquals(node.List, _list)) return false;
+
+                _list.Remove(node);
+                w.Node = null;
+                w.Location = HayateObjectLocation.Removing;
+                size = _list.Count;
+                claimed = true;
             }
+            finally
+            {
+                if (taken) _lock.Exit();
+            }
+
+            if (claimed)
+            {
+                _logger.LogDebug("[Shard {Index}] Object removed from shard (current size: {Size})", Index, size);
+            }
+
+            return claimed;
         }
 
-        public IEnumerable<HayateObject<T>> GetAll() => _queue.ToArray();
+        public IEnumerable<HayateObject<T>> GetAll()
+        {
+            var taken = false;
+            try
+            {
+                _lock.Enter(ref taken);
+                return _list.ToArray();
+            }
+            finally { if (taken) _lock.Exit(); }
+        }
 
         public void Clear()
         {
-            int clearedCount = 0;
-            while (_queue.TryDequeue(out var w))
+            HayateObject<T>[] drained;
+
+            var taken = false;
+            try
             {
-                try
+                _lock.Enter(ref taken);
+                drained = _list.ToArray();
+                _list.Clear();
+                foreach (var w in drained)
                 {
-                    if (w.Value is IDisposable d) d.Dispose();
-                    clearedCount++;
-                }
-                catch
-                {
-                    // ignore
+                    w.Node = null;
+                    Interlocked.Exchange(ref w.Destroyed, 1);
+                    w.Location = HayateObjectLocation.Destroyed;
                 }
             }
+            finally { if (taken) _lock.Exit(); }
 
-            //Interlocked.Exchange(ref _availableCount, 0);
+            var clearedCount = 0;
+            foreach (var w in drained)
+            {
+                if (SafeDispose(w, "shard clear")) clearedCount++;
+            }
+
             _logger.LogInformation("[Shard {Index}] Shard cleared, {Count} objects destroyed", Index, clearedCount);
         }
+
+        /// <summary>
+        /// 在锁外安全释放对象，吞掉用户 Dispose 抛出的异常并返回是否释放成功。
+        /// </summary>
+        private bool SafeDispose(HayateObject<T> w, string reason)
+        {
+            try
+            {
+                if (w.Value is IDisposable d) d.Dispose();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to dispose object when [{Reason}]", reason);
+                return false;
+            }
+        }
     }
-
-
 }

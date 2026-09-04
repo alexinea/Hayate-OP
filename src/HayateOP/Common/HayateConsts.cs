@@ -81,6 +81,12 @@ public static class HayateConstant
 
     public const int DEFAULT_SCALE_UP_STEP = 5;
 
+    /// <summary>
+    /// 默认缩容步长（每次缩容时减少的对象数）。默认与 <see cref="DEFAULT_SCALE_UP_STEP"/> 保持一致，
+    /// 业务侧可根据缩容保守度自行调小。
+    /// </summary>
+    public const int DEFAULT_SCALE_DOWN_STEP = 5;
+
     #endregion
 
     #region 对象验证

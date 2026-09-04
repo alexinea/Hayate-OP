@@ -233,6 +233,17 @@ public class HayatePoolBuilder<T> where T : class, new()
         return this;
     }
 
+    /// <summary>
+    /// 设置缩容步长
+    /// </summary>
+    public HayatePoolBuilder<T> WithScaleDownStep(int step)
+    {
+        if (step < 1)
+            throw new ArgumentOutOfRangeException(nameof(step), "ScaleDownStep must be at least 1");
+        _options.ScaleDownStep = step;
+        return this;
+    }
+
     #endregion
 
     #region 验证配置
