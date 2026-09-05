@@ -203,7 +203,7 @@ public class ShardAtomicRemovalTests
     /// 都意味着对象在并发下丢失或被重复发放。
     /// </para>
     /// </summary>
-    [Fact]
+    [Fact(Timeout = 60000)]
     public void T04_ConcurrentAddRemove_NoObjectsLost()
     {
         const int Total = 1000;
@@ -266,7 +266,7 @@ public class ShardAtomicRemovalTests
     /// 配置与 <c>OptimizationRegressionTests.DisableValidation_ShouldSkipAllValidation</c> 一致，
     /// 再叠加一个「归还后对象不再是池中唯一元素」的干扰对象，确保 FIFO 与摘除逻辑都正确。
     /// </summary>
-    [Fact]
+    [Fact(Timeout = 60000)]
     public void T04_BorrowReleaseBorrow_ReturnsSameInstance()
     {
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -304,7 +304,7 @@ public class ShardAtomicRemovalTests
     /// 无条件销毁，直接破坏正在使用它的业务线程。
     /// </para>
     /// </summary>
-    [Fact]
+    [Fact(Timeout = 60000)]
     public void T04_HighConcurrency_BorrowedObjectNeverDestroyed()
     {
         var policy = new BorrowedDestroyDetector<TestObject>();
@@ -403,7 +403,7 @@ public class ShardAtomicRemovalTests
     /// 用并发破坏去冲击这条快照自洽不变量。
     /// </para>
     /// </summary>
-    [Fact]
+    [Fact(Timeout = 60000)]
     public void T04_Snapshot_GetAll_NeverTornUnderConcurrency()
     {
         const int Total = 500;
@@ -507,7 +507,7 @@ public class ShardAtomicRemovalTests
     /// 因此 Acquire 不会走到拒绝策略的超时路径。
     /// </para>
     /// </summary>
-    [Fact]
+    [Fact(Timeout = 60000)]
     public void T04_Snapshot_Invariant_HoldsUnderConcurrency()
     {
         const int Capacity = 64;

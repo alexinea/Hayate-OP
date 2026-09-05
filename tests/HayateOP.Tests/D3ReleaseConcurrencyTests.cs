@@ -36,7 +36,7 @@ public class D3ReleaseConcurrencyTests
     /// Shard.Add 静默 dispose 对象，第二次 Acquire 阻塞到默认超时。
     /// 修复后 Release 按 HayateObject&lt;T&gt;.ShardIndex round-trip，杜绝 ProcessorId 命中 max=0 shard。
     /// </summary>
-    [Fact]
+    [Fact(Timeout = 60000)]
     public void D3_1_ReleaseRoundTrip_SmallPoolOverSharding_NoTimeout()
     {
         // ShardCount=4 + MaxSize=2 配置让 shard 2/3 的 max=0
@@ -80,7 +80,7 @@ public class D3ReleaseConcurrencyTests
     /// 当 Release 命中 max=0 shard 时，对象被 dispose，下次 Acquire
     /// 必超时（如果池被掏空）。修复后 round-trip 消除该故障路径。
     /// </summary>
-    [Fact]
+    [Fact(Timeout = 60000)]
     public void D3_2_ReleaseShouldNotDescreasePooledCount_BelowMinSize()
     {
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -113,7 +113,7 @@ public class D3ReleaseConcurrencyTests
     /// D3-3：并发 Acquire/Release + 后台 Eviction 同时跑，对象总和应可对账。
     /// 现有 Shard.Remove 的 LinkedList+SpinLock 实现保证不丢对象；本测试验证池级别一致性。
     /// </summary>
-    [Fact]
+    [Fact(Timeout = 60000)]
     public async Task D3_3_ConcurrentAcquireReleaseWithEviction_ObjectCountConsistent()
     {
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -173,7 +173,7 @@ public class D3ReleaseConcurrencyTests
     ///   - 池不超出 MaxPoolSize
     ///   - 全量 Acquire 都最终完成（不强制 All Return，因为冷却导致节奏差异）
     /// </summary>
-    [Fact]
+    [Fact(Timeout = 60000)]
     public async Task D3_4_ConcurrentReleaseWhereOnReleaseFalse_PoolStaysConsistent()
     {
         var policy = new HalfRejectPolicy();

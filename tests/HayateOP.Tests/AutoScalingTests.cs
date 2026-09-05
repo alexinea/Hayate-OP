@@ -36,7 +36,7 @@ public class AutoScalingTests
         Assert.Equal(10, options.MaxPoolSize);
     }
 
-    [Fact]
+    [Fact(Timeout = 60000)]
     public void AcquireTimeout_ShouldTriggerForceScaleUp()
     {
         // Arrange
@@ -67,7 +67,7 @@ public class AutoScalingTests
         Assert.True(pool.GetStats().CurrentSize > initialSize);
     }
 
-    [Fact]
+    [Fact(Timeout = 60000)]
     public void ScaleDown_ShouldNotGoBelowMinSize()
     {
         // Arrange

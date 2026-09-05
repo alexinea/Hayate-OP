@@ -84,7 +84,7 @@ public class OptimizationRegressionTests
 
     #region 并发安全必过用例
 
-    [Fact]
+    [Fact(Timeout = 60000)]
     public async Task ConcurrentAcquireRelease_ShouldNotThrow()
     {
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -118,7 +118,7 @@ public class OptimizationRegressionTests
         Assert.Equal(threadCount * operationsPerThread, totalOperations);
     }
 
-    [Fact]
+    [Fact(Timeout = 60000)]
     public async Task ConcurrentAcquire_ShouldNotExceedMaxPoolSize()
     {
         const int maxSize = 50;

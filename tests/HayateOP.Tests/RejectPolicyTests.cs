@@ -23,7 +23,7 @@ public class RejectPolicyTests
         Assert.Contains("无可用对象", exception.Message);
     }
 
-    [Fact]
+    [Fact(Timeout = 60000)]
     public void RejectPolicy_Block_ShouldWaitUntilObjectAvailable()
     {
         // Arrange
@@ -53,7 +53,7 @@ public class RejectPolicyTests
         Assert.True(sw.ElapsedMilliseconds >= 80);
     }
 
-    [Fact]
+    [Fact(Timeout = 60000)]
     public void RejectPolicy_BlockTimeout_ShouldThrowAfterTimeout()
     {
         // Arrange
@@ -80,7 +80,7 @@ public class RejectPolicyTests
         Assert.True(sw.ElapsedMilliseconds < 10_000, $"疑似超时路径挂死：{sw.ElapsedMilliseconds}ms 未返回");
     }
 
-    [Fact]
+    [Fact(Timeout = 60000)]
     public void RejectPolicy_CreateNew_ShouldReturnNewObjectWhenTimeout()
     {
         // Arrange

@@ -18,12 +18,18 @@
         <IsTestProject>true</IsTestProject>
         <!-- .NET 8/9 SDK 下让 dotnet test 走 MTP；.NET 10 SDK 默认即 MTP -->
         <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+        <!-- 切换为 Microsoft.Testing.Platform v2 Runner（而非 xunit in-process runner），
+             使 MTP 扩展（含 Microsoft.Testing.Extensions.CodeCoverage）的 coverage 参数生效 -->
+        <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
     </PropertyGroup>
 
     <ItemGroup>
         <PackageReference Include="Moq" Version="4.20.72" />
         <!-- xunit.v3 聚合包：net8/9/10 编译并链接 v3 core/assert，并引入 MTP -->
         <PackageReference Include="xunit.v3" Version="4.0.0" />
+        <!-- MTP 代码覆盖率扩展：随 Microsoft.Testing.Platform.MSBuild 自动注册，
+             直跑自执行测试 exe 时传 coverage 与 cobertura 输出参数即可（见任务 #28） -->
+        <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.0" />
     </ItemGroup>
 
     <ItemGroup>

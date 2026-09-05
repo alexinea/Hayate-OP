@@ -62,7 +62,7 @@ public class BasicFunctionTests
         Assert.Equal(4, stats.TotalAcquired);
     }
     
-    [Fact]
+    [Fact(Timeout = 60000)]
     public async Task ConcurrentAcquire_ShouldCorrectlyIncrementTotalAcquired()
     {
         // Arrange
