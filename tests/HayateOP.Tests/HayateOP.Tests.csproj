@@ -6,21 +6,30 @@
         <RootNamespace>DotNetCore.HayateOP.Tests</RootNamespace>
     </PropertyGroup>
 
-    <ItemGroup Condition="'$(TargetFramework)' == 'net10.0' OR  '$(TargetFramework)' == 'net9.0' OR'$(TargetFramework)' == 'net8.0'">
-        <PackageReference Include="coverlet.collector" Version="8.0.0">
-          <PrivateAssets>all</PrivateAssets>
-          <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-        </PackageReference>
-        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.3.0" />
+    <!-- =====================================================================
+         xunit v2/v3 双轨（net6/net7 保持 v2+VSTest；net8/net9/net10 走 v3+MTP）
+         说明：xunit v3 仅支持 net8.0+，故 v3 分支要求项目为自执行(Exe)并启用
+         Microsoft.Testing.Platform；老框架分支维持 v2 库 + VSTest runner，
+         以便日后可向下兼容 .NET Framework 项目。见 common.tests.props 的 TFM。
+    ===================================================================== -->
+
+    <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0' OR '$(TargetFramework)' == 'net9.0' OR '$(TargetFramework)' == 'net8.0'">
+        <!-- xunit v3 自执行测试程序 -->
+        <OutputType>Exe</OutputType>
+        <IsTestProject>true</IsTestProject>
+        <!-- .NET 8/9 SDK 下让 dotnet test 走 MTP；.NET 10 SDK 默认即 MTP -->
+        <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+        <!-- 标记 v3 分支，供共享源码用条件编译切分 v2/v3 差异 API -->
+        <DefineConstants>$(DefineConstants);XUNIT_V3</DefineConstants>
+    </PropertyGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' == 'net10.0' OR '$(TargetFramework)' == 'net9.0' OR '$(TargetFramework)' == 'net8.0'">
         <PackageReference Include="Moq" Version="4.20.72" />
-        <PackageReference Include="xunit" Version="2.9.3" />
-        <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
-          <PrivateAssets>all</PrivateAssets>
-          <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-        </PackageReference>
+        <!-- xunit.v3 聚合包：net8/9/10 分支编译并链接 v3 core/assert -->
+        <PackageReference Include="xunit.v3" Version="4.0.0" />
     </ItemGroup>
 
-    <ItemGroup Condition="'$(TargetFramework)' == 'net7.0' OR  '$(TargetFramework)' == 'net6.0'">
+    <ItemGroup Condition="'$(TargetFramework)' == 'net7.0' OR '$(TargetFramework)' == 'net6.0'">
         <PackageReference Include="coverlet.collector" Version="8.0.0">
             <PrivateAssets>all</PrivateAssets>
             <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
