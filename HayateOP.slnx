@@ -19,5 +19,10 @@
     <Project Path="tests/HayateOP.Tests.DI/HayateOP.Tests.DI.csproj" Id="8f3ce109-b0c9-4181-9a2c-1e1d38893ee5" />
     <Project Path="tests/HayateOP.Tests.Endpoints/HayateOP.Tests.Endpoints.csproj" Id="6cc9b753-68e3-4a3f-b30f-de4884a44ab5" />
     <Project Path="tests/HayateOP.Tests/HayateOP.Tests.csproj" />
+    <!-- legacy 世代 (net6/net7, xunit v2 + VSTest)：与上方 future 项目用例同步维护 -->
+    <Project Path="tests/legacy/HayateOP.Tests.Legacy/HayateOP.Tests.Legacy.csproj" />
+    <Project Path="tests/legacy/HayateOP.Tests.Configuration.Legacy/HayateOP.Tests.Configuration.Legacy.csproj" />
+    <Project Path="tests/legacy/HayateOP.Tests.DI.Legacy/HayateOP.Tests.DI.Legacy.csproj" />
+    <Project Path="tests/legacy/HayateOP.Tests.Endpoints.Legacy/HayateOP.Tests.Endpoints.Legacy.csproj" />
   </Folder>
 </Solution>

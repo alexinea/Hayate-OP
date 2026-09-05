@@ -1,8 +1,11 @@
 <Project>
 
-    <PropertyGroup>
-        <TargetFrameworks>net6.0;net7.0;net8.0;net9.0;net10.0</TargetFrameworks>
-    </PropertyGroup>
+    <!-- 通用测试项目编译项（共享给 future/legacy 各测试项目）。
+
+         注意：TargetFrameworks 不再在此统一声明，改由各测试项目按"世代"自行声明：
+           - future 项目：net8.0;net9.0;net10.0（xunit v3 + MTP）
+           - legacy 项目：net6.0;net7.0       （xunit v2 + VSTest）
+         以便 future 与 legacy 独立演进、无需 MSBuild 条件 / 预处理器符号双轨。 -->
 
     <PropertyGroup>
         <LangVersion>latest</LangVersion>

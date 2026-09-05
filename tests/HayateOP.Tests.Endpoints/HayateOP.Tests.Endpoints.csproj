@@ -1,37 +1,18 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
+    <!-- FUTURE 世代：net8/net9/net10 + xunit v3 + MTP。net6/net7(v2) 见 tests/legacy/HayateOP.Tests.Endpoints.Legacy -->
     <PropertyGroup>
-        <TargetFrameworks>net6.0;net7.0;net8.0;net9.0;net10.0</TargetFrameworks>
+        <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
-    </PropertyGroup>
-
-    <!-- xunit v2/v3 双轨：net8/net9/net10 → v3 + MTP；net6/net7 → v2 + VSTest -->
-    <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0' OR '$(TargetFramework)' == 'net9.0' OR '$(TargetFramework)' == 'net8.0'">
         <OutputType>Exe</OutputType>
         <IsTestProject>true</IsTestProject>
         <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
-        <DefineConstants>$(DefineConstants);XUNIT_V3</DefineConstants>
     </PropertyGroup>
 
-    <!-- v3 分支 (net8/9/10)：xunit.v3 聚合包走 MTP，无需 coverlet/runner -->
-    <ItemGroup Condition="'$(TargetFramework)' == 'net10.0' OR '$(TargetFramework)' == 'net9.0' OR '$(TargetFramework)' == 'net8.0'">
+    <ItemGroup>
         <PackageReference Include="xunit.v3" Version="4.0.0" />
-    </ItemGroup>
-
-    <!-- v2 分支 (net6/7)：coverlet + VSTest + xunit v2 -->
-    <ItemGroup Condition="'$(TargetFramework)' == 'net7.0' OR '$(TargetFramework)' == 'net6.0'">
-        <PackageReference Include="coverlet.collector" Version="8.0.0">
-            <PrivateAssets>all</PrivateAssets>
-            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-        </PackageReference>
-        <PackageReference Include="xunit" Version="2.9.3" />
-        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
-        <PackageReference Include="xunit.runner.visualstudio" Version="3.0.2">
-            <PrivateAssets>all</PrivateAssets>
-            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-        </PackageReference>
     </ItemGroup>
 
     <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
@@ -44,14 +25,6 @@
 
     <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
         <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.24"/>
-    </ItemGroup>
-
-    <ItemGroup Condition="'$(TargetFramework)' == 'net7.0'">
-        <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="7.0.20"/>
-    </ItemGroup>
-
-    <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
-        <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="6.0.36"/>
     </ItemGroup>
 
     <ItemGroup>
