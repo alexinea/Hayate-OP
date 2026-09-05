@@ -1,6 +1,26 @@
 @HayateOP.Samples.Endpoints_HostAddress = http://localhost:5185
 
-GET {{HayateOP.Samples.Endpoints_HostAddress}}/weatherforecast/
+### HayateOP management endpoints
+### NOTE: per-pool endpoints resolve {type} via reflection (Type.GetType) and
+### currently have a known limitation (tracked as T05). The overview and the
+### DI-resolved pool endpoint below are the recommended working entry points.
+
+### Management overview (works)
+GET {{HayateOP.Samples.Endpoints_HostAddress}}/hayateop
 Accept: application/json
 
 ###
+
+### DI-resolved pool access (works) — recommended for per-pool operations
+GET {{HayateOP.Samples.Endpoints_HostAddress}}/test-hayateop
+
+###
+
+### ASP.NET Core health check backed by HayateOpHealthCheck<T> (works)
+GET {{HayateOP.Samples.Endpoints_HostAddress}}/health
+
+###
+
+### Per-pool detail (current limitation: needs an assembly-qualified type name
+### and has a known issue — see README "Management Endpoints")
+# GET {{HayateOP.Samples.Endpoints_HostAddress}}/hayateop/HayateOP.Samples.Endpoints.MyBizObj,HayateOP.Samples.Endpoints

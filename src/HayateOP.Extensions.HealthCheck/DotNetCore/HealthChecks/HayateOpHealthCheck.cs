@@ -1,10 +1,9 @@
 ﻿using DotNetCore.HayateOP;
-using DotNetCore.HayateOP.Modules;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace DotNetCore.HealthChecks;
 
-public class HayateOpHealthCheck<T> : IHealthCheck, IHayateOpModule where T : class
+public class HayateOpHealthCheck<T> : IHealthCheck where T : class
 {
     private readonly IHayateObjectPool<T> _pool;
 

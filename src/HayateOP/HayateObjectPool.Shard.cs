@@ -30,10 +30,6 @@ public partial class HayatePoolBasic<T>
         // 拒绝（OnRelease=false）会直接销毁、不经过本分片 Add，增减无法一一配对。
         // 池级借出数由 TakeSnapshot 以 _objectMap.Count - 各分片 Count 之和 派生。
 
-        // 公平模式票号机制
-        private long _ticketCounter = 0;
-        private long _nextTicket = 0;
-
         public int Index { get; }
 
         public int Count
@@ -119,16 +115,15 @@ public partial class HayatePoolBasic<T>
                 if (taken) _lock.Exit();
             }
 
-            // Dispose 在锁外执行，避免用户代码重入本分片导致自旋锁自死锁
+            // P0-新-1 修复：overflow 时不在本方法内自行处置（裸 Dispose 会漏掉 _policy.OnDestroy，
+            // 且提前置 Destroyed=1 会让调用方的完整 Destroy(w) 因幂等 CAS 直接 return，OnDestroy 永不触发）。
+            // 故这里只做日志 + 返回 false，把销毁完整地交给唯一真实调用方（Release → Destroy(w)，
+            // 其内部会触发 _policy.OnDestroy → Dispose → _objectMap.TryRemove，且带幂等保护）。
+            // PreWarm / ForceScaleUp 均先按容量 clamp / UpdateShardMaxSizes，不会在此真实 overflow。
             if (overflow != null)
             {
-                _logger.LogWarning("[Shard {Index}] capacity exceeded, object will be destroyed (shard size: {Size}, max: {Max})",
+                _logger.LogWarning("[Shard {Index}] capacity exceeded, object rejected and will be destroyed by caller (shard size: {Size}, max: {Max})",
                     Index, size, currentMax);
-
-                // 标记终态，使后续任何 Destroy 调用成为幂等空操作（此处已负责释放）
-                Interlocked.Exchange(ref overflow.Destroyed, 1);
-                overflow.Location = HayateObjectLocation.Destroyed;
-                SafeDispose(overflow, "shard is full");
             }
             else if (accepted)
             {
@@ -138,59 +133,31 @@ public partial class HayatePoolBasic<T>
             return accepted;
         }
 
-        public bool TryTake(out HayateObject<T> w, bool useFairMode)
+        public bool TryTake(out HayateObject<T> w)
         {
             w = null;
-            long myTicket = 0;
 
-            if (useFairMode)
-            {
-                myTicket = Interlocked.Increment(ref _ticketCounter) - 1;
-            }
-
+            var taken = false;
             try
             {
-                if (useFairMode && Interlocked.Read(ref _nextTicket) != myTicket)
-                {
-                    // 还没轮到自己，本次直接放弃；票号由下面的 finally 归还给下一位
-                    return false;
-                }
+                _lock.Enter(ref taken);
 
-                var taken = false;
-                try
-                {
-                    _lock.Enter(ref taken);
+                var node = _list.First;
+                if (node == null) return false;
 
-                    var node = _list.First;
-                    if (node == null) return false;
+                w = node.Value;
+                _list.Remove(node);
+                w.Node = null;
 
-                    w = node.Value;
-                    _list.Remove(node);
-                    w.Node = null;
+                // 关键顺序：先摘链再置 Borrowed。
+                // 此后 Remove 无法再认领该对象（其 Node 已不属于任何链表），
+                // 因此驱逐线程不可能销毁一个已经交到调用方手里的对象。
+                w.Location = HayateObjectLocation.Borrowed;
 
-                    // 关键顺序：先摘链再置 Borrowed。
-                    // 此后 Remove 无法再认领该对象（其 Node 已不属于任何链表），
-                    // 因此驱逐线程不可能销毁一个已经交到调用方手里的对象。
-                    w.Location = HayateObjectLocation.Borrowed;
-
-                    if (useFairMode)
-                    {
-                        Interlocked.Increment(ref _nextTicket);
-                    }
-
-                    _logger.LogDebug("[Shard {Index}] Object taken from shard (current size: {Size})", Index, _list.Count);
-                    return true;
-                }
-                finally { if (taken) _lock.Exit(); }
+                _logger.LogDebug("[Shard {Index}] Object taken from shard (current size: {Size})", Index, _list.Count);
+                return true;
             }
-            finally
-            {
-                // 公平模式：拿到了票却没取到对象，把票让给下一位
-                if (useFairMode && Interlocked.Read(ref _nextTicket) == myTicket)
-                {
-                    Interlocked.Increment(ref _nextTicket);
-                }
-            }
+            finally { if (taken) _lock.Exit(); }
         }
 
         /// <summary>

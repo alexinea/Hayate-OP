@@ -77,7 +77,7 @@ public class ShardAtomicRemovalTests
 
         public bool TryTake(out HayateObject<TestObject> w)
         {
-            var args = new object?[] { null, false };
+            var args = new object?[] { null };
             var ok = (bool)_tryTake.Invoke(_shard, args)!;
             w = (HayateObject<TestObject>)args[0]!;
             return ok;
@@ -334,11 +334,15 @@ public class ShardAtomicRemovalTests
         {
             var t = new Thread(() =>
             {
+                // P1/R1 围栏：原实现是 Thread.Yield() 满速空转调用回调，数秒内吃满一个核，
+                // 拖累宿主。这里改为自适应退避——仍在每次回调间让出时间片，但引入短暂
+                // Thread.Sleep 降低空转频率：既保留足够驱逐/校验密度去冲击借出态竞态，
+                // 又不至于把 CPU 打到 100%。循环由 finally 中的 running=false + Join(2s) 兜底。
                 while (Volatile.Read(ref running))
                 {
                     try { m.Invoke(pool, new object?[] { null }); }
                     catch (TargetInvocationException) { /* 回调内部已兜底，忽略 */ }
-                    Thread.Yield();
+                    Thread.Sleep(1);   // 有界退避：~1ms/次，避免忙自旋烧 CPU
                 }
             })
             { IsBackground = true, Name = "hayate-bg-driver" };
@@ -593,6 +597,162 @@ public class ShardAtomicRemovalTests
             // 对象仍处借出态却被销毁 —— 说明后台线程破坏了正在使用它的业务线程
             if (_borrowed.ContainsKey(item)) Interlocked.Increment(ref _destroyedWhileBorrowed);
         }
+    }
+
+    #endregion
+
+    #region PR-A：P0-新-1 / P1-新-1（overflow / 分片拒绝须走完整 Destroy 触发 OnDestroy）
+
+    /// <summary>
+    /// 计数 OnDestroy 的 policy，用于验证「经分片拒绝而销毁的对象」策略钩子必被触发一次。
+    /// </summary>
+    private sealed class OnDestroyCounterPolicy<T> : IHayateObjectPolicy<T> where T : class
+    {
+        public int OnDestroyCount;
+
+        public T Create() => (T)Activator.CreateInstance(typeof(T))!;
+
+        public void OnAcquire(T item) { }
+
+        public void OnPassivate(T item) { }
+
+        public bool OnRelease(T item) => true;
+
+        public bool Validate(T item) => true;
+
+        public void OnDestroy(T item) => Interlocked.Increment(ref OnDestroyCount);
+    }
+
+    private static HayateObject<TestObject> GetWrapped(IHayateObjectPool<TestObject> pool, TestObject item)
+    {
+        var mapField = pool.GetType().GetField("_objectMap", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        Assert.NotNull(mapField);
+        var map = mapField.GetValue(pool)!;
+        var tryGet = map.GetType().GetMethod("TryGetValue")!;
+        var args = new object?[] { item, null };
+        tryGet.Invoke(map, args);
+        return (HayateObject<TestObject>)args[1]!;
+    }
+
+    private static int GetLocationCode(HayateObject<TestObject> w)
+    {
+        var f = typeof(HayateObject<TestObject>).GetField("Location", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        return (int)f.GetValue(w)!;
+    }
+
+    private static int GetDestroyedFlag(HayateObject<TestObject> w)
+    {
+        var f = typeof(HayateObject<TestObject>).GetField("Destroyed", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        return (int)f.GetValue(w)!;
+    }
+
+    private static void SetLocation(HayateObject<TestObject> w, int locationCode)
+    {
+        var f = typeof(HayateObject<TestObject>).GetField("Location", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        f.SetValue(w, Enum.ToObject(f.FieldType, locationCode)); // Removing = 3
+    }
+
+    /// <summary>
+    /// P0-新-1：Shard.Add 在分片满（overflow）时不再自行短路处置。
+    /// 修复前 overflow 分支会「置 Destroyed=1 + 改终态 Location + 裸 SafeDispose（只 Dispose 不调
+    /// _policy.OnDestroy）」，这会让外层完整 Destroy(w) 因幂等 CAS 直接 return，OnDestroy 永不触发。
+    /// 修复后 Shard 只拒绝并返回 false，对象的销毁责任完整留给调用方 Destroy(w)。
+    /// </summary>
+    [Fact]
+    public void P0_AddOverflow_RejectsWithoutPrematureDestroy()
+    {
+        // 单分片、容量 1：塞满后第二个 Add 必然 overflow。
+        using var pool = BuildQuietPool(minSize: 0, maxSize: 1);
+        var shard = new ShardProxy(pool);
+
+        var w1 = Wrap(1);
+        Assert.True(shard.Add(w1));            // 填满分片（None → InPool）
+
+        // 模拟「已借出后归还」的对象（真实 Release overflow 时对象处于 Borrowed）。
+        var w2 = Wrap(2);
+        SetLocation(w2, /* Borrowed */ 2);
+        var accepted = shard.Add(w2);
+
+        // overflow → 拒绝
+        Assert.False(accepted);
+        // P0-新-1 修复：Shard 不自行标记 Destroyed、不改写 Location 终态
+        Assert.Equal(0, GetDestroyedFlag(w2));
+        Assert.Equal(/* Borrowed */ 2, GetLocationCode(w2));
+        // 该分片仍只有 w1
+        Assert.Equal(1, shard.Count);
+    }
+
+    /// <summary>
+    /// P0-新-1 池级端到端：一个对象被驱逐 / 空闲校验认领（Location=Removing）后，
+    /// 业务线程仍 Release 它 → Shard.Add 拒绝 → 走 Release 的完整 Destroy(w) →
+    /// OnDestroy 恰触发一次。修复前该对象在 overflow 分支被裸 Dispose 短路，OnDestroy 不会触发。
+    /// </summary>
+    [Fact]
+    public void ReleaseRejectedByShard_TriggersOnDestroyOnce()
+    {
+        var policy = new OnDestroyCounterPolicy<TestObject>();
+        using var pool = new HayatePoolBuilder<TestObject>()
+            .WithEnableSharding(true)
+            .WithShardCount(1)
+            .WithMinSize(1)
+            .WithMaxSize(8)
+            .WithPolicy(policy)
+            .WithEnableEviction(false)
+            .WithEnableValidation(false)
+            .WithEnableAutoScaling(true)
+            .WithScalingInterval(600000)
+            .WithEnableLeakDetection(false)
+            .WithEnableGenerationOptimization(false)
+            .Build();
+
+        var item = pool.Acquire();                      // 预填 1 个，Location=Borrowed，位于 _objectMap
+        var w = GetWrapped(pool, item);
+        Assert.Equal(0, policy.OnDestroyCount);
+
+        // 模拟驱逐线程已认领该对象（仅改状态，不真正销毁），随后业务线程误 Release。
+        SetLocation(w, /* Removing */ 3);
+        pool.Release(item);                             // Shard.Add 拒绝 → 完整 Destroy → OnDestroy++
+
+        Assert.Equal(1, policy.OnDestroyCount);         // P0-新-1：OnDestroy 必触发一次
+    }
+
+    /// <summary>
+    /// P1-新-1：Release 分片拒绝路径在销毁对象后补水位，池不跌破 MinPoolSize。
+    /// 修复前该分支缺 ForceScaleUpOneStep，驱逐 / 归还交错时可能跌破最小水位导致冷启动。
+    /// </summary>
+    [Fact]
+    public void ReleaseRejectedByShard_ForceScalesUpToKeepMinPoolSize()
+    {
+        var policy = new OnDestroyCounterPolicy<TestObject>();
+        using var pool = new HayatePoolBuilder<TestObject>()
+            .WithEnableSharding(true)
+            .WithShardCount(1)
+            .WithMinSize(4)
+            .WithMaxSize(16)
+            .WithPolicy(policy)
+            .WithEnableEviction(false)
+            .WithEnableValidation(false)
+            .WithEnableAutoScaling(true)
+            .WithScalingInterval(600000)
+            .WithScaleUpCooldownSeconds(0)              // 消除扩容冷却，ForceScaleUp 同步立即执行
+            .WithScaleUpStep(2)
+            .WithEnableLeakDetection(false)
+            .WithEnableGenerationOptimization(false)
+            .Build();
+
+        // 预填 MinPoolSize=4。借 1 → 剩 3 InPool + 1 Borrowed。
+        var item = pool.Acquire();
+        Assert.True(pool.GetStats().CurrentSize >= 4);
+
+        // 制造分片拒绝：把对象标记为已认领(Removing)，Release 将销毁它。
+        var w = GetWrapped(pool, item);
+        SetLocation(w, /* Removing */ 3);
+        pool.Release(item);                             // → Destroy 1 个 → 池 3 < Min 4 → ForceScaleUp 补
+
+        // P1-新-1：水位补回 ≥ MinPoolSize（ForceScaleUp 同步执行补 2 → 5）
+        var current = pool.GetStats().CurrentSize;
+        Assert.True(current >= 4, $"分片拒绝销毁后池应补回水位，实际 CurrentSize={current}");
+        Assert.Equal(1, policy.OnDestroyCount);
     }
 
     #endregion

@@ -7,16 +7,19 @@ var builder = WebApplication.CreateBuilder(args);
 Console.OutputEncoding = Encoding.UTF8;
 Console.InputEncoding = Encoding.UTF8;
 
-builder.Services.AddHayatePoolSupport().RegisterHayatePool<MyBizObj>(opt =>
-{
-    opt.MinPoolSize = 10;
-    opt.MaxPoolSize = 100;
-    opt.UseFairMode = true;
-    opt.EnableMetrics = true;
-    opt.ShardCount = 4;
-    //opt.ScalingIntervalMs = 1000 * 60 * 60;
-    //opt.DefaultAcquireTimeout = TimeSpan.FromMinutes(5);
-});
+// ---------------------------------------------------------------------------
+// HayateOP registration
+//   * AddHayatePoolSupport         -> core services (scaling strategy, metrics)
+//   * RegisterGlobalConfig         -> bind "HayatePool:Global" from config
+//   * RegisterHayatePool<T>(config)-> bind "HayatePool:Pools:MyBizObj" + DI注册
+//   * RegisterHealthChecks<T>      -> ASP.NET Core health check integration
+//   * RegisterDiagnostics<T>       -> System.Diagnostics metrics bridge
+// ---------------------------------------------------------------------------
+builder.Services.AddHayatePoolSupport()
+    .RegisterGlobalConfig(builder.Configuration)
+    .RegisterHayatePool<MyBizObj>(builder.Configuration)
+    .RegisterHealthChecks<MyBizObj>()
+    .RegisterDiagnostics<MyBizObj>();
 
 builder.Services.AddLogging(b =>
 {
@@ -24,10 +27,8 @@ builder.Services.AddLogging(b =>
     b.SetMinimumLevel(LogLevel.Debug);
 });
 
-// Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
-
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -41,26 +42,38 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+// Built-in HayateOP management endpoints (see README "Management Endpoints").
+//   * GET  /hayateop                       -> overview (works)
+//   * GET  /hayateop/{type}                -> per-pool detail
+//   * GET  /hayateop/{type}/stats          -> per-pool stats
+//   * POST /hayateop/{type}                -> update config
+//   * POST /hayateop/{type}/clear          -> clear pool
+// NOTE: the per-pool endpoints currently resolve {type} via reflection
+// (Type.GetType) and have a known limitation (tracked as T05). For reliable,
+// programmatic per-pool access prefer the DI-resolved IHayateObjectPool<T>
+// shown in the /test-hayateop endpoint below.
 app.MapHayatePoolEndpoints();
 
-app.MapGet("/test-hayateop", async (IHayateObjectPool<MyBizObj> pool, ILogger<HayatePoolBasic<MyBizObj>> logger) =>
+// Standard ASP.NET Core health endpoint backed by HayateOpHealthCheck<T>.
+app.MapHealthChecks("/health");
+
+app.MapGet("/test-hayateop", async (IHayateObjectPool<MyBizObj> pool, ILogger<MyBizObj> logger) =>
 {
     MyBizObj? obj = null;
 
     try
     {
-        logger.LogInformation("获取对象池，当前统计：{Stats}", pool.GetStats());
+        logger.LogInformation("Acquiring object, current stats: {Stats}", pool.GetStats());
 
-        // 显式指定获取对象的超时时间（便于排查）
-        obj = pool.Acquire(TimeSpan.FromSeconds(5)); // 覆盖默认BlockTimeout，临时排查
-        //obj = pool.Acquire(); // 覆盖默认BlockTimeout，临时排查
+        // Optionally override the default block/timeout behaviour per call.
+        obj = pool.Acquire(TimeSpan.FromSeconds(5));
         if (obj == null)
         {
-            logger.LogError("从对象池获取MyBizObj失败，对象为null");
-            return Results.BadRequest("获取对象池对象失败：对象为null");
+            logger.LogError("Acquiring MyBizObj failed: returned null");
+            return Results.BadRequest("Failed to acquire object: null");
         }
 
-        logger.LogInformation("成功获取对象，ID：{ObjId}", obj.Id);
+        logger.LogInformation("Acquired object, Id: {ObjId}", obj.Id);
         return Results.Ok(new
         {
             ObjectId = obj.Id,
@@ -70,39 +83,32 @@ app.MapGet("/test-hayateop", async (IHayateObjectPool<MyBizObj> pool, ILogger<Ha
     }
     catch (TimeoutException ex)
     {
-        logger.LogError(ex, "获取对象池对象超时：{Message}", ex.Message);
-        var timeoutMessage = $"获取对象超时：{ex.Message}，当前池统计：{pool?.GetStats()}";
-
+        logger.LogError(ex, "Timed out acquiring object: {Message}", ex.Message);
         return Results.Text(
-            content: timeoutMessage,
+            content: $"Acquire timeout: {ex.Message}, stats: {pool?.GetStats()}",
             contentType: "text/plain; charset=utf-8",
-            statusCode: StatusCodes.Status503ServiceUnavailable
-        );
+            statusCode: StatusCodes.Status503ServiceUnavailable);
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "获取/使用对象池对象异常：{Message}", ex.Message);
-        var errorMessage = ex.Message;
+        logger.LogError(ex, "Error acquiring/using object: {Message}", ex.Message);
         return Results.Text(
-            content: errorMessage,
+            content: ex.Message,
             contentType: "text/plain; charset=utf-8",
-            statusCode: StatusCodes.Status500InternalServerError
-        );
+            statusCode: StatusCodes.Status500InternalServerError);
     }
     finally
     {
-        // 确保对象非null时才归还，避免Return(null)导致的异常
         if (pool != null && obj != null)
         {
             try
             {
                 pool.Release(obj);
-                logger.LogInformation("成功归还对象，ID：{ObjId}，归还后池统计：{Stats}",
-                    obj.Id, pool.GetStats());
+                logger.LogInformation("Released object, Id: {ObjId}, stats: {Stats}", obj.Id, pool.GetStats());
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "归还对象失败，ID：{ObjId}", obj.Id);
+                logger.LogError(ex, "Failed to release object, Id: {ObjId}", obj.Id);
             }
         }
     }

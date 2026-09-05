@@ -12,7 +12,10 @@
     </ItemGroup>
 
     <ItemGroup>
+      <ProjectReference Include="..\..\src\HayateOP.Extensions.Configuration\HayateOP.Extensions.Configuration.csproj" />
+      <ProjectReference Include="..\..\src\HayateOP.Extensions.Diagnostics\HayateOP.Extensions.Diagnostics.csproj" />
       <ProjectReference Include="..\..\src\HayateOP.Extensions.Endpoints\HayateOP.Extensions.Endpoints.csproj" />
+      <ProjectReference Include="..\..\src\HayateOP.Extensions.HealthCheck\HayateOP.Extensions.HealthCheck.csproj" />
       <ProjectReference Include="..\..\src\HayateOP\HayateOP.csproj" />
     </ItemGroup>
 

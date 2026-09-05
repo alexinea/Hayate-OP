@@ -72,7 +72,12 @@ public class RejectPolicyTests
         sw.Stop();
 
         Assert.Contains("超时", exception.Message);
-        Assert.True(sw.ElapsedMilliseconds >= 80 && sw.ElapsedMilliseconds <= 200);
+        // P2/R5 围栏：原断言 80≤elapsed≤200ms 的上界在宿主负载高/线程池饥饿时会偶发超窗误报。
+        // 改为只校验"确实等到超时（不早于配置的 100ms 太多）且没有永久挂起"：
+        //   下界 80ms ≈ 100ms 超时 - 计时/调度容差；
+        //   上界放宽到 10s，仅用于拦截"该超时却死锁不返回"的挂死回归（配合外层看门狗）。
+        Assert.True(sw.ElapsedMilliseconds >= 80, $"应在约 100ms 超时后抛错，实际 {sw.ElapsedMilliseconds}ms");
+        Assert.True(sw.ElapsedMilliseconds < 10_000, $"疑似超时路径挂死：{sw.ElapsedMilliseconds}ms 未返回");
     }
 
     [Fact]

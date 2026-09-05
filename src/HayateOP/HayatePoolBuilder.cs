@@ -139,15 +139,6 @@ public class HayatePoolBuilder<T> where T : class, new()
         return this;
     }
 
-    /// <summary>
-    /// 设置是否启用公平模式
-    /// </summary>
-    public HayatePoolBuilder<T> WithFairMode(bool enable = true)
-    {
-        _options.UseFairMode = enable;
-        return this;
-    }
-
     #endregion
 
     #region 超时配置

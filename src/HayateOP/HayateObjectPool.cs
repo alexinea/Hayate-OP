@@ -177,7 +177,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         {
             foreach (var shard in _shards)
             {
-                if (shard.TryTake(out var w, _options.UseFairMode))
+                if (shard.TryTake(out var w))
                 {
                     #region 分代验证逻辑
 
@@ -374,8 +374,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         {
             foreach (var shard in _shards)
             {
-                //if (shard.TryTake(out var w, TimeSpan.Zero, _options.UseFairMode))
-                if (shard.TryTake(out var w, _options.UseFairMode))
+                //if (shard.TryTake(out var w, TimeSpan.Zero))
+                if (shard.TryTake(out var w))
                 {
                     if (_options.ValidateOnBorrow && !_policy.Validate(w.Value))
                     {
@@ -507,15 +507,27 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             if (!shard.Add(w))
             {
                 // 分片拒绝接收，两种可能：
-                // 1) 分片已满 —— Add 内部已负责释放该对象；
+                // 1) 分片已满（overflow）——P0-新-1 后 Add 不再自行处置该对象，
+                //    由本路径的 Destroy(w) 统一走完整销毁（触发 OnDestroy），避免钩子漏调；
                 // 2) 对象已被驱逐 / 空闲校验流程认领 —— 对端线程正在销毁它。
-                // 无论哪种，对象都已不可复用，这里只需把它从全局索引中摘除；
+                // 无论哪种，对象都已不可复用，这里统一销毁并把它从全局索引中摘除；
                 // Destroy 自带幂等保护，不会二次 Dispose。
                 _logger.LogWarning("Object rejected by shard on release. Removing from pool. Type: {Type}, shard: {ShardIndex}",
                     typeof(T).Name, shardIndex);
 
                 Destroy(w);
                 _objectMap.TryRemove(w.Value, out _);
+
+                // P1-新-1 修复：分片拒绝销毁了一个对象，池总量可能跌破 MinPoolSize
+                // （尤其驱逐线程先认领走一个 InPool 对象、随后本归还对象又被 overflow 的场景）。
+                // 与 OnRelease=false 路径一致，仅在开启自动扩缩容且确实低于水位时补一次，
+                // 避免延迟敏感业务在驱逐/归还交错下遭遇冷启动。
+                if (_enableAutoScaling && _options.MinPoolSize > 0 &&
+                    _objectMap.Count < _options.MinPoolSize)
+                {
+                    ForceScaleUpOneStep();
+                }
+
                 return;
             }
 
@@ -787,7 +799,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                     //while (shard.Count > _options.MinPoolSize / _shards.Length && removed < remove)
                     //{
-                    //    if (shard.TryTake(out var w, _options.UseFairMode))
+                    //    if (shard.TryTake(out var w))
                     //    {
                     //        Destroy(w);
                     //        removed++;
@@ -797,7 +809,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                     while (removed < remove)
                     {
-                        if (shard.TryTake(out var w, _options.UseFairMode))
+                        if (shard.TryTake(out var w))
                         {
                             Destroy(w);
                             removed++;

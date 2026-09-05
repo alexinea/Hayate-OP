@@ -9,7 +9,9 @@
     </PropertyGroup>
 
     <ItemGroup>
+      <ProjectReference Include="..\..\src\HayateOP.Extensions.Configuration\HayateOP.Extensions.Configuration.csproj" />
       <ProjectReference Include="..\..\src\HayateOP.Extensions.DependencyInjection\HayateOP.Extensions.DependencyInjection.csproj" />
+      <ProjectReference Include="..\..\src\HayateOP.Extensions.Diagnostics\HayateOP.Extensions.Diagnostics.csproj" />
       <ProjectReference Include="..\..\src\HayateOP\HayateOP.csproj" />
     </ItemGroup>
 
@@ -18,6 +20,10 @@
       <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.3" />
       <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.3" />
       <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.3" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
 </Project>

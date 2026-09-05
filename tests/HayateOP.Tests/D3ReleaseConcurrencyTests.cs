@@ -186,7 +186,13 @@ public class D3ReleaseConcurrencyTests
             .WithEnableAutoScaling(true)
             .WithEnableMetrics(true)
             .WithEnableEviction(false)
-            .WithAcquireTimeout(TimeSpan.FromSeconds(15))   // ForceScaleUp 冷却期间会慢，给足时间
+            // 围栏（R-挂起）：默认 ScaleUpCooldownSeconds=3 会让 ForceScaleUp 在"半数 Release 拒绝
+            // 不断销毁对象"的高频消耗下被冷却节流，池被掏空 → 6 线程反复触发 15s Acquire 超时，
+            // 600 次操作被拖成分钟级"超时活锁"，测试近乎挂死。
+            // 把扩容冷却置 0，让池在每次耗竭后立即补回 MinSize，Acquire 基本即时命中、
+            // 测试秒级完成；AcquireTimeout 收窄到 2s 仅作安全兜底，避免任何潜在活锁拖长。
+            .WithScaleUpCooldownSeconds(0)
+            .WithAcquireTimeout(TimeSpan.FromSeconds(2))
             .Build();
 
         const int threadCount = 6;

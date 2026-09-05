@@ -118,17 +118,6 @@ public class HayatePoolOptions
     /// </remarks>
     public int ShardCount { get; set; } = HayateConstant.DEFAULT_SHARD_COUNT;
 
-    /// <summary>
-    /// 是否启用公平信号量语义。<br />
-    /// 默认值：<c>false</c>。
-    /// </summary>
-    /// <remarks>
-    /// 用途：用于控制排队公平性策略。<br />
-    /// 特例：当前版本主流程未使用该开关，可视为预留配置。<br />
-    /// 边界：布尔开关。推荐值区间：保持默认。
-    /// </remarks>
-    public bool UseFairMode { get; set; } = false;
-
     #endregion
 
     #region 扩缩容策略
@@ -431,7 +420,6 @@ public class HayatePoolOptions
         // 分片策略
         options.EnableSharding = this.EnableSharding;
         options.ShardCount = this.ShardCount;
-        options.UseFairMode = this.UseFairMode;
 
         // 扩缩容策略
         options.EnableAutoScaling = this.EnableAutoScaling;
@@ -489,11 +477,10 @@ public class HayatePoolOptions
 
     public void ApplyFeatureSwitches()
     {
-        // 关闭分片：弹性单分片 + 非公平模式
+        // 关闭分片：弹性单分片
         if (!EnableSharding)
         {
             ShardCount = 1;
-            UseFairMode = false;
         }
 
         // 关闭自动扩缩容：强制池大小固定

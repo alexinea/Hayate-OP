@@ -27,7 +27,6 @@ using var pool = new HayatePoolBuilder<PooledResource>()
     .WithMaxSize(MaxPoolSize)
     .WithShardCount(4)
     .WithShardCount(8) // 增加分片数
-    .WithFairMode(false) // 关闭公平模式，提高性能
     .WithAcquireTimeout(TimeSpan.FromSeconds(10))
     .WithEnableAutoScaling(true)
     .WithScaleUpStep(20) // 增加扩容步长

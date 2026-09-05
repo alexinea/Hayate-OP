@@ -1,9 +1,8 @@
-﻿using DotNetCore.HayateOP.Modules;
-using Microsoft.Extensions.Options;
+﻿using Microsoft.Extensions.Options;
 
 namespace DotNetCore.HayateOP.Metrics;
 
-public class HayateOpDiagnosticsService : IHayateMetrics, IHayateOpModule
+public class HayateOpDiagnosticsService : IHayateMetrics
 {
     private readonly IHayateMetrics _metrics;
     private readonly HayatePoolOptions _options;

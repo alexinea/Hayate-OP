@@ -75,16 +75,26 @@ public class AutoScalingTests
             .WithEnableAutoScaling(true)
             .WithMinSize(5)
             .WithMaxSize(20)
+            .WithScalingInterval(200)          // 缩短定时器周期，让缩容判定尽快反复触发
             .WithScaleUpThreshold(0.91)
             .WithScaleDownThreshold(0.9)
+            .WithScaleDownStep(5)
             .WithScaleDownCooldownSeconds(0)
             .Build();
 
-        // Act：等待缩容执行
-        Thread.Sleep(6000);
-        var stats = pool.GetStats();
+        // Act：事件驱动等待——轮询池状态直到缩放定时器已运行至少一轮，
+        // 而不是盲睡固定 6s。上限 = deadline，一旦到点立即停，避免无界等待拖慢套件。
+        var deadline = Environment.TickCount + 3000;   // 3s 看门狗，远超 200ms 间隔 × 多轮
+        var minObserved = int.MaxValue;
+        while (Environment.TickCount < deadline)
+        {
+            var current = pool.GetStats().CurrentSize;
+            if (current < minObserved) minObserved = current;
+            Thread.Sleep(50);                          // 有界轮询退避，不吃满 CPU
+        }
 
-        // Assert
-        Assert.True(stats.CurrentSize >= 5);
+        // Assert：任何时刻池大小都不应跌破 MinPoolSize
+        Assert.True(minObserved >= 5, $"缩容不得跌破 MinPoolSize，实际观察到的最小 CurrentSize={minObserved}");
+        Assert.True(pool.GetStats().CurrentSize >= 5);
     }
 }

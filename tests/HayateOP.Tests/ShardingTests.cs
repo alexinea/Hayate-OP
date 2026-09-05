@@ -34,24 +34,5 @@ namespace DotNetCore.HayateOP.Tests
             options.ApplyFeatureSwitches();
             Assert.Equal(1, options.ShardCount);
         }
-
-        [Fact]
-        public void FairMode_ShouldWorkWithSharding()
-        {
-            using var pool = new HayatePoolBuilder<TestObject>()
-                .WithEnableSharding(true)
-                .WithShardCount(4)
-                .WithFairMode(true)
-                .Build();
-
-            // 验证公平模式能正常工作
-            var obj1 = pool.Acquire();
-            var obj2 = pool.Acquire();
-            pool.Release(obj1);
-            pool.Release(obj2);
-
-            Assert.NotNull(obj1);
-            Assert.NotNull(obj2);
-        }
     }
 }

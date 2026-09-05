@@ -3,7 +3,7 @@
 public class MyPooledObject : IHayateResettable, IDisposable
 {
     public int Id { get; set; }
-    public string Data { get; set; }
+    public string Data { get; set; } = string.Empty;
     
     public bool IsDisposed { get; private set; }
 

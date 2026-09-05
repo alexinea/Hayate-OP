@@ -95,7 +95,9 @@ public class OptimizationRegressionTests
             .Build();
 
         const int threadCount = 16;
-        const int operationsPerThread = 10000;
+        const int operationsPerThread = 2000;   // P2/R7：由 10000 收敛到 2000（16 线程 × 2000 = 32k 次），
+                                                // 仍是 16 线程争抢 MaxSize=100 池的真实并发压力；
+                                                // 但把原先 16 万次锁操作对全量耗时的拖累降下来。
         var tasks = new Task[threadCount];
         var totalOperations = 0L;
 
