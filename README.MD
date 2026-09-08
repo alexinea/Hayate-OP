@@ -459,6 +459,30 @@ pool.ReloadConfig(config =>
 pool.Clear();
 ```
 
+## Performance
+
+Benchmark suite (BenchmarkDotNet, short-iteration job: 3 warmup + 10 iterations, Server GC)
+comparing HayateOP against `Microsoft.Extensions.ObjectPool.DefaultObjectPool<T>` (baseline).
+Run it with `dotnet run -c Release --project tests/HayateOP.Benchmarks`; archived reports live
+in [`docs/benchmarks/`](docs/benchmarks).
+
+Latest run (2026-09-08, .NET 10.0, Release):
+
+| Suite | MEOOP (baseline) | HayateOP minimal | HayateOP 4-shard | HayateOP full-feature |
+| :--- | ---: | ---: | ---: | ---: |
+| Acquire+Release (single-thread) | 17.1 ns | 199.6 ns (11.7×) | 227.2 ns (13.3×) | 37,487.6 ns (2190×)¹ |
+| Release-only (with refill acquire) | 19.8 ns | 207.4 ns | — | — |
+| Mixed 50/50 acquire/release | 39.2 ns | 238.9 ns | 212.5 ns | — |
+| 100-thread concurrent borrow/return | 12.2 µs | 112.4 µs | 110.6 µs | — |
+
+> ¹ Full-feature mode (validation + metrics + leak detection + eviction enabled) carries heavy
+> per-acquire cost and allocation (~28.7 KB/acquire) — treat as a known optimization target, not
+> a recommended production configuration for latency-sensitive paths.
+
+HayateOP's single acquire/release round-trip is currently slower than MEOOP's minimal `Get()/Return()`
+(HayateOP tracks per-object state, shard index, and supports validation/metrics hooks that MEOOP does not).
+In exchange it provides sharding, eviction, leak detection, metrics, and management endpoints.
+
 ## Samples
 
 Runnable examples live under [`samples/`](samples):

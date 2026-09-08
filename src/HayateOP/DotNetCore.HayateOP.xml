@@ -206,6 +206,24 @@
             驱逐、空闲校验、归还拒绝三条路径可能并发命中同一个对象，用 CAS 保证只销毁一次。
             </summary>
         </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.TrackedObjectCount">
+            <summary>真实存活对象总数（空闲 + 借出），由各分片登记表求和派生。</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.UntrackObject(DotNetCore.HayateOP.HayateObject{`0})">
+            <summary>
+            T09：按包装对象的归属分片摘除登记项；ShardIndex 异常时兜底全分片扫描（理论不可达，
+            登记项在 CreateWrappedObject 即写入目标分片并同步 ShardIndex）。
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.UntrackKey(`0)">
+            <summary>T09：仅有裸对象引用（无包装）时，全分片扫描摘除登记项。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TrackedCount">
+            <summary>本分片登记的存活对象数（空闲 + 借出）。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TrackedValues">
+            <summary>本分片登记的全部包装对象（含借出中）。</summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.Add(DotNetCore.HayateOP.HayateObject{`0})">
             <summary>
             Appends an object to the shard free list.
@@ -949,6 +967,15 @@
             标记对象可在归还时自动重置状态
             </summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.Logging.DefaultHayateLogger.RenderTemplate(System.String,System.Object[])">
+            <summary>
+            T13：取代原 NormalizeFormatString 正则改写。
+            按占位符出现顺序把参数依次代入：{Name} → 参数值，{Name:F2} → 应用格式说明符。
+            池内模板约定：每个命名占位符按出现顺序对应一个参数（与调用点一一对应），
+            生产结构化日志请使用 HayateMicrosoftLoggerAdapter{T}（MEL 原生支持命名模板）。
+            无正则、单趟扫描，消除每次日志调用的 Regex 开销。
+            </summary>
+        </member>
         <member name="T:DotNetCore.HayateOP.Metrics.IHayateMetrics">
             <summary>
             对象池诊断指标接口
@@ -970,12 +997,11 @@
             <param name="item"></param>
             <param name="isValid"></param>
         </member>
-        <member name="M:DotNetCore.HayateOP.Metrics.IHayateMetrics.RecordObjectMiss(System.String,System.Object)">
+        <member name="M:DotNetCore.HayateOP.Metrics.IHayateMetrics.RecordObjectMiss(System.String)">
             <summary>
             记录对象池创建新对象的操作
             </summary>
             <param name="poolName"></param>
-            <param name="item"></param>
         </member>
         <member name="M:DotNetCore.HayateOP.Metrics.IHayateMetrics.RecordPoolScaled(System.String,System.String,System.Int32,System.Int32)">
             <summary>
