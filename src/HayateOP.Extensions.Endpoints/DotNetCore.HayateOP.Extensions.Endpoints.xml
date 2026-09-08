@@ -4,54 +4,6 @@
         <name>DotNetCore.HayateOP.Extensions.Endpoints</name>
     </assembly>
     <members>
-        <member name="T:Microsoft.AspNetCore.Routing.EndpointRouteBuilderExtensions">
-            <summary>
-            为 .NET 6 提供 MapGroup 兼容实现
-            </summary>
-        </member>
-        <member name="M:Microsoft.AspNetCore.Routing.EndpointRouteBuilderExtensions.MapGroup(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder,System.String)">
-            <summary>
-            兼容 .NET 7 的 MapGroup 方法，用法完全一致
-            </summary>
-            <param name="builder">Endpoint 构建器</param>
-            <param name="prefix">路由前缀</param>
-            <returns>路由组构建器</returns>
-        </member>
-        <member name="T:Microsoft.AspNetCore.Routing.RouteGroupBuilder">
-            <summary>
-            .NET 6 兼容的 RouteGroupBuilder 实现
-            </summary>
-        </member>
-        <member name="M:Microsoft.AspNetCore.Routing.RouteGroupBuilder.WithTags(System.String[])">
-            <summary>
-            为组内所有 Endpoint 添加 Tags（用于 Swagger 文档）
-            </summary>
-        </member>
-        <member name="M:Microsoft.AspNetCore.Routing.RouteGroupBuilder.WithGroupName(System.String)">
-            <summary>
-            为组内所有 Endpoint 设置 GroupName（用于 Swagger 文档分组）
-            </summary>
-        </member>
-        <member name="M:Microsoft.AspNetCore.Routing.RouteGroupBuilder.RequireAuthorization">
-            <summary>
-            为组内所有 Endpoint 启用授权
-            </summary>
-        </member>
-        <member name="M:Microsoft.AspNetCore.Routing.RouteGroupBuilder.RequireAuthorization(System.String)">
-            <summary>
-            为组内所有 Endpoint 启用授权（指定策略）
-            </summary>
-        </member>
-        <member name="M:Microsoft.AspNetCore.Routing.RouteGroupBuilder.WithMetadata(System.Object[])">
-            <summary>
-            为组内所有 Endpoint 添加自定义 Metadata（通用扩展）
-            </summary>
-        </member>
-        <member name="M:Microsoft.AspNetCore.Routing.RouteGroupBuilder.Microsoft#AspNetCore#Builder#IEndpointConventionBuilder#Add(System.Action{Microsoft.AspNetCore.Builder.EndpointBuilder})">
-            <summary>
-            添加组级别的约定（自动应用到所有子 Endpoint）
-            </summary>
-        </member>
         <member name="M:Microsoft.Extensions.DependencyInjection.EndpointsExtensions.TryResolve(System.IServiceProvider,System.String,DotNetCore.HayateOP.IHayateObjectPool@)">
             <summary>
             T05：优先按逻辑池名查注册表；若未注入注册表（例如直接用 Builder 而非 DI 注册），
