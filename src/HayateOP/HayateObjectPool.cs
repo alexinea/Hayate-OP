@@ -92,6 +92,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private readonly bool _enableEviction;
     private readonly bool _enableAutoScaling;
 
+    // PR-D L1：泄漏取证模式（与泄漏检测解耦）。默认 Off——借出热路径不抓栈。
+    private readonly HayateLeakTraceCaptureMode _leakTraceCaptureMode;
+    private readonly int _leakTraceSampleRate;
+    private int _leakTraceCounter;
+
     internal HayatePoolBasic(
         IHayateObjectPolicy<T> policy,
         HayatePoolOptions options,
@@ -124,6 +129,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _enableLeakDetection = _options.EnableLeakDetection;
         _enableEviction = _options.EnableEviction;
         _enableMetrics = _options.EnableMetrics;
+
+        // PR-D L1：取证配置随构造快照（采样分母经 IsValid/ApplyFeatureSwitches 已钳制 ≥1，此处再兜底）
+        _leakTraceCaptureMode = _options.LeakTraceCaptureMode;
+        _leakTraceSampleRate = Math.Max(1, _options.LeakTraceSampleRate);
 
         // 初始化分片
         _shards = new Shard[shardCount];
@@ -287,7 +296,19 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     //if (_options.EnableLeakDetection)
                     if (_enableLeakDetection)
                     {
-                        w.AcquireTrace = Environment.StackTrace;
+                        // PR-D L1：取证与检测解耦。泄漏扫描（阈值判定 + LeakCount）只依赖 LastBorrowedAt，
+                        // 零取证开销；调用栈按 LeakTraceCaptureMode 独立控制——
+                        // Off（默认）不抓栈（2.0 及之前每次借出抓全栈，37.5μs / 28.7KB 量级）；
+                        // Sampled 每 N 次借出抓 1 次（第 1 次必抓）；EveryAcquire 维持旧行为，显式 opt-in。
+                        if (_leakTraceCaptureMode == HayateLeakTraceCaptureMode.EveryAcquire)
+                        {
+                            w.AcquireTrace = Environment.StackTrace;
+                        }
+                        else if (_leakTraceCaptureMode == HayateLeakTraceCaptureMode.Sampled &&
+                                 (Interlocked.Increment(ref _leakTraceCounter) - 1) % _leakTraceSampleRate == 0)
+                        {
+                            w.AcquireTrace = Environment.StackTrace;
+                        }
                     }
 
                     // 分代升级，仅开启分代优化时执行

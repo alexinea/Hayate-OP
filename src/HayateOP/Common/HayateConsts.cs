@@ -148,5 +148,10 @@ public static class HayateConstant
     /// </summary>
     public const int DEFAULT_LEAK_DETECTION_THRESHOLD_SECONDS = 30;
 
+    /// <summary>
+    /// 默认泄漏取证采样分母（用于 <see cref="HayatePoolOptions.LeakTraceSampleRate"/>，仅 Sampled 模式生效）。
+    /// </summary>
+    public const int DEFAULT_LEAK_TRACE_SAMPLE_RATE = 1024;
+
     #endregion
 }

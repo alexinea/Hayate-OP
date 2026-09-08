@@ -371,6 +371,29 @@ public class HayatePoolOptions
     /// </remarks>
     public TimeSpan LeakDetectionThreshold { get; set; } = TimeSpan.FromMinutes(HayateConstant.DEFAULT_LEAK_DETECTION_THRESHOLD_SECONDS);
 
+    /// <summary>
+    /// 泄漏取证模式。<br />
+    /// 默认值：<see cref="HayateLeakTraceCaptureMode.Off"/>。<br />
+    /// </summary>
+    /// <remarks>
+    /// 用途：控制借出热路径是否抓取调用栈（取证），与泄漏检测本身（阈值判定 + LeakCount）解耦。<br />
+    /// 行为变更（PR-D L1）：2.0 及之前默认每次借出抓取全栈（数十微秒 CPU / 10~40KB 分配/次）；
+    /// 2.1 起默认 <c>Off</c>，LeakTraces 中为占位文案；需要栈信息时显式选择
+    /// <see cref="HayateLeakTraceCaptureMode.Sampled"/> 或 <see cref="HayateLeakTraceCaptureMode.EveryAcquire"/>。<br />
+    /// 边界：仅在 <see cref="EnableLeakDetection"/> 为 <c>true</c> 时生效。
+    /// </remarks>
+    public HayateLeakTraceCaptureMode LeakTraceCaptureMode { get; set; } = HayateLeakTraceCaptureMode.Off;
+
+    /// <summary>
+    /// 泄漏取证采样分母（1/N）。<br />
+    /// 默认值：<c>1024</c>（由 <see cref="HayateConstant.DEFAULT_LEAK_TRACE_SAMPLE_RATE"/> 构造）。
+    /// </summary>
+    /// <remarks>
+    /// 用途：仅 <see cref="HayateLeakTraceCaptureMode.Sampled"/> 模式生效，每 N 次借出抓取 1 次调用栈（第 1 次必抓）；N=1 等价于每次抓取。<br />
+    /// 边界：≤ 0 时构建/运行期自动修正为默认值 1024（见 <see cref="ApplyFeatureSwitches"/>）。
+    /// </remarks>
+    public int LeakTraceSampleRate { get; set; } = HayateConstant.DEFAULT_LEAK_TRACE_SAMPLE_RATE;
+
     #endregion
 
     #region 统计指标
@@ -454,6 +477,8 @@ public class HayatePoolOptions
         // 泄露检测
         options.EnableLeakDetection = this.EnableLeakDetection;
         options.LeakDetectionThreshold = this.LeakDetectionThreshold;
+        options.LeakTraceCaptureMode = this.LeakTraceCaptureMode;
+        options.LeakTraceSampleRate = this.LeakTraceSampleRate;
 
         // 统计指标
         options.EnableMetrics = this.EnableMetrics;
@@ -495,6 +520,12 @@ public class HayatePoolOptions
             ValidateOnBorrow = false;
             ValidateOnReturn = false;
             ValidateWhileIdle = false;
+        }
+
+        // 泄漏取证采样分母防御：≤0 自动修正为默认值（仅 Sampled 模式使用，必须 ≥1）
+        if (LeakTraceSampleRate < 1)
+        {
+            LeakTraceSampleRate = HayateConstant.DEFAULT_LEAK_TRACE_SAMPLE_RATE;
         }
     }
 

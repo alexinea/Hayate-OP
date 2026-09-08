@@ -1,4 +1,5 @@
 ﻿using System;
+using DotNetCore.HayateOP.Common;
 using DotNetCore.HayateOP.Logging;
 using DotNetCore.HayateOP.Metrics;
 using DotNetCore.HayateOP.Policies;
@@ -417,6 +418,20 @@ public class HayatePoolBuilder<T> where T : class, new()
     public HayatePoolBuilder<T> WithLeakDetection(bool enable = true)
     {
         _options.EnableLeakDetection = enable;
+        return this;
+    }
+
+    /// <summary>
+    /// 设置泄漏取证模式与采样率（PR-D L1）。<br />
+    /// 默认 <see cref="HayateLeakTraceCaptureMode.Off"/>：借出热路径不抓取调用栈，泄漏扫描不受影响。
+    /// 如需 2.0 及之前的"每次借出抓全栈"旧行为，显式传入 <see cref="HayateLeakTraceCaptureMode.EveryAcquire"/>。
+    /// </summary>
+    /// <param name="mode">取证模式（Off / Sampled / EveryAcquire）。</param>
+    /// <param name="sampleRate">采样分母（1/N），仅 Sampled 模式生效；≤0 时由选项自动修正为默认值 1024。</param>
+    public HayatePoolBuilder<T> WithLeakTraceCapture(HayateLeakTraceCaptureMode mode, int sampleRate = HayateConstant.DEFAULT_LEAK_TRACE_SAMPLE_RATE)
+    {
+        _options.LeakTraceCaptureMode = mode;
+        _options.LeakTraceSampleRate = sampleRate;
         return this;
     }
 

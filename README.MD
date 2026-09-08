@@ -10,7 +10,7 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 - **Object Validation**: Validates objects on borrow, return, and while idle.
 - **Eviction Policy**: Automatically removes expired or idle objects.
 - **Generation Optimization**: Reduces validation frequency for long-lived objects.
-- **Leak Detection**: Tracks and reports potential object leaks with stack traces.
+- **Leak Detection**: Tracks and reports potential object leaks; stack-trace capture is opt-in (`Off` / `Sampled` / `EveryAcquire`) since 2.1.
 - **Metrics & Monitoring**: Comprehensive statistics and snapshot capabilities.
 - **Multiple Reject Policies**: `Abort`, `Block`, `BlockTimeout`, and `CreateNew`.
 - **Dependency Injection Integration**: Seamless integration with `Microsoft.Extensions.DependencyInjection`.
@@ -407,10 +407,35 @@ var options = new HayatePoolOptions
     // Leak detection
     EnableLeakDetection = true,
     LeakDetectionThreshold = TimeSpan.FromMinutes(30),
+    LeakTraceCaptureMode = HayateLeakTraceCaptureMode.Off, // Off (default) | Sampled | EveryAcquire
+    LeakTraceSampleRate = 1024, // 1/N sampling, Sampled mode only
 
     // Metrics
     EnableMetrics = false
 };
+```
+
+### Leak trace capture (breaking change in 2.1)
+
+Since 2.1, stack-trace capture is **decoupled** from leak detection and **off by
+default** (`LeakTraceCaptureMode.Off`). In 2.0 and earlier, every `Acquire` captured
+a full `Environment.StackTrace` (tens of microseconds and 10–40 KB per borrow when
+the call chain is deep). Leak detection itself — threshold detection and `LeakCount`
+reporting — is unaffected and still costs nothing on the hot path; `LeakTraces`
+entries become the placeholder text `"No stack trace available"` unless capture is
+enabled.
+
+| Mode | Behavior |
+| :--- | :--- |
+| `Off` (default) | Never capture; hot path pays zero forensics overhead |
+| `Sampled` | Capture 1-in-N borrows (`LeakTraceSampleRate`, first borrow always captured) |
+| `EveryAcquire` | Capture on every borrow (2.0 behavior; opt-in for diagnostics) |
+
+```csharp
+// Sampling mode: capture 1-in-256 borrows
+var pool = new HayatePoolBuilder<MyPooledObject>()
+    .WithLeakTraceCapture(HayateLeakTraceCaptureMode.Sampled, 256)
+    .Build();
 ```
 
 ## Monitoring and Diagnostics
