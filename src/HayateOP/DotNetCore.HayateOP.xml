@@ -233,6 +233,22 @@
             在锁外安全释放对象，吞掉用户 Dispose 抛出的异常并返回是否释放成功。
             </summary>
         </member>
+        <member name="T:DotNetCore.HayateOP.HayateObjectPoolRegistry">
+            <summary>
+            Default thread-safe <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/> backed by a
+            <see cref="T:System.Collections.Concurrent.ConcurrentDictionary`2"/>. Pools self-register here as
+            they are created; callers resolve by the same logical name.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateObjectPoolRegistry.Register(System.String,DotNetCore.HayateOP.IHayateObjectPool)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateObjectPoolRegistry.TryGet(System.String,DotNetCore.HayateOP.IHayateObjectPool@)">
+            <inheritdoc />
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateObjectPoolRegistry.Names">
+            <inheritdoc />
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEnableSharding(System.Boolean)">
             <summary>
             启用/禁用分片功能
@@ -286,11 +302,6 @@
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithShardCount(System.Int32)">
             <summary>
             设置分片数量
-            </summary>
-        </member>
-        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithFairMode(System.Boolean)">
-            <summary>
-            设置是否启用公平模式
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithAcquireTimeout(System.TimeSpan)">
@@ -533,17 +544,6 @@
             特例：分片过多会提升管理成本并放大预热偏差。<br />
             边界：建议大于等于 1。<br />
             推荐值区间：2~16。
-            </remarks>
-        </member>
-        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.UseFairMode">
-            <summary>
-            是否启用公平信号量语义。<br />
-            默认值：<c>false</c>。
-            </summary>
-            <remarks>
-            用途：用于控制排队公平性策略。<br />
-            特例：当前版本主流程未使用该开关，可视为预留配置。<br />
-            边界：布尔开关。推荐值区间：保持默认。
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableAutoScaling">
@@ -922,6 +922,27 @@
             对象池通用接口
             </summary>
             <typeparam name="T"></typeparam>
+        </member>
+        <member name="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry">
+            <summary>
+            A registry that maps a logical pool name (e.g. <c>typeof(T).Name</c>) to its
+            <see cref="T:DotNetCore.HayateOP.IHayateObjectPool"/> instance.
+            <para>
+            It decouples management endpoints / diagnostics from reflection-based lookup
+            (<c>Type.GetType(poolName)</c> cannot resolve a plain type-name like "MyObj").
+            Registrations are populated as pools are created; lookups are by the same
+            name used to register the pool.
+            </para>
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPoolRegistry.Register(System.String,DotNetCore.HayateOP.IHayateObjectPool)">
+            <summary>Registers (or replaces) a pool under the given name.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPoolRegistry.TryGet(System.String,DotNetCore.HayateOP.IHayateObjectPool@)">
+            <summary>Tries to resolve a previously-registered pool by name.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.IHayateObjectPoolRegistry.Names">
+            <summary>All currently registered pool names.</summary>
         </member>
         <member name="T:DotNetCore.HayateOP.IHayateResettable">
             <summary>

@@ -7,7 +7,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System;
 using System.Collections.Concurrent;
+using System.Linq;
 
 namespace Microsoft.Extensions.DependencyInjection;
 
@@ -54,7 +56,7 @@ public static class ConfigurationExtensions
             var logger = new HayateMicrosoftLoggerAdapter<T>(loggerFactory?.CreateLogger<T>());
 
             // 合并全局配置与池专属配置
-            var mergedOptions = MergeOptions(optionsMonitor.CurrentValue, optionsMonitor.Get(poolName));
+            var mergedOptions = MergeOptions(optionsMonitor.CurrentValue, poolConfigSection);
             if (!mergedOptions.IsValid())
             {
                 throw new InvalidOperationException($"HayatePool [{poolName}] 配置无效");
@@ -79,7 +81,7 @@ public static class ConfigurationExtensions
                 try
                 {
                     // 合并最新配置
-                    var latestOptions = MergeOptions(optionsMonitor.CurrentValue, optionsMonitor.Get(poolName));
+                    var latestOptions = MergeOptions(optionsMonitor.CurrentValue, poolConfigSection);
                     if (!latestOptions.IsValid())
                     {
                         logger?.LogWarning("HayatePool [{PoolName}] 热更新配置无效，已忽略", poolName);
@@ -107,7 +109,7 @@ public static class ConfigurationExtensions
         return services;
     }
 
-    private static HayatePoolOptions MergeOptions(HayatePoolOptions globalOptions, HayatePoolOptions poolOptions)
+    private static HayatePoolOptions MergeOptions(HayatePoolOptions globalOptions, IConfiguration poolSection)
     {
         var merged = new HayatePoolOptions();
 
@@ -115,30 +117,33 @@ public static class ConfigurationExtensions
         globalOptions.CopyTo(merged);
 
         // 再应用池配置（覆盖全局）
-        ApplyPoolOptionsOverrides(merged, poolOptions);
+        ApplyPoolOptionsOverrides(merged, poolSection);
 
         merged.ApplyFeatureSwitches();
 
         return merged;
     }
 
-    private static void ApplyPoolOptionsOverrides(HayatePoolOptions target, HayatePoolOptions poolOptions)
+    private static void ApplyPoolOptionsOverrides(HayatePoolOptions target, IConfiguration poolSection)
     {
-        var defaultOptions = new HayatePoolOptions();
-        var properties = typeof(HayatePoolOptions).GetProperties();
+        // T13 修复（默认值误判）：原实现以「值 != C# 默认值」判断池配置是否显式设置，
+        // 用户显式配置为默认值时（如 MaxPoolSize 配回默认 100）会被误判为"未覆盖"，
+        // 导致全局配置意外生效。改为只应用配置节中真实出现的键：
+        // 值来自 binder 对整个配置节的绑定结果（正确处理 int/bool/TimeSpan 等），
+        // 缺席的键保持全局配置值。poolOptions 参数仅保留签名兼容用途。
+        var properties = typeof(HayatePoolOptions).GetProperties()
+            .Where(p => p.CanRead && p.CanWrite)
+            .GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
-        foreach (var prop in properties)
+        var bound = new HayatePoolOptions();
+        poolSection.Bind(bound);
+
+        foreach (var child in poolSection.GetChildren())
         {
-            if (!prop.CanRead || !prop.CanWrite) continue;
+            if (!properties.TryGetValue(child.Key, out var prop)) continue;
 
-            var poolValue = prop.GetValue(poolOptions);
-            var defaultValue = prop.GetValue(defaultOptions);
-
-            // 只有池配置的值不等于默认值时，才覆盖目标配置
-            if (!Equals(poolValue, defaultValue))
-            {
-                prop.SetValue(target, poolValue);
-            }
+            prop.SetValue(target, prop.GetValue(bound));
         }
     }
 
