@@ -515,6 +515,28 @@ HayateOP's single acquire/release round-trip is currently slower than MEOOP's mi
 (HayateOP tracks per-object state, shard index, and supports validation/metrics hooks that MEOOP does not).
 In exchange it provides sharding, eviction, leak detection, metrics, and management endpoints.
 
+## Known Limitations
+
+Behaviors to be aware of before adopting HayateOP (several are queued for follow-up releases):
+
+* **Empty pool never auto-rebuilds on acquire.** If the pool is empty (e.g. not pre-warmed),
+  `Acquire` under `BlockTimeout` only waits for another caller to return an object — it does not
+  synchronously create one to satisfy the request. With no returns coming, the call waits the full
+  configured acquire timeout (default 5 s) and then throws `TimeoutException`.
+* **`CreateNew` reject policy creates lazily, not eagerly.** Under `RejectPolicy.CreateNew` the pool
+  first waits up to the acquire timeout for a return, and only then synchronously creates a new
+  tracked object. A cold first call on an empty pool therefore incurs up to a full-timeout delay
+  before the new object is handed out.
+* **Blocking wake-up granularity is ~100 ms.** Blocking waits (`Block` / `BlockTimeout` /
+  `CreateNew`) re-check in fixed slices of 100 ms, so the observed tail latency of a
+  return-to-acquire handoff is quantized to that slice size.
+* **`MinPoolSize = 0` cold pools do not self-bootstrap.** No background component creates objects
+  to reach `MinPoolSize`; the pool starts empty and only grows on demand through acquire paths.
+* **`ApplyFeatureSwitches` collapses capacity when auto-scaling is off.** With
+  `EnableAutoScaling = false`, `MaxPoolSize` is forced to equal `MinPoolSize`; if `MinPoolSize` is 0
+  the effective capacity becomes 0 and all returns are silently rejected. Keep auto-scaling enabled
+  unless you set both sizes explicitly.
+
 ## Samples
 
 Runnable examples live under [`samples/`](samples):
