@@ -105,11 +105,13 @@ public class RejectPolicyTests
         Assert.NotSame(obj1, obj2);
         Assert.True(sw.ElapsedMilliseconds >= 80);
         Assert.Equal(1, pool.GetStats().TotalMissed);
-        Assert.Equal(initialCount, pool.GetStats().CurrentSize); // 新对象不加入池
+        // T15 修复后语义：CreateNew 创建的是「已登记」的池内对象（借出状态），
+        // CurrentSize +1；旧实现返回未登记裸对象，Release 时被当作外来对象销毁。
+        Assert.Equal(initialCount + 1, pool.GetStats().CurrentSize);
     }
 
     [Fact]
-    public void RejectPolicy_CreateNew_ShouldNotAddNewObjectToPool()
+    public void RejectPolicy_CreateNew_ShouldPoolReturnedObjectForReuse()
     {
         // Arrange
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -125,7 +127,10 @@ public class RejectPolicyTests
         var obj2 = pool.Acquire();
         pool.Release(obj2);
 
-        // Assert：新对象不加入池，空闲数为0
-        Assert.Equal(0, pool.GetStats().PooledCount);
+        // Assert：T15 修复后语义——CreateNew 对象 Release 正常回池（不再被当作
+        // 外来对象销毁），可被后续 Acquire 复用。
+        Assert.Equal(1, pool.GetStats().PooledCount);
+        var obj3 = pool.Acquire();
+        Assert.Same(obj2, obj3);
     }
 }

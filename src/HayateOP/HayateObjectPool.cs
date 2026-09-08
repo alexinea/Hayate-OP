@@ -78,6 +78,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private long _totalReleased;
     private long _totalMissed;
     private long _totalAcquired;
+
+    // T15：CreateNew 分片的轮询游标（避免新建对象全部落在首个分片）
+    private int _createCursor;
     private long _leakDetectedCount;
     private readonly HayatePoolStats _stats = new();
     private readonly object _statsLock = new();
@@ -361,12 +364,34 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                 case HayatePoolRejectPolicy.CreateNew:
                     {
-                        // 超时后创建新对象，不加入池
+                        // 超时后创建新对象
                         if (elapsed >= timeout)
                         {
                             if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
                             _metrics.RecordObjectMiss(_name);
-                            return _policy.Create();
+
+                            // T15 修复：创建「已登记」的池内对象（登记即 Borrowed，不进空闲
+                            // 链表——避免其他等待者 TryTake 认领导致双重借出），Release 时
+                            // 按 ShardIndex 正常回池复用。旧实现返回未登记的裸对象，Release
+                            // 反查失败被当作外来对象销毁——每次借还都新建+销毁，池化完全失效。
+                            var shard = _shards[(int)(Interlocked.Increment(ref _createCursor) - 1) % _shards.Length];
+                            var w = CreateWrappedObject(shard);   // 内部已完成 TryTrack 登记
+                            w.Location = HayateObjectLocation.Borrowed;
+                            if (_enableEviction || _enableLeakDetection)
+                            {
+                                w.LastBorrowedAt = DateTime.UtcNow;
+                            }
+                            _policy.OnAcquire(w.Value);
+                            Interlocked.Increment(ref _totalAcquired);
+
+                            var waitTime = (long)sw.Elapsed.TotalMilliseconds;
+                            if (_enableMetrics)
+                            {
+                                UpdateWaitTimeStats(waitTime);
+                                _metrics.RecordObjectAcquired(_name, w.Value, waitTime);
+                            }
+
+                            return w.Value;
                         }
 
                         // T06：挂起等待归还信号，切片内无信号则醒来重检超时与分片
