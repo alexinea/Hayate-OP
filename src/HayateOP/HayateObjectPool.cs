@@ -22,6 +22,15 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     private readonly ConcurrentDictionary<T, HayateObject<T>> _objectMap = new();
 
+    // T06：归还事件通知门。Release 成功回池时 Release() 一次，Block/BlockTimeout/CreateNew
+    // 等待者以 Wait 取代 SpinWait 忙等，消除等待期 CPU 100% 空转。
+    // 计数语义为"可消费的唤醒信号数"；借出成功时以 Wait(0) 消费一个信号，
+    // 防止陈旧信号积累导致等待者被逐个伪唤醒形成忙循环。
+    private readonly SemaphoreSlim _blockGate = new(0, int.MaxValue);
+
+    // T06：无信号时的挂起等待切片。信号到达会立即唤醒，切片仅封顶无信号时的重检间隔。
+    private const int BlockWaitSliceMs = 100;
+
     // 后台任务
     private Timer _evictionTimer;
     private Timer _scalingTimer;
@@ -87,10 +96,6 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             int shardMax = perShardMax + (i < remainderMax ? 1 : 0);
             _shards[i] = new Shard(_options, i, shardMax, _logger);
         }
-        //_shards = Enumerable
-        //    .Range(0, _options.ShardCount)
-        //    .Select(index => new Shard(_options, index, _logger))
-        //    .ToArray();
 
         PreWarm();
 
@@ -171,7 +176,6 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be non-negative");
 
         var sw = ValueStopwatch.StartNew();
-        var spinWait = new SpinWait();
 
         while (true)
         {
@@ -179,6 +183,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             {
                 if (shard.TryTake(out var w))
                 {
+                    // T06：借出成功即消费一个唤醒信号（若有），保持信号数与池内空闲对象对齐，
+                    // 避免等待者被陈旧信号逐个伪唤醒空转。Wait(0) 无信号时立即返回 false。
+                    _blockGate.Wait(0);
+
                     #region 分代验证逻辑
 
                     // 仅开启分代 + 验证时执行
@@ -281,37 +289,6 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             // 超时处理
             var elapsed = sw.Elapsed;
 
-            //if (sw.Elapsed >= timeout)
-            //{
-            //    if (_options.EnableMetrics)
-            //    {
-            //        Interlocked.Increment(ref _totalMissed);
-            //    }
-
-            //    // 仅开启扩缩容时，触发强制扩容
-            //    if (_enableAutoScaling)
-            //    {
-            //        ForceScaleUpOneStep();
-            //    }
-
-            //    var newObj = _options.RejectPolicy switch
-            //    {
-            //        HayatePoolRejectPolicy.Abort => throw new TimeoutException($"Pool timeout after {timeout.TotalSeconds} seconds"),
-            //        HayatePoolRejectPolicy.Block => throw new TimeoutException("Pool is full, block policy triggered"),
-            //        HayatePoolRejectPolicy.BlockTimeout => throw new TimeoutException($"Pool timeout after {timeout.TotalSeconds} seconds (BlockTimeout policy)"),
-            //        HayatePoolRejectPolicy.CreateNew => CreateWrappedObject().Value, // 创建新对象（不加入池）
-            //        _ => throw new TimeoutException($"HayatePool [{_name}] acquire timeout")
-            //    };
-
-            //    if (_options.EnableMetrics)
-            //    {
-            //        // 记录指标
-            //        _metrics.RecordObjectMiss(_name, newObj);
-            //    }
-
-            //    return newObj;
-            //}
-
             switch (_options.RejectPolicy)
             {
                 case HayatePoolRejectPolicy.Abort:
@@ -324,8 +301,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                 case HayatePoolRejectPolicy.Block:
                     {
-                        // 无限等待直到获取到对象
-                        spinWait.SpinOnce();
+                        // T06：无限等待直到获取到对象。挂起等待归还信号（切片封顶重检间隔），
+                        // 信号到达立即醒来重试 TryTake；取代原 SpinOnce 忙等（CPU 100%）。
+                        // Block 策略不设超时，timeout 参数不参与判定（与原行为一致）。
+                        _blockGate.Wait(BlockWaitSliceMs);
                         continue;
                     }
 
@@ -338,7 +317,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                             if (_enableAutoScaling) ForceScaleUpOneStep();
                             throw new TimeoutException($"HayatePool [{_name}] 获取对象超时，超时时间：{timeout.TotalSeconds}s");
                         }
-                        spinWait.SpinOnce();
+
+                        // T06：挂起等待归还信号，切片内无信号则醒来重检超时与分片
+                        _blockGate.Wait(BlockWaitSliceMs);
                         continue;
                     }
 
@@ -348,10 +329,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         if (elapsed >= timeout)
                         {
                             if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
-                            _metrics.RecordObjectMiss(_name, null);
+                            _metrics.RecordObjectMiss(_name);
                             return _policy.Create();
                         }
-                        spinWait.SpinOnce();
+
+                        // T06：挂起等待归还信号，切片内无信号则醒来重检超时与分片
+                        _blockGate.Wait(BlockWaitSliceMs);
                         continue;
                     }
 
@@ -360,16 +343,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         throw new ArgumentOutOfRangeException(nameof(_options.RejectPolicy), "未知的拒绝策略");
                     }
             }
-
-            //// 短暂等待后重试
-            //spinWait.SpinOnce();
         }
     }
 
     public async Task<T> AcquireAsync(CancellationToken cancellationToken = default)
     {
-        var delay = TimeSpan.FromMilliseconds(1);
-
         while (!cancellationToken.IsCancellationRequested)
         {
             foreach (var shard in _shards)
@@ -377,6 +355,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 //if (shard.TryTake(out var w, TimeSpan.Zero))
                 if (shard.TryTake(out var w))
                 {
+                    // T07：借出成功即消费一个唤醒信号（若有），与同步路径保持一致，
+                    // 防止陈旧信号积累导致异步等待者伪唤醒空转。
+                    _blockGate.Wait(0);
+
                     if (_options.ValidateOnBorrow && !_policy.Validate(w.Value))
                     {
                         Destroy(w);
@@ -402,7 +384,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 }
             }
 
-            await Task.Delay(delay, cancellationToken);
+            // T07：取代原 Task.Delay(1ms) 轮询（异步路径空转、空载 CPU 开销）。
+            // 挂起等待归还信号或取消——信号由 Release 成功回池时发出（与同步 Acquire
+            // 共用 _blockGate，单一信号源），计数持久化语义保证无丢失唤醒。
+            // 设计说明：执行计划原草图为本方法引入 Channel<T> 推送对象，但对象回池后
+            // 所有权仍属分片链表，channel 再持引用会造成双重所有权；所需语义与 T06
+            // 信号门同构，故直接复用 SemaphoreSlim（WaitAsync 异步原生），零新增状态。
+            await _blockGate.WaitAsync(cancellationToken);
         }
 
         throw new TaskCanceledException();
@@ -533,6 +521,14 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
             #endregion
 
+            // T06：对象已成功回池，唤醒一个等待中的 Acquire（Block/BlockTimeout/CreateNew）。
+            // 无等待者时计数累积，由借出路径 Wait(0) 消费，不会泄漏。
+            try { _blockGate.Release(); }
+            catch (SemaphoreFullException)
+            {
+                // int.MaxValue 计数上限保护，正常负载下不可达；吞掉以保证 Release 路径不中断。
+            }
+
             _logger.LogDebug("Object returned to pool. Type: {Type} LeaseTime: {LeaseTime:F2}ms, shard: {ShardIndex}", typeof(T).Name, w.LeaseTimeMs, shardIndex);
         }
         catch (Exception ex)
@@ -559,7 +555,6 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             {
                 var o = _policy.Create();
                 var w = new HayateObject<T>(o);
-                //_objectMap.TryAdd(o, w);
                 if (_objectMap.TryAdd(o, w) && _enableMetrics)
                     Interlocked.Increment(ref _totalCreated);
                 return w;
@@ -913,17 +908,17 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         //if (_options.EnableLeakDetection)
         if (_enableLeakDetection)
         {
-            foreach (var shard in _shards)
+            // T13/穿插修复：泄漏扫描必须遍历 _objectMap（全部存活包装对象）。
+            // 原实现遍历 shard.GetAll()（仅池内空闲对象），而 TryTake 会把借出对象
+            // 物理摘出分片链表——借出对象从未被扫描，泄漏检测结构上恒不触发。
+            foreach (var w in _objectMap.Values)
             {
-                foreach (var w in shard.GetAll())
+                // 检查泄露
+                if (w.IsBorrowed &&
+                    now - w.LastBorrowedAt > _options.LeakDetectionThreshold)
                 {
-                    // 检查泄露
-                    if (w.IsBorrowed &&
-                        now - w.LastBorrowedAt > _options.LeakDetectionThreshold)
-                    {
-                        leakTraces.Add(w.AcquireTrace ?? "No stack trace available");
-                        Interlocked.Increment(ref _leakDetectedCount);
-                    }
+                    leakTraces.Add(w.AcquireTrace ?? "No stack trace available");
+                    Interlocked.Increment(ref _leakDetectedCount);
                 }
             }
         }
@@ -990,6 +985,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _evictionTimer?.Dispose();
         _scalingTimer?.Dispose();
         _validationTimer?.Dispose();
+
+        // T06：释放归还信号门（前提与定时器一致：Dispose 时无未完成的 Acquire 等待者）
+        _blockGate.Dispose();
+
         _logger.LogInformation("Object pool disposed. Type: {Type}", typeof(T).Name);
     }
 

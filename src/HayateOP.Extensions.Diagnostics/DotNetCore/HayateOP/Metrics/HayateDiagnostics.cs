@@ -35,11 +35,11 @@ public class HayateDiagnostics : IHayateMetrics
         }
     }
 
-    public void RecordObjectMiss(string poolName, object item)
+    public void RecordObjectMiss(string poolName)
     {
         if (_options.EnableMetrics && Source.IsEnabled(ObjectMiss))
         {
-            Source.Write($"{poolName}_{ObjectMiss}", item);
+            Source.Write($"{poolName}_{ObjectMiss}", null);
         }
     }
 

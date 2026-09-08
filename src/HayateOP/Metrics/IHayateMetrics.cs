@@ -25,8 +25,7 @@ public interface IHayateMetrics
     /// 记录对象池创建新对象的操作
     /// </summary>
     /// <param name="poolName"></param>
-    /// <param name="item"></param>
-    void RecordObjectMiss(string poolName, object item);
+    void RecordObjectMiss(string poolName);
 
     /// <summary>
     /// 记录对象池扩缩容的操作

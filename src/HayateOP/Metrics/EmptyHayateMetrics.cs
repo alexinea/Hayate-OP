@@ -10,7 +10,7 @@ public class EmptyHayateMetrics : IHayateMetrics
     {
     }
 
-    public void RecordObjectMiss(string poolName, object item)
+    public void RecordObjectMiss(string poolName)
     {
     }
 
