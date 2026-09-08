@@ -62,6 +62,33 @@ public class BasicFunctionTests
         Assert.Equal(4, stats.TotalAcquired);
     }
     
+    [Fact]
+    public void FifoOrder_AcquireReturnsObjectsInReleaseOrder()
+    {
+        // 关闭分片以在单分片内确定性验证 FIFO（多分片下 FIFO 仅保证分片内顺序）
+        using var pool = new HayatePoolBuilder<TestObject>()
+            .WithEnableSharding(false)
+            .WithMinSize(5)
+            .WithMaxSize(5)
+            .Build();
+
+        // 借出全部预暖对象并保留引用顺序
+        var acquired = new TestObject[5];
+        for (var i = 0; i < acquired.Length; i++)
+            acquired[i] = pool.Acquire();
+
+        // 按借出顺序归还，形成 FIFO 空闲队列（分片空闲链表 Add 尾插）
+        foreach (var o in acquired)
+            pool.Release(o);
+
+        // 再次借出应保持归还顺序（TryTake 头取，先入先出）
+        for (var i = 0; i < acquired.Length; i++)
+        {
+            var o = pool.Acquire();
+            Assert.Same(acquired[i], o);
+        }
+    }
+
     [Fact(Timeout = 60000)]
     public async Task ConcurrentAcquire_ShouldCorrectlyIncrementTotalAcquired()
     {
