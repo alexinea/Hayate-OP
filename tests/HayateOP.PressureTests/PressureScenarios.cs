@@ -124,13 +124,18 @@ public class PressureScenarios
             Task.WaitAll(workers);
             Assert.Equal(0, errors);
 
-            // 轮间等待缩容收敛（≥ 4 个缩容周期 + 余量）
-            Thread.Sleep(TimeSpan.FromSeconds(4));
-
-            var stats = pool.GetStats();
-            // 容忍一个 in-flight 缩容周期（Step=150 下残留应趋近 0）
-            Assert.True(stats.CurrentSize <= minSize + 5,
-                $"round {round}: pool failed to scale back to ~{minSize} (current={stats.CurrentSize})");
+            // 轮间等待缩容收敛：轮询直至 ≤ min+5（上限 10s）。
+            // 固定 sleep 会与缩容冷却（1s，自最近一次扩容起算）/步长语义赛跑
+            // （实测 round 2 残留 current=60），轮询收敛才是确定性断言。
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            var current = pool.GetStats().CurrentSize;
+            while (current > minSize + 5 && DateTime.UtcNow < deadline)
+            {
+                Thread.Sleep(250);
+                current = pool.GetStats().CurrentSize;
+            }
+            Assert.True(current <= minSize + 5,
+                $"round {round}: pool failed to scale back to ~{minSize} (current={current})");
         }
     }
 
