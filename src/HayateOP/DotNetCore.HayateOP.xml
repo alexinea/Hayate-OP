@@ -257,6 +257,16 @@
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.UntrackKey(`0)">
             <summary>T09：仅有裸对象引用（无包装）时，全分片扫描摘除登记项。</summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryColdBootAcquire(System.Int64)">
+            <summary>
+            PR-D L5：冷池自举。池完全空（无空闲且无借出）且容量上限 &gt; 0 时，
+            同步创建首个对象直接借出（原子防重，并发首借仅创建一个），
+            消除 Min=0 冷池「等超时者补货」的不确定性（T12 ColdStart 实测 2/5 与 5/5 超时两种时序）。
+            仅由 Block / BlockTimeout 策略与异步等待路径调用——CreateNew 保持「等满超时后创建」语义（L6），
+            Abort 保持直接拒绝语义。
+            </summary>
+            <returns>自举借出的对象；返回 <c>null</c> 表示本调用未认领自举（池非空 / 达上限 / 他线程正在创建），调用方应继续正常等待。</returns>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.InterlockedMax(System.Int64@,System.Int64)">
             <summary>
             L2：无锁 Max 归并（CAS 环）。并发下最终收敛到真实最大值。
