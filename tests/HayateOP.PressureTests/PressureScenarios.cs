@@ -259,7 +259,7 @@ public class PressureScenarios
     [Fact(Timeout = 60_000)]
     public void ColdStart_ColdPoolBehaviorAndWarmPathP99()
     {
-        // 段 A：Min=0 冷池 —— 首批并发首借全部按 Known Limitation 超时
+        // 段 A：Min=0 冷池 —— L5 后首批并发首借全部经冷启动自举即时成功（确定性）
         using (var cold = new HayatePoolBuilder<PooledResource>()
             .WithPoolName("pressure-coldstart-cold")
             .WithMinSize(0)
@@ -285,15 +285,14 @@ public class PressureScenarios
             Task.WaitAll(tasks);
             var succeeded = 5 - (int)Interlocked.Read(ref timeouts);
 
-            // 行为守卫（实测确认的"超时驱动间接自举"路径）：
-            //  - ScalingCallback（周期扩容）对空池短路（currentTotal==0 return），无法周期性自举；
-            //  - 但 BlockTimeout 超时抛异常前会 ForceScaleUpOneStep() 同步补货（该方法无空池短路），
-            //    首个超时者"牺牲自己"触发补货，其余等待者切片醒来即可借到 → 结果不确定（实测 2/5 超时 3/5 成功）。
-            //  - 稳定事实：至少 1 个等待者经历超时（首个到期的等待者必然先补货再抛超时）；
-    //    空池从未做到"即时可用"。若未来实现空池同步创建策略，此断言应随行为更新。
-            Assert.True(Interlocked.Read(ref timeouts) >= 1,
-                "at least one cold-pool waiter must hit the timeout (empty pool is never instantly available)");
-            Console.WriteLine($"[ColdStart] cold pool (Min=0): {timeouts}/5 timed out, {succeeded}/5 acquired via timeout-triggered ForceScaleUpOneStep");
+            // 行为守卫（PR-D L5，2.1 行为变更）：
+            //  - 旧语义：ScalingCallback 对空池短路（currentTotal==0 return）无法周期自举；
+            //    仅 BlockTimeout 超时抛异常前的 ForceScaleUpOneStep() 间接补货，首个超时者
+            //    "牺牲自己"，结果不确定（实测 2/5 与 5/5 超时两种时序）。
+            //  - 新语义：借出路径冷启动自举——池完全空时首个 Acquire 按需同步创建（CAS 防重），
+            //    其余等待者经归还信号轮转复用，全部即时成功、零超时。
+            Assert.Equal(0L, Interlocked.Read(ref timeouts));
+            Console.WriteLine($"[ColdStart] cold pool (Min=0): {succeeded}/5 acquired instantly via L5 cold-boot, {timeouts} timeouts");
         }
 
         // 段 B：Min=5 池（构造即预热）—— 首借走池内热对象，P99 < 1ms

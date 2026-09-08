@@ -107,6 +107,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private readonly int _leakTraceSampleRate;
     private int _leakTraceCounter;
 
+    // PR-D L5：冷池自举防重标志。0=无人认领，1=已有线程正在冷启动创建。
+    // CAS 赢家负责创建首个对象，输家回落到正常等待路径；创建结束（含异常）即复位，
+    // 保证池再次清空后仍可二次自举。
+    private int _coldBootClaimed;
+
     internal HayatePoolBasic(
         IHayateObjectPolicy<T> policy,
         HayatePoolOptions options,
@@ -375,6 +380,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                 case HayatePoolRejectPolicy.Block:
                     {
+                        // PR-D L5：冷池自举——池完全空时按需创建首个对象，确定性消除首借挂起
+                        var coldBoot = TryColdBootAcquire((long)sw.Elapsed.TotalMilliseconds);
+                        if (coldBoot is not null) return coldBoot;
+
                         // T06：无限等待直到获取到对象。挂起等待归还信号（切片封顶重检间隔），
                         // 信号到达立即醒来重试 TryTake；取代原 SpinOnce 忙等（CPU 100%）。
                         // Block 策略不设超时，timeout 参数不参与判定（与原行为一致）。
@@ -384,6 +393,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                 case HayatePoolRejectPolicy.BlockTimeout:
                     {
+                        // PR-D L5：冷池自举——池完全空时按需创建首个对象，确定性消除首借超时
+                        var coldBoot = TryColdBootAcquire((long)elapsed.TotalMilliseconds);
+                        if (coldBoot is not null) return coldBoot;
+
                         // 等待超时后抛异常
                         if (elapsed >= timeout)
                         {
@@ -490,6 +503,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             // 设计说明：执行计划原草图为本方法引入 Channel<T> 推送对象，但对象回池后
             // 所有权仍属分片链表，channel 再持引用会造成双重所有权；所需语义与 T06
             // 信号门同构，故直接复用 SemaphoreSlim（WaitAsync 异步原生），零新增状态。
+
+            // PR-D L5：冷池自举——池完全空时按需创建首个对象。异步路径原本无限等
+            // 归还信号，Min=0 冷池首借将永久挂起直到取消，自举是唯一的确定性出口。
+            var coldBoot = TryColdBootAcquire(0);
+            if (coldBoot is not null) return coldBoot;
+
             await _blockGate.WaitAsync(cancellationToken);
         }
 
@@ -745,6 +764,52 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         catch (Exception ex)
         {
             _logger.LogError(ex, "Force scale up failed");
+        }
+    }
+
+    /// <summary>
+    /// PR-D L5：冷池自举。池完全空（无空闲且无借出）且容量上限 &gt; 0 时，
+    /// 同步创建首个对象直接借出（原子防重，并发首借仅创建一个），
+    /// 消除 Min=0 冷池「等超时者补货」的不确定性（T12 ColdStart 实测 2/5 与 5/5 超时两种时序）。
+    /// 仅由 Block / BlockTimeout 策略与异步等待路径调用——CreateNew 保持「等满超时后创建」语义（L6），
+    /// Abort 保持直接拒绝语义。
+    /// </summary>
+    /// <returns>自举借出的对象；返回 <c>null</c> 表示本调用未认领自举（池非空 / 达上限 / 他线程正在创建），调用方应继续正常等待。</returns>
+    private T TryColdBootAcquire(long waitTimeMs)
+    {
+        if (_options.MaxPoolSize <= 0) return null;
+        if (TrackedObjectCount != 0) return null;
+        if (Interlocked.CompareExchange(ref _coldBootClaimed, 1, 0) != 0) return null;
+
+        try
+        {
+            // 双检：CAS 期间可能有并发归还 / 扩容使池非空——此时回落正常等待路径即可。
+            if (TrackedObjectCount != 0) return null;
+
+            var shard = _shards[(int)(Interlocked.Increment(ref _createCursor) - 1) % _shards.Length];
+            var w = CreateWrappedObject(shard);   // 内部已完成 TryTrack 登记（含 _totalCreated 计数）
+            w.Location = HayateObjectLocation.Borrowed;
+            if (_enableEviction || _enableLeakDetection)
+            {
+                w.LastBorrowedAt = DateTime.UtcNow;
+            }
+            _policy.OnAcquire(w.Value);
+            Interlocked.Increment(ref _totalAcquired);
+
+            if (_enableMetrics)
+            {
+                UpdateWaitTimeStats(waitTimeMs);
+                _metrics.RecordObjectAcquired(_name, w.Value, waitTimeMs);
+            }
+
+            _logger.LogInformation("Pool [{PoolName}] cold-boot acquired on demand (pool was empty)", _name);
+            return w.Value;
+        }
+        finally
+        {
+            // 创建成功或失败都必须复位，池再次清空后仍可自举；
+            // CreateWrappedObject 抛异常时异常向调用方传播（与 CreateNew 路径行为一致）。
+            Interlocked.Exchange(ref _coldBootClaimed, 0);
         }
     }
 

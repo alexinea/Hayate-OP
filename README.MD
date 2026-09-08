@@ -547,10 +547,11 @@ In exchange it provides sharding, eviction, leak detection, metrics, and managem
 
 Behaviors to be aware of before adopting HayateOP (several are queued for follow-up releases):
 
-* **Empty pool never auto-rebuilds on acquire.** If the pool is empty (e.g. not pre-warmed),
-  `Acquire` under `BlockTimeout` only waits for another caller to return an object — it does not
-  synchronously create one to satisfy the request. With no returns coming, the call waits the full
-  configured acquire timeout (default 5 s) and then throws `TimeoutException`.
+* **Empty pool cold-boot (changed in 2.1).** If the pool is completely empty (e.g. `MinPoolSize = 0`
+  and not pre-warmed), `Acquire` under `Block` / `BlockTimeout` — and `AcquireAsync` — now
+  synchronously creates the first object on demand (cold-boot, atomically de-duplicated) instead of
+  waiting for a return that may never come. Previously the call waited the full acquire timeout and
+  then threw `TimeoutException` (or hung forever on the async path).
 * **`CreateNew` reject policy creates lazily, not eagerly.** Under `RejectPolicy.CreateNew` the pool
   first waits up to the acquire timeout for a return, and only then synchronously creates a new
   tracked object. A cold first call on an empty pool therefore incurs up to a full-timeout delay
@@ -558,12 +559,14 @@ Behaviors to be aware of before adopting HayateOP (several are queued for follow
 * **Blocking wake-up granularity is ~100 ms.** Blocking waits (`Block` / `BlockTimeout` /
   `CreateNew`) re-check in fixed slices of 100 ms, so the observed tail latency of a
   return-to-acquire handoff is quantized to that slice size.
-* **`MinPoolSize = 0` cold pools do not self-bootstrap.** No background component creates objects
-  to reach `MinPoolSize`; the pool starts empty and only grows on demand through acquire paths.
-* **`ApplyFeatureSwitches` collapses capacity when auto-scaling is off.** With
-  `EnableAutoScaling = false`, `MaxPoolSize` is forced to equal `MinPoolSize`; if `MinPoolSize` is 0
-  the effective capacity becomes 0 and all returns are silently rejected. Keep auto-scaling enabled
-  unless you set both sizes explicitly.
+* **`MinPoolSize = 0` cold pools bootstrap on first acquire (changed in 2.1).** No background
+  component pre-creates objects to reach `MinPoolSize`; the pool starts empty, and the first
+  acquire on a fully empty pool creates its object on demand (see the cold-boot note above).
+  Background scaling never grows toward `MinPoolSize = 0`.
+* **`ApplyFeatureSwitches` capacity semantics (changed in 2.1).** With `EnableAutoScaling = false`,
+  your explicit `MaxPoolSize` is kept as the hard capacity cap (previously it was forced to
+  `MinPoolSize`, which silently collapsed capacity to 0 when `MinPoolSize = 0`). Only a
+  `MaxPoolSize < MinPoolSize` misconfiguration is lifted to `MaxPoolSize = MinPoolSize`.
 
 ## Samples
 
