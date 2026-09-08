@@ -8,6 +8,9 @@
 
     <ItemGroup>
         <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.3" />
+        <!-- A6（2.2 安全升级）：显式固定传递依赖 Microsoft.OpenApi ≥ 2.7.5，
+             修复 GHSA-v5pm-xwqc-g5wc（CVE-2026-49451 循环 $ref 栈溢出 DoS，CVSS 7.5） -->
+        <PackageReference Include="Microsoft.OpenApi" Version="2.7.6" />
         <PackageReference Include="Swashbuckle.AspNetCore" Version="10.1.4" />
     </ItemGroup>
 
