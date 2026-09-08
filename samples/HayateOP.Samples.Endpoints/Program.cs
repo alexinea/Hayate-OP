@@ -1,4 +1,5 @@
 ﻿using DotNetCore.HayateOP;
+using DotNetCore.HayateOP.Metrics;
 using HayateOP.Samples.Endpoints;
 using System.Text;
 
@@ -13,13 +14,18 @@ Console.InputEncoding = Encoding.UTF8;
 //   * RegisterGlobalConfig         -> bind "HayatePool:Global" from config
 //   * RegisterHayatePool<T>(config)-> bind "HayatePool:Pools:MyBizObj" + DI注册
 //   * RegisterHealthChecks<T>      -> ASP.NET Core health check integration
-//   * RegisterDiagnostics<T>       -> System.Diagnostics metrics bridge
+//   * AddSingleton<IHayateMetrics, HayateDiagnostics>
+//                                  -> System.Diagnostics metrics bridge
+//                                     (T13 removed the RegisterDiagnostics<T> helper;
+//                                      the later registration replaces the default
+//                                      EmptyHayateMetrics registered via TryAdd)
 // ---------------------------------------------------------------------------
 builder.Services.AddHayatePoolSupport()
     .RegisterGlobalConfig(builder.Configuration)
     .RegisterHayatePool<MyBizObj>(builder.Configuration)
-    .RegisterHealthChecks<MyBizObj>()
-    .RegisterDiagnostics<MyBizObj>();
+    .RegisterHealthChecks<MyBizObj>();
+
+builder.Services.AddSingleton<IHayateMetrics, HayateDiagnostics>();
 
 builder.Services.AddLogging(b =>
 {

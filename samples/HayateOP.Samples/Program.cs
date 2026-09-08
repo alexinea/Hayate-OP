@@ -5,6 +5,7 @@
 
 using System.Text;
 using DotNetCore.HayateOP;
+using DotNetCore.HayateOP.Metrics;
 using DotNetCore.HayateOP.Policies;
 using DotNetCore.HayateOP.Samples;
 using Microsoft.Extensions.Configuration;
@@ -169,8 +170,12 @@ var configuration = new ConfigurationBuilder()
 var cfgServices = new ServiceCollection();
 cfgServices.AddHayatePoolSupport()
           .RegisterGlobalConfig(configuration)
-          .RegisterHayatePool<MyPooledObject>(configuration)
-          .RegisterDiagnostics<MyPooledObject>();
+          .RegisterHayatePool<MyPooledObject>(configuration);
+
+// T13 后：RegisterDiagnostics<T> 扩展已删除。System.Diagnostics 桥接改为直接注册
+// HayateDiagnostics（AddHayatePoolSupport 内部以 TryAddSingleton 注册默认 EmptyHayateMetrics，
+// 后注册者即成为生效的 IHayateMetrics）。
+cfgServices.AddSingleton<IHayateMetrics, HayateDiagnostics>();
 
 using var cfgProvider = cfgServices.BuildServiceProvider();
 var cfgPool = cfgProvider.GetRequiredService<IHayateObjectPool<MyPooledObject>>();
