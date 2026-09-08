@@ -20,7 +20,40 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private readonly IHayateLogger _logger;
     private readonly IHayateMetrics _metrics;
 
-    private readonly ConcurrentDictionary<T, HayateObject<T>> _objectMap = new();
+    // T09：原池级单张 _objectMap（ConcurrentDictionary<T, HayateObject<T>>）已按分片拆分，
+    // 迁移至各 Shard 内部的登记表（见 HayateObjectPool.Shard.cs）。登记项随对象的创建/销毁
+    // 固定在其归属分片，消除多分片并发写同一张表导致的桶数组峰值不收敛。
+    // 池级只保留两个派生视图：
+    /// <summary>真实存活对象总数（空闲 + 借出），由各分片登记表求和派生。</summary>
+    private int TrackedObjectCount => _shards.Sum(s => s.TrackedCount);
+
+    /// <summary>
+    /// T09：按包装对象的归属分片摘除登记项；ShardIndex 异常时兜底全分片扫描（理论不可达，
+    /// 登记项在 CreateWrappedObject 即写入目标分片并同步 ShardIndex）。
+    /// </summary>
+    private void UntrackObject(HayateObject<T> w)
+    {
+        if (w?.Value is null) return;
+
+        var home = (uint)w.ShardIndex < (uint)_shards.Length ? _shards[w.ShardIndex] : null;
+        if (home is not null && home.Untrack(w.Value)) return;
+
+        foreach (var shard in _shards)
+        {
+            if (shard.Untrack(w.Value)) return;
+        }
+    }
+
+    /// <summary>T09：仅有裸对象引用（无包装）时，全分片扫描摘除登记项。</summary>
+    private void UntrackKey(T o)
+    {
+        if (o is null) return;
+
+        foreach (var shard in _shards)
+        {
+            if (shard.Untrack(o)) return;
+        }
+    }
 
     // T06：归还事件通知门。Release 成功回池时 Release() 一次，Block/BlockTimeout/CreateNew
     // 等待者以 Wait 取代 SpinWait 忙等，消除等待期 CPU 100% 空转。
@@ -128,7 +161,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                 for (var j = 0; j < count; j++)
                 {
-                    shard.Add(CreateWrappedObject());
+                    // T09：登记并入目标分片。分片拒绝（容量已 clamp，理论不可达）时兜底销毁，
+                    // 防止产生「已登记但不在任何空闲链表」的孤儿项。
+                    var w = CreateWrappedObject(shard);
+                    if (!shard.Add(w)) Destroy(w);
                     totalPreWarmed++;
                 }
 
@@ -404,8 +440,16 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             return;
         }
 
-        // 查找对应的包装对象，验证是否属于池中对象
-        if (!_objectMap.TryGetValue(item, out var w))
+        // 查找对应的包装对象，验证是否属于池中对象。
+        // T09：登记表按分片拆分后，按 T 反查需逐分片探测（只读无锁；分片数为个位数，
+        // 代价可忽略）。同一对象只会登记在创建分片，任一分片命中即认定属于本池。
+        HayateObject<T> w = null;
+        foreach (var shard in _shards)
+        {
+            if (shard.TryGetTracked(item, out w)) break;
+        }
+
+        if (w is null)
         {
             _logger.LogWarning("Returned object does not belong to pool. Disposing. Type: {Type}", typeof(T).Name);
 
@@ -463,7 +507,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 // 维持最小空闲水位：策略层拒绝后池被掏空，主动补充。
                 // 仅在开启了自动扩缩容且 MinPoolSize > 0 时触发，避免无意义的开销。
                 if (_enableAutoScaling && _options.MinPoolSize > 0 &&
-                    _objectMap.Count < _options.MinPoolSize)
+                    TrackedObjectCount < _options.MinPoolSize)
                 {
                     ForceScaleUpOneStep();
                 }
@@ -504,14 +548,14 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     typeof(T).Name, shardIndex);
 
                 Destroy(w);
-                _objectMap.TryRemove(w.Value, out _);
+                UntrackObject(w);
 
                 // P1-新-1 修复：分片拒绝销毁了一个对象，池总量可能跌破 MinPoolSize
                 // （尤其驱逐线程先认领走一个 InPool 对象、随后本归还对象又被 overflow 的场景）。
                 // 与 OnRelease=false 路径一致，仅在开启自动扩缩容且确实低于水位时补一次，
                 // 避免延迟敏感业务在驱逐/归还交错下遭遇冷启动。
                 if (_enableAutoScaling && _options.MinPoolSize > 0 &&
-                    _objectMap.Count < _options.MinPoolSize)
+                    TrackedObjectCount < _options.MinPoolSize)
                 {
                     ForceScaleUpOneStep();
                 }
@@ -547,17 +591,29 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     #region 辅助方法
 
-    private HayateObject<T> CreateWrappedObject()
+    private HayateObject<T> CreateWrappedObject(Shard targetShard)
     {
         for (var retry = 0; retry < _options.CreationRetryCount; retry++)
         {
             try
             {
                 var o = _policy.Create();
-                var w = new HayateObject<T>(o);
-                if (_objectMap.TryAdd(o, w) && _enableMetrics)
-                    Interlocked.Increment(ref _totalCreated);
-                return w;
+
+                // T09：登记并入目标分片（同步写入 ShardIndex 作为归属）。
+                // 对象 round-trip 永远回到该分片，登记项与对象生命周期同步，
+                // TrackedCount 之和即为池的真实存活对象数。
+                var w = new HayateObject<T>(o) { ShardIndex = targetShard.Index };
+                if (targetShard.TryTrack(o, w))
+                {
+                    if (_enableMetrics) Interlocked.Increment(ref _totalCreated);
+                    return w;
+                }
+
+                // 同一键已存在（策略层重复创建同一实例的病态情形）：销毁新实例后重试，
+                // 绝不入池——否则 Release 反查会命中旧登记项，新旧包装对象互相污染。
+                _logger.LogWarning("Duplicate pooled object instance detected. Retrying. Type: {Type}", typeof(T).Name);
+                _policy.OnDestroy(o);
+                if (o is IDisposable d) d.Dispose();
             }
             catch (Exception ex)
             {
@@ -579,7 +635,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         try
         {
-            int currentTotal = _objectMap.Count;
+            int currentTotal = TrackedObjectCount;
             if (currentTotal >= _options.MaxPoolSize) return;
             if ((DateTime.UtcNow - _lastScaleUpTime).TotalSeconds < _options.ScaleUpCooldownSeconds) return;
 
@@ -595,13 +651,15 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             for (var i = 0; i < add; i++)
             {
                 var shard = _shards[i % _shards.Length];
-                shard.Add(CreateWrappedObject());
+                // T09：登记并入目标分片；并发下 Add 仍可能被他线程先填满而拒绝，兜底销毁防孤儿登记。
+                var w = CreateWrappedObject(shard);
+                if (!shard.Add(w)) Destroy(w);
                 added++;
             }
 
             _lastScaleUpTime = DateTime.UtcNow;
             _logger.LogWarning("FORCE SCALE UP Pool [{PoolName}] (because timeout) → total: {Total}, added: {Count}",
-                _name, _objectMap.Count, added);
+                _name, TrackedObjectCount, added);
 
             if (_enableMetrics)
             {
@@ -640,7 +698,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         {
             _policy.OnDestroy(w.Value);
             if (w.Value is IDisposable d) d.Dispose();
-            _objectMap.TryRemove(w.Value, out _);
+            UntrackObject(w);
             w.Location = HayateObjectLocation.Destroyed;
             _logger.LogDebug("Wrapped object destroyed. Type: {Type}", typeof(T).Name);
         }
@@ -658,7 +716,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         {
             _policy.OnDestroy(o);
             if (o is IDisposable d) d.Dispose();
-            _objectMap.TryRemove(o, out _);
+            UntrackKey(o);
             _logger.LogDebug("Object destroyed. Type: {Type}", typeof(T).Name);
         }
         catch (Exception ex)
@@ -753,7 +811,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         try
         {
             var totalIdle = _shards.Sum(s => s.Count);
-            var currentTotal = _objectMap.Count;
+            var currentTotal = TrackedObjectCount;
             if (currentTotal == 0) return;
 
             var targetSize = _scalingStrategy.CalculateNewSize(currentTotal, totalIdle, _options);
@@ -771,7 +829,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 for (var i = 0; i < add; i++)
                 {
                     var shard = _shards[i % _shards.Length];
-                    shard.Add(CreateWrappedObject());
+                    // T09：登记并入目标分片；Add 被拒时兜底销毁防孤儿登记。
+                    var w = CreateWrappedObject(shard);
+                    if (!shard.Add(w)) Destroy(w);
                 }
 
                 _lastScaleUpTime = DateTime.UtcNow;
@@ -874,7 +934,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         lock (_statsLock)
         {
             int totalIdle = _shards.Sum(s => s.Count);
-            int totalObjects = _objectMap.Count; // 真实总对象数（空闲+借出）
+            int totalObjects = TrackedObjectCount; // 真实总对象数（空闲+借出）
 
             return new HayatePoolStats
             {
@@ -908,17 +968,20 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         //if (_options.EnableLeakDetection)
         if (_enableLeakDetection)
         {
-            // T13/穿插修复：泄漏扫描必须遍历 _objectMap（全部存活包装对象）。
+            // T13/穿插修复 + T09：泄漏扫描必须遍历分片登记表（全部存活包装对象）。
             // 原实现遍历 shard.GetAll()（仅池内空闲对象），而 TryTake 会把借出对象
             // 物理摘出分片链表——借出对象从未被扫描，泄漏检测结构上恒不触发。
-            foreach (var w in _objectMap.Values)
+            foreach (var shard in _shards)
             {
-                // 检查泄露
-                if (w.IsBorrowed &&
-                    now - w.LastBorrowedAt > _options.LeakDetectionThreshold)
+                foreach (var w in shard.TrackedValues)
                 {
-                    leakTraces.Add(w.AcquireTrace ?? "No stack trace available");
-                    Interlocked.Increment(ref _leakDetectedCount);
+                    // 检查泄露
+                    if (w.IsBorrowed &&
+                        now - w.LastBorrowedAt > _options.LeakDetectionThreshold)
+                    {
+                        leakTraces.Add(w.AcquireTrace ?? "No stack trace available");
+                        Interlocked.Increment(ref _leakDetectedCount);
+                    }
                 }
             }
         }
@@ -929,9 +992,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         // totalObjects - totalIdle 口径一致），而不是依赖 Shard.BorrowedCount。
         // 原因：TryTake 先把对象物理摘出分片链表、再置 Borrowed，借出的对象根本不在
         // 分片链表中，因此 Shard.BorrowedCount（统计链表内 IsBorrowed）结构上恒为 0。
-        // _objectMap 始终持有所有存活包装对象（空闲 + 借出），直到 Destroy 才移除；
+        // 分片登记表始终持有所有存活包装对象（空闲 + 借出），直到 Destroy 才移除；
         // 驱逐「已认领未销毁」的极短瞬态会被计入，但被 Destroy 的快速执行所限，可忽略。
-        var borrowedCount = _objectMap.Count - pooledCount;
+        var borrowedCount = TrackedObjectCount - pooledCount;
         if (borrowedCount < 0) borrowedCount = 0;
 
         return new HayatePoolSnapshot
@@ -969,8 +1032,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     public void Clear()
     {
-        foreach (var shard in _shards) shard.Clear();
-        _objectMap.Clear();
+        foreach (var shard in _shards)
+        {
+            shard.Clear();
+            // T09：登记表随分片清空（含借出中对象的登记项，与原池级 map.Clear 语义一致）。
+            shard.ClearTracked();
+        }
         _logger.LogInformation("Clearing object pool. Type: {Type}", typeof(T).Name);
     }
 

@@ -89,6 +89,50 @@ public class BasicFunctionTests
         }
     }
 
+    [Fact]
+    public void TrackedRegistry_ConservesObjectsAcrossBorrowReleaseCycles()
+    {
+        // T09 回归守卫：登记表按分片拆分后不得产生孤儿登记项。
+        // 纯借还循环（驱逐/校验/自动扩缩容全关）后应满足：
+        //   1) CurrentSize（各分片登记表 TrackedCount 之和）== PooledCount（各分片空闲数之和）
+        //      —— 即「登记总数 == 空闲数」，无借出残留、无孤儿登记；
+        //   2) TotalCreated 不增长 —— 纯借还绝不新建对象；
+        //   3) 归还的对象能再次按原样借出（Release 反查逐分片探测路径正确）。
+        using var pool = new HayatePoolBuilder<TestObject>()
+            .WithEnableSharding(true)
+            .WithShardCount(4)
+            .WithMinSize(8)
+            .WithMaxSize(8)
+            .WithEnableEviction(false)
+            .WithEnableValidation(false)
+            .WithEnableAutoScaling(false)
+            .WithEnableLeakDetection(false)
+            .WithEnableGenerationOptimization(false)
+            .Build();
+
+        var createdBaseline = pool.GetStats().TotalCreated;
+
+        for (var round = 0; round < 100; round++)
+        {
+            var borrowed = new TestObject[8];
+            for (var i = 0; i < borrowed.Length; i++)
+                borrowed[i] = pool.Acquire();
+
+            foreach (var o in borrowed)
+                pool.Release(o);
+        }
+
+        var stats = pool.GetStats();
+        Assert.Equal(8, stats.PooledCount);
+        Assert.Equal(stats.PooledCount, stats.CurrentSize);
+        Assert.Equal(createdBaseline, stats.TotalCreated);
+
+        // 末轮抽验：任取一个已归还对象仍可正常借出（登记项 round-trip 有效）
+        var reAcquired = pool.Acquire();
+        Assert.NotNull(reAcquired);
+        pool.Release(reAcquired);
+    }
+
     [Fact(Timeout = 60000)]
     public async Task ConcurrentAcquire_ShouldCorrectlyIncrementTotalAcquired()
     {

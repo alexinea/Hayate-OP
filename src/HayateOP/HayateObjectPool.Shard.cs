@@ -1,5 +1,6 @@
 ﻿using DotNetCore.HayateOP.Logging;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -18,6 +19,28 @@ public partial class HayatePoolBasic<T>
         // 重建窗口内并发的 TryTake / Add 会丢对象或产生重复项，本次彻底替换为链表。
         private readonly LinkedList<HayateObject<T>> _list = new();
 
+        // T09：本分片的登记表（T → 包装对象），原为池级单张 _objectMap。
+        // 借出对象长期驻留 + 各分片并发写入同一张表，导致桶数组随并发峰值扩张后永不回落，
+        // 内存峰值不收敛；拆分到分片后，登记项随对象的创建/销毁固定在本分片，
+        // 容量与分片容量对齐、随销毁真正回落。
+        // 对象 round-trip 永远回到创建分片（Acquire 记录 ShardIndex、Release 按此回源），
+        // 同一键只会出现在一个分片的登记表中，键空间天然互斥，无需跨分片同步。
+        private readonly ConcurrentDictionary<T, HayateObject<T>> _objects = new();
+
+        /// <summary>本分片登记的存活对象数（空闲 + 借出）。</summary>
+        internal int TrackedCount => _objects.Count;
+
+        /// <summary>本分片登记的全部包装对象（含借出中）。</summary>
+        internal IEnumerable<HayateObject<T>> TrackedValues => _objects.Values;
+
+        internal bool TryTrack(T key, HayateObject<T> w) => _objects.TryAdd(key, w);
+
+        internal bool TryGetTracked(T key, out HayateObject<T> w) => _objects.TryGetValue(key, out w);
+
+        internal bool Untrack(T key) => _objects.TryRemove(key, out _);
+
+        internal void ClearTracked() => _objects.Clear();
+
         // 保护 _list 以及对象位置状态迁移。临界区只做若干指针操作，极短。
         // 硬约束：临界区内绝不回调用户代码（Dispose / policy 一律在锁外执行），避免重入死锁。
         private SpinLock _lock = new(enableThreadOwnerTracking: false);
@@ -28,7 +51,7 @@ public partial class HayatePoolBasic<T>
         // TryTake 先把对象物理摘出本分片链表、再置 Borrowed，借出的对象根本不在
         // 链表中，因此「链表内 IsBorrowed 计数」结构上恒为 0；且归还时若被 Release
         // 拒绝（OnRelease=false）会直接销毁、不经过本分片 Add，增减无法一一配对。
-        // 池级借出数由 TakeSnapshot 以 _objectMap.Count - 各分片 Count 之和 派生。
+        // 池级借出数由 TakeSnapshot 以「各分片登记表 TrackedCount 之和 - 各分片 Count 之和」派生。
 
         public int Index { get; }
 
@@ -118,7 +141,7 @@ public partial class HayatePoolBasic<T>
             // P0-新-1 修复：overflow 时不在本方法内自行处置（裸 Dispose 会漏掉 _policy.OnDestroy，
             // 且提前置 Destroyed=1 会让调用方的完整 Destroy(w) 因幂等 CAS 直接 return，OnDestroy 永不触发）。
             // 故这里只做日志 + 返回 false，把销毁完整地交给唯一真实调用方（Release → Destroy(w)，
-            // 其内部会触发 _policy.OnDestroy → Dispose → _objectMap.TryRemove，且带幂等保护）。
+            // 其内部会触发 _policy.OnDestroy → Dispose → 登记表 Untrack，且带幂等保护）。
             // PreWarm / ForceScaleUp 均先按容量 clamp / UpdateShardMaxSizes，不会在此真实 overflow。
             if (overflow != null)
             {

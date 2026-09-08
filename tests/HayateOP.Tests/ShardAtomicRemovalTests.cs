@@ -94,7 +94,7 @@ public class ShardAtomicRemovalTests
     /// <para>
     /// 注意：必须保持 EnableAutoScaling = true。ApplyFeatureSwitches 在关闭自动扩缩容时
     /// 会强制把 MaxPoolSize 钳到 MinPoolSize，否则分片容量会被压成 0。
-    /// MinSize 设为 0 时 _objectMap 恒为空，ScalingCallback 会立即返回，不会干扰用例。
+    /// MinSize 设为 0 时各分片登记表恒为空，ScalingCallback 会立即返回，不会干扰用例。
     /// </para>
     /// </summary>
     private static IHayateObjectPool<TestObject> BuildQuietPool(int minSize, int maxSize)
@@ -463,8 +463,8 @@ public class ShardAtomicRemovalTests
     /// <summary>
     /// §3.3 池级：无驱逐 / 校验干扰的安静池里，确定性校验 TakeSnapshot 的借出口径。
     /// <para>
-    /// _objectMap 恒持有「空闲 + 借出」的全部存活对象（Destroy 才移除），因此
-    /// BorrowedCount = _objectMap.Count - 池内空闲数 在无驱逐瞬态下应精确成立。
+    /// 分片登记表恒持有「空闲 + 借出」的全部存活对象（Destroy 才移除），因此
+    /// BorrowedCount = 登记总数 - 池内空闲数 在无驱逐瞬态下应精确成立。
     /// 用 MinSize 预热让 Acquire 立即命中，避免触发拒绝策略的超时等待。
     /// </para>
     /// </summary>
@@ -502,7 +502,7 @@ public class ShardAtomicRemovalTests
     /// §3.3 池级：并发借还期间反复采样 TakeSnapshot，不变量恒定。
     /// <para>
     /// 关键不变量：PooledCount 与 BorrowedCount 恒非负，且二者之和（= 真实存活对象数）
-    /// ≤ 池容量；驱逐关闭时不存在「已认领未销毁」瞬态，二者之和精确等于 _objectMap 存活数。
+    /// ≤ 池容量；驱逐关闭时不存在「已认领未销毁」瞬态，二者之和精确等于分片登记表存活总数。
     /// 每个 worker 一次只借一个、借完即还，峰值并发持有 ≤ 线程数，永远不把池掏空，
     /// 因此 Acquire 不会走到拒绝策略的超时路径。
     /// </para>
@@ -625,13 +625,25 @@ public class ShardAtomicRemovalTests
 
     private static HayateObject<TestObject> GetWrapped(IHayateObjectPool<TestObject> pool, TestObject item)
     {
-        var mapField = pool.GetType().GetField("_objectMap", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        Assert.NotNull(mapField);
-        var map = mapField.GetValue(pool)!;
-        var tryGet = map.GetType().GetMethod("TryGetValue")!;
-        var args = new object?[] { item, null };
-        tryGet.Invoke(map, args);
-        return (HayateObject<TestObject>)args[1]!;
+        // T09：登记表已按分片拆分（原池级 _objectMap → 各 Shard 私有字段 _objects），
+        // 此处经 _shards 逐分片探测登记表取包装对象。
+        var shardsField = pool.GetType().GetField("_shards", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        Assert.NotNull(shardsField);
+        var shards = (Array)shardsField.GetValue(pool)!;
+
+        foreach (var shard in shards)
+        {
+            var objectsField = shard.GetType().GetField("_objects", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (objectsField == null) continue;
+
+            var map = objectsField.GetValue(shard);
+            var tryGet = map.GetType().GetMethod("TryGetValue")!;
+            var args = new object[] { item, null };
+            tryGet.Invoke(map, args);
+            if (args[1] != null) return (HayateObject<TestObject>)args[1];
+        }
+
+        return null!;
     }
 
     private static int GetLocationCode(HayateObject<TestObject> w)
@@ -705,7 +717,7 @@ public class ShardAtomicRemovalTests
             .WithEnableGenerationOptimization(false)
             .Build();
 
-        var item = pool.Acquire();                      // 预填 1 个，Location=Borrowed，位于 _objectMap
+        var item = pool.Acquire();                      // 预填 1 个，Location=Borrowed，位于分片登记表
         var w = GetWrapped(pool, item);
         Assert.Equal(0, policy.OnDestroyCount);
 
