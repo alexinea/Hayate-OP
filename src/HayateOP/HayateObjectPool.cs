@@ -272,8 +272,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     // 激活对象
                     _policy.OnAcquire(w.Value);
 
-                    // 记录借出时间和调用栈（如果启用泄漏检测）
-                    w.IsBorrowed = true;
+                    // P2-新-1：借出状态不再单独置位——Shard.TryTake 认领时已把 Location
+                    // 迁移为 Borrowed，IsBorrowed 是其计算属性（单一事实源）。
 
                     //if (_options.EnableEviction || _options.EnableLeakDetection || _options.EnableGenerationOptimization)
                     if (_enableEviction || _enableLeakDetection || _enableGenerationOptimization)
@@ -403,7 +403,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                     _policy.OnAcquire(w.Value);
 
-                    w.IsBorrowed = true;
+                    // P2-新-1：TryTake 认领已置 Location=Borrowed，IsBorrowed 为其计算属性。
 
                     // D3：记录源分片索引，Release round-trip 用
                     w.ShardIndex = shard.Index;
@@ -483,8 +483,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             // 纯化对象
             _policy.OnPassivate(item);
 
-            // 更新对象状态
-            w.IsBorrowed = false;
+            // P2-新-1：归还状态不再单独清位——下方 shard.Add 成功即把 Location 迁回
+            // InPool（IsBorrowed 随之为 false）；Add 被拒则走 Destroy（Location=Destroyed）。
 
             //if (_options.EnableEviction || _options.EnableMetrics)
             if (_enableEviction || _enableMetrics)

@@ -35,7 +35,14 @@ public class HayateObject<T> where T : class
     public DateTime LastBorrowedAt { get; set; }
     public DateTime LastReleasedAt { get; set; }
     public string AcquireTrace { get; set; }
-    public bool IsBorrowed { get; set; }
+
+    /// <summary>
+    /// P2-新-1：借出状态改为 <see cref="Location"/> 的计算属性，消除双源不一致窗口。
+    /// 原独立 bool 字段与 Location（Borrowed 状态）由两条路径分别维护，
+    /// 弱内存模型下存在 stale 读风险；Location 为 volatile 且全部迁移在 Shard 自旋锁内完成，
+    /// 以它为唯一事实源。Removing（驱逐认领）/Destroyed 均不属于 Borrowed，语义与原字段一致。
+    /// </summary>
+    public bool IsBorrowed => Location == HayateObjectLocation.Borrowed;
     public int Generation { get; set; } // 0 年轻代 1 老年代
 
     public int ValidationSkipCount { get; set; } // 老年代跳过验证计数

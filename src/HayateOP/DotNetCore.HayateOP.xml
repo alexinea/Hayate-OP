@@ -180,6 +180,14 @@
         <member name="F:DotNetCore.HayateOP.HayateObjectLocation.Destroyed">
             <summary>Already destroyed; must never be handed out again.</summary>
         </member>
+        <member name="P:DotNetCore.HayateOP.HayateObject`1.IsBorrowed">
+            <summary>
+            P2-新-1：借出状态改为 <see cref="F:DotNetCore.HayateOP.HayateObject`1.Location"/> 的计算属性，消除双源不一致窗口。
+            原独立 bool 字段与 Location（Borrowed 状态）由两条路径分别维护，
+            弱内存模型下存在 stale 读风险；Location 为 volatile 且全部迁移在 Shard 自旋锁内完成，
+            以它为唯一事实源。Removing（驱逐认领）/Destroyed 均不属于 Borrowed，语义与原字段一致。
+            </summary>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayateObject`1.ShardIndex">
             <summary>
             对象被借出时所属的分片索引。
