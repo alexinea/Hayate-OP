@@ -82,8 +82,18 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     // T15：CreateNew 分片的轮询游标（避免新建对象全部落在首个分片）
     private int _createCursor;
     private long _leakDetectedCount;
-    private readonly HayatePoolStats _stats = new();
-    private readonly object _statsLock = new();
+
+    // PR-D L2：统计数据去全局锁——借/还热路径改为 Interlocked 原子累加，
+    // Min/Max 用 CAS 环（long 毫秒存储，GetStats 快照时转 double 汇总）。
+    // 更新语义不变；GetStats 不再持全局锁，改为逐字段原子读取的最终一致快照。
+    private long _waitTimeSum;
+    private long _waitTimeCount;
+    private long _waitTimeMaxMs;
+    private long _waitTimeMinMs = long.MaxValue;
+    private long _leaseTimeSum;
+    private long _leaseTimeCount;
+    private long _leaseTimeMaxMs;
+    private long _leaseTimeMinMs = long.MaxValue;
 
     private readonly bool _enableValidation;
     private readonly bool _enableMetrics;
@@ -331,7 +341,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         // 记录等待时间统计
                         var waitTime = (long)sw.Elapsed.TotalMilliseconds;
                         UpdateWaitTimeStats(waitTime);
-                        _metrics.RecordObjectAcquired(_name, w.Value, waitTime);
+                        // L3：纳入 _enableMetrics 门控（借出路径漏网点）
+                        if (_enableMetrics)
+                        {
+                            _metrics.RecordObjectAcquired(_name, w.Value, waitTime);
+                        }
                         _logger.LogDebug("Object borrowed from pool. Type: {Type} WaitTime: {WaitTime:F2}ms, shard: {ShardIndex}", typeof(T).Name, waitTime, shard.Index);
                     }
                     else
@@ -389,7 +403,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         if (elapsed >= timeout)
                         {
                             if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
-                            _metrics.RecordObjectMiss(_name);
+                            // L3：纳入 _enableMetrics 门控（超时创建路径漏网点）
+                            if (_enableMetrics)
+                            {
+                                _metrics.RecordObjectMiss(_name);
+                            }
 
                             // T15 修复：创建「已登记」的池内对象（登记即 Borrowed，不进空闲
                             // 链表——避免其他等待者 TryTake 认领导致双重借出），Release 时
@@ -501,7 +519,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
             Destroy(item);
 
-            _metrics.RecordObjectReleased(_name, item, false);
+            // L3：纳入 _enableMetrics 门控（拒绝路径原本不受门控，是启用 HayateDiagnostics 后的漏网分配点）
+            if (_enableMetrics)
+            {
+                _metrics.RecordObjectReleased(_name, item, false);
+            }
 
             return;
         }
@@ -515,7 +537,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
             Destroy(w);
 
-            _metrics.RecordObjectReleased(_name, item, false);
+            // L3：纳入 _enableMetrics 门控（验证拒绝路径漏网点）
+            if (_enableMetrics)
+            {
+                _metrics.RecordObjectReleased(_name, item, false);
+            }
 
             return;
         }
@@ -548,7 +574,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                 Destroy(w);
 
-                _metrics.RecordObjectReleased(_name, item, false);
+                // L3：纳入 _enableMetrics 门控（策略拒绝路径漏网点）
+                if (_enableMetrics)
+                {
+                    _metrics.RecordObjectReleased(_name, item, false);
+                }
 
                 // 维持最小空闲水位：策略层拒绝后池被掏空，主动补充。
                 // 仅在开启了自动扩缩容且 MinPoolSize > 0 时触发，避免无意义的开销。
@@ -773,23 +803,47 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     private void UpdateWaitTimeStats(long waitTimeMs)
     {
-        lock (_statsLock)
-        {
-            _stats.WaitTimeSum += waitTimeMs;
-            _stats.WaitTimeCount++;
-            if (waitTimeMs > _stats.MaxWaitTimeMs) _stats.MaxWaitTimeMs = waitTimeMs;
-            if (waitTimeMs < _stats.MinWaitTimeMs) _stats.MinWaitTimeMs = waitTimeMs;
-        }
+        // L2：无锁更新（原实现持全局 _statsLock，为并发借还的争用点）
+        Interlocked.Add(ref _waitTimeSum, waitTimeMs);
+        Interlocked.Increment(ref _waitTimeCount);
+        InterlockedMax(ref _waitTimeMaxMs, waitTimeMs);
+        InterlockedMin(ref _waitTimeMinMs, waitTimeMs);
     }
 
     private void UpdateLeaseTimeStats(long leaseTimeMs)
     {
-        lock (_statsLock)
+        // L2：无锁更新（同上）
+        Interlocked.Add(ref _leaseTimeSum, leaseTimeMs);
+        Interlocked.Increment(ref _leaseTimeCount);
+        InterlockedMax(ref _leaseTimeMaxMs, leaseTimeMs);
+        InterlockedMin(ref _leaseTimeMinMs, leaseTimeMs);
+    }
+
+    /// <summary>
+    /// L2：无锁 Max 归并（CAS 环）。并发下最终收敛到真实最大值。
+    /// </summary>
+    private static void InterlockedMax(ref long location, long value)
+    {
+        var current = Volatile.Read(ref location);
+        while (value > current)
         {
-            _stats.LeaseTimeSum += leaseTimeMs;
-            _stats.LeaseTimeCount++;
-            if (leaseTimeMs > _stats.MaxLeaseTimeMs) _stats.MaxLeaseTimeMs = leaseTimeMs;
-            if (leaseTimeMs < _stats.MinLeaseTimeMs) _stats.MinLeaseTimeMs = leaseTimeMs;
+            var previous = Interlocked.CompareExchange(ref location, value, current);
+            if (previous == current) break;
+            current = previous;
+        }
+    }
+
+    /// <summary>
+    /// L2：无锁 Min 归并（CAS 环）。并发下最终收敛到真实最小值。
+    /// </summary>
+    private static void InterlockedMin(ref long location, long value)
+    {
+        var current = Volatile.Read(ref location);
+        while (value < current)
+        {
+            var previous = Interlocked.CompareExchange(ref location, value, current);
+            if (previous == current) break;
+            current = previous;
         }
     }
 
@@ -977,32 +1031,40 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     public HayatePoolStats GetStats()
     {
-        lock (_statsLock)
-        {
-            int totalIdle = _shards.Sum(s => s.Count);
-            int totalObjects = TrackedObjectCount; // 真实总对象数（空闲+借出）
+        // L2：不再持全局 _statsLock——统计字段逐个原子读取（最终一致快照）；
+        // 分片计数读取语义与原实现一致（原实现锁内读取同样不构成分片级一致性）。
+        int totalIdle = _shards.Sum(s => s.Count);
+        int totalObjects = TrackedObjectCount; // 真实总对象数（空闲+借出）
 
-            return new HayatePoolStats
-            {
-                PooledCount = _shards.Sum(s => s.Count),
-                TotalCreated = Interlocked.Read(ref _totalCreated),
-                TotalReleased = Interlocked.Read(ref _totalReleased),
-                TotalMissed = Interlocked.Read(ref _totalMissed),
-                TotalAcquired = Interlocked.Read(ref _totalAcquired),
-                AvailableSlots = totalIdle,
-                MinSize = _options.MinPoolSize,
-                CurrentSize = totalObjects,
-                LeakDetectedCount = Interlocked.Read(ref _leakDetectedCount),
-                WaitTimeSum = _stats.WaitTimeSum,
-                WaitTimeCount = _stats.WaitTimeCount,
-                LeaseTimeSum = _stats.LeaseTimeSum,
-                LeaseTimeCount = _stats.LeaseTimeCount,
-                MaxWaitTimeMs = _stats.MaxWaitTimeMs,
-                MaxLeaseTimeMs = _stats.MaxLeaseTimeMs,
-                MinWaitTimeMs = _stats.MinWaitTimeMs == double.MaxValue ? 0 : _stats.MinWaitTimeMs,
-                MinLeaseTimeMs = _stats.MinLeaseTimeMs == double.MaxValue ? 0 : _stats.MinLeaseTimeMs
-            };
-        }
+        long waitSum = Volatile.Read(ref _waitTimeSum);
+        long waitCount = Volatile.Read(ref _waitTimeCount);
+        long waitMax = Volatile.Read(ref _waitTimeMaxMs);
+        long waitMin = Volatile.Read(ref _waitTimeMinMs);
+        long leaseSum = Volatile.Read(ref _leaseTimeSum);
+        long leaseCount = Volatile.Read(ref _leaseTimeCount);
+        long leaseMax = Volatile.Read(ref _leaseTimeMaxMs);
+        long leaseMin = Volatile.Read(ref _leaseTimeMinMs);
+
+        return new HayatePoolStats
+        {
+            PooledCount = _shards.Sum(s => s.Count),
+            TotalCreated = Interlocked.Read(ref _totalCreated),
+            TotalReleased = Interlocked.Read(ref _totalReleased),
+            TotalMissed = Interlocked.Read(ref _totalMissed),
+            TotalAcquired = Interlocked.Read(ref _totalAcquired),
+            AvailableSlots = totalIdle,
+            MinSize = _options.MinPoolSize,
+            CurrentSize = totalObjects,
+            LeakDetectedCount = Interlocked.Read(ref _leakDetectedCount),
+            WaitTimeSum = waitSum,
+            WaitTimeCount = waitCount,
+            LeaseTimeSum = leaseSum,
+            LeaseTimeCount = leaseCount,
+            MaxWaitTimeMs = waitMax,
+            MaxLeaseTimeMs = leaseMax,
+            MinWaitTimeMs = waitMin == long.MaxValue ? 0 : waitMin,
+            MinLeaseTimeMs = leaseMin == long.MaxValue ? 0 : leaseMin
+        };
     }
 
     public HayatePoolSnapshot TakeSnapshot()

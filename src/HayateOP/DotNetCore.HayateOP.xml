@@ -257,6 +257,16 @@
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.UntrackKey(`0)">
             <summary>T09：仅有裸对象引用（无包装）时，全分片扫描摘除登记项。</summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.InterlockedMax(System.Int64@,System.Int64)">
+            <summary>
+            L2：无锁 Max 归并（CAS 环）。并发下最终收敛到真实最大值。
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.InterlockedMin(System.Int64@,System.Int64)">
+            <summary>
+            L2：无锁 Min 归并（CAS 环）。并发下最终收敛到真实最小值。
+            </summary>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TrackedCount">
             <summary>本分片登记的存活对象数（空闲 + 借出）。</summary>
         </member>

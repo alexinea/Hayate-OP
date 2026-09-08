@@ -4,5 +4,13 @@
         <name>DotNetCore.HayateOP.Extensions.Diagnostics</name>
     </assembly>
     <members>
+        <member name="F:DotNetCore.HayateOP.Metrics.HayateDiagnostics._cachedEventNames">
+            <summary>
+            L3：事件名缓存。事件名只依赖 <c>poolName</c>（运行期不变），
+            避免每次 <see cref="!:Source.Write(string, object)"/> 前插值分配新字符串。
+            诊断实例通常每池一个；多池共享同一实例时按引用比较失效退化为重建，语义不变。
+            <c>volatile</c> 保证重建后的 <see cref="T:DotNetCore.HayateOP.Metrics.HayateDiagnostics.EventNameSet"/> 安全发布（字段整体一致可见）。
+            </summary>
+        </member>
     </members>
 </doc>
