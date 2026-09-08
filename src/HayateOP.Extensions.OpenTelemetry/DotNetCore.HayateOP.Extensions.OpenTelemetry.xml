@@ -1,0 +1,100 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>DotNetCore.HayateOP.Extensions.OpenTelemetry</name>
+    </assembly>
+    <members>
+        <member name="T:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetricsOptions">
+            <summary>
+            OpenTelemetry 桥接选项
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetricsOptions.MeterName">
+            <summary>
+            <see cref="T:System.Diagnostics.Metrics.Meter"/> 名称（Meter.Name）。默认 "DotNetCore.HayateOP"。
+            </summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics">
+            <summary>
+            T14：将 <see cref="T:DotNetCore.HayateOP.Metrics.IHayateMetrics"/> 事件桥接到 <see cref="N:System.Diagnostics.Metrics"/>（.NET 官方 Metrics API，
+            OpenTelemetry .NET SDK 的原生数据源）。
+            <para>
+            指标清单：
+            <list type="bullet">
+            <item><description>Counter <c>HayatePoolAcquire</c> —— 借出次数（tag: pool.name）</description></item>
+            <item><description>Counter <c>HayatePoolRelease</c> —— 归还次数（tag: pool.name, valid）</description></item>
+            <item><description>Counter <c>HayatePoolMiss</c> —— 未命中（需创建新对象）次数（tag: pool.name）</description></item>
+            <item><description>Counter <c>HayatePoolScaled</c> —— 扩缩容事件次数（tag: pool.name, action）</description></item>
+            <item><description>Histogram <c>HayatePoolWaitTime</c> —— 借出等待时长（ms，tag: pool.name）</description></item>
+            <item><description>ObservableGauge <c>HayatePoolSize</c> —— 各池当前容量（tag: pool.name）</description></item>
+            <item><description>ObservableGauge <c>HayatePoolAvailable</c> —— 各池当前可用（空闲）对象数（tag: pool.name）</description></item>
+            </list>
+            </para>
+            <para>
+            本包零外部 NuGet 依赖：<see cref="T:System.Diagnostics.Metrics.Meter"/> 由 .NET 6+ 基础类库内置（System.Diagnostics.DiagnosticSource），
+            使用方按需自行引入 OpenTelemetry SDK + Exporter（OTLP / Prometheus / InMemory …）订阅
+            Meter "<c>DotNetCore.HayateOP</c>" 即可；无 SDK 时也可用 <c>dotnet-counters</c> 直接观测。
+            </para>
+            <para>
+            解耦约束：本类不访问池的任何内部状态——事件经 <see cref="T:DotNetCore.HayateOP.Metrics.IHayateMetrics"/> 回调、
+            gauge 经公开的 <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/> + <see cref="M:DotNetCore.HayateOP.IHayateObjectPool.GetStats"/> 取数。
+            </para>
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics.TagPoolName">
+            <summary>池名 tag 键（OTel 惯例小写点分）。</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics.TagValid">
+            <summary>归还有效性 tag 键。</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics.TagAction">
+            <summary>扩缩容动作 tag 键（expand / shrink）。</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics.#ctor(DotNetCore.HayateOP.IHayateObjectPoolRegistry,DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetricsOptions)">
+            <summary>
+            创建桥接实例。
+            </summary>
+            <param name="registry">
+            池注册表（gauge 数据源）。可为 <c>null</c>——此时 gauge 仍会被创建，
+            但观测不到任何池（适合仅关心事件计数器的场景）。
+            </param>
+            <param name="options">可选配置（Meter 名等）。</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics.RecordObjectAcquired(System.String,System.Object,System.Double)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics.RecordObjectReleased(System.String,System.Object,System.Boolean)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics.RecordObjectMiss(System.String)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics.RecordPoolScaled(System.String,System.String,System.Int32,System.Int32)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics.Dispose">
+            <summary>释放 Meter（注销全部指标；幂等）。</summary>
+        </member>
+        <member name="T:Microsoft.Extensions.DependencyInjection.HayateOpenTelemetryServiceCollectionExtensions">
+            <summary>
+            T14：<see cref="T:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics"/> 的 DI 注册扩展。
+            </summary>
+        </member>
+        <member name="M:Microsoft.Extensions.DependencyInjection.HayateOpenTelemetryServiceCollectionExtensions.AddHayateOpenTelemetryMetrics(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Action{DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetricsOptions})">
+            <summary>
+            注册 OpenTelemetry 桥接指标（覆盖 <c>AddHayatePoolSupport()</c> 默认的
+            <c>EmptyHayateMetrics</c>），并令其通过容器中的
+            <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/>（由 <c>RegisterHayatePool&lt;T&gt;</c> 填充）
+            观测各池容量。
+            <para>
+            本方法只负责把指标发布到 System.Diagnostics.Metrics；
+            消费端（OpenTelemetry SDK + Exporter / dotnet-counters）由使用方自行接入，
+            例如：<c>builder.Services.AddOpenTelemetry().WithMetrics(m =&gt; m.AddMeter("DotNetCore.HayateOP"))</c>。
+            </para>
+            </summary>
+            <param name="services">服务容器。</param>
+            <param name="configure">可选的桥接配置（Meter 名等）。</param>
+            <returns>服务容器（链式）。</returns>
+        </member>
+    </members>
+</doc>

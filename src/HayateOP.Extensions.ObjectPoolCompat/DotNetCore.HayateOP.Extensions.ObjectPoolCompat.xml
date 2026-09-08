@@ -1,0 +1,114 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>DotNetCore.HayateOP.Extensions.ObjectPoolCompat</name>
+    </assembly>
+    <members>
+        <member name="T:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatPooledObjectPolicy`1">
+            <summary>
+            T15：把 MEOP 的 <see cref="T:Microsoft.Extensions.ObjectPool.IPooledObjectPolicy`1"/> 适配为 HayateOP 的
+            <see cref="T:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1"/>，使既有策略实现原样驱动 HayateOP 池。
+            </summary>
+            <typeparam name="T">池化对象类型。</typeparam>
+            <remarks>
+            钩子映射（MEOP 仅有两个钩子，其余映射为无操作）：
+            <list type="bullet">
+            <item><c>Create()</c> → <see cref="M:Microsoft.Extensions.ObjectPool.IPooledObjectPolicy`1.Create"/></item>
+            <item><c>OnRelease(item)</c> → <see cref="M:Microsoft.Extensions.ObjectPool.IPooledObjectPolicy`1.Return(`0)"/>
+            （返回 false = 拒绝回池，HayateOP 将销毁该对象，与 MEOP「丢弃」语义一致）</item>
+            <item><c>Validate</c> → 恒 true（MEOP 无借出时校验语义；IResettable.TryReset
+            由 MEOP 默认策略内部处理，经 Return 钩子自然到达）</item>
+            <item><c>OnAcquire/OnPassivate/OnDestroy</c> → 无操作</item>
+            </list>
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatPooledObjectPolicy`1.#ctor(Microsoft.Extensions.ObjectPool.IPooledObjectPolicy{`0})">
+            <summary>以既有 MEOP 策略驱动适配器。</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatPooledObjectPolicy`1.Create">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatPooledObjectPolicy`1.OnRelease(`0)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatPooledObjectPolicy`1.Validate(`0)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatPooledObjectPolicy`1.OnAcquire(`0)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatPooledObjectPolicy`1.OnPassivate(`0)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatPooledObjectPolicy`1.OnDestroy(`0)">
+            <inheritdoc />
+        </member>
+        <member name="T:DotNetCore.HayateOP.ObjectPoolCompat.HayateObjectPoolAdapter`1">
+            <summary>
+            T15：把 HayateOP 池包装为 <see cref="T:Microsoft.Extensions.ObjectPool.ObjectPool`1"/>（Microsoft.Extensions.ObjectPool 抽象类），
+            使现有 MEOP 调用方（只依赖 <c>ObjectPool&lt;T&gt;</c> 的 Get/Return）零代码改动切换到 HayateOP。
+            </summary>
+            <typeparam name="T">池化对象类型。</typeparam>
+            <remarks>
+            语义映射：<c>Get()</c> → <see cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.Acquire"/>；
+            <c>Return(obj)</c> → <see cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.Release(`0)"/>。
+            拒绝/溢出时 HayateOP 在 Release 内部销毁对象，与 MEOP「池满即丢弃」语义对齐。
+            注意：Get 的阻塞/创建行为由被包装池自身的拒绝策略决定——
+            MEOP 语义（空池同步立即创建）请使用 <see cref="T:DotNetCore.HayateOP.ObjectPoolCompat.HayateObjectPoolCompatProvider"/> 构建池。
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.ObjectPoolCompat.HayateObjectPoolAdapter`1.InnerPool">
+            <summary>被包装的 HayateOP 池实例。</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.ObjectPoolCompat.HayateObjectPoolAdapter`1.#ctor(DotNetCore.HayateOP.IHayateObjectPool{`0})">
+            <summary>包装一个已构建的 HayateOP 池。</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.ObjectPoolCompat.HayateObjectPoolAdapter`1.Get">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.ObjectPoolCompat.HayateObjectPoolAdapter`1.Return(`0)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.ObjectPoolCompat.HayateObjectPoolAdapter`1.Dispose">
+            <summary>释放底层 HayateOP 池。</summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatOptions">
+            <summary>
+            T15：<see cref="T:DotNetCore.HayateOP.ObjectPoolCompat.HayateObjectPoolCompatProvider"/> 构建参数。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatOptions.PoolNamePrefix">
+            <summary>生成的池名前缀（后接 <c>typeof(T).Name</c>）。默认 <c>"HayateCompat."</c>。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatOptions.MinSize">
+            <summary>
+            预热数量。默认 0（MEOP DefaultObjectPool 也是懒创建）；
+            若希望规避首次借出的冷启动延迟（见 <see cref="P:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatOptions.AcquireTimeout"/>），可设为预期并发量。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatOptions.MaxSize">
+            <summary>
+            容量上限。默认 <c>Environment.ProcessorCount * 2</c>——
+            对齐 MEOP DefaultObjectPool 的默认 <c>maximumRetained</c> 口径。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatOptions.AcquireTimeout">
+            <summary>
+            空池借出超时。默认 1s。
+            ⚠️ HayateOP 当前 CreateNew 语义是「等满该超时后创建」（PR-C 实测 L6，PR-D 改进项），
+            因此冷池首次借出的延迟 ≈ 此值——与 MEOP「空池同步立即创建、永不阻塞」存在差异。
+            缩短该值可降低冷启动延迟，或用 <see cref="P:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatOptions.MinSize"/> 预热规避。
+            </summary>
+        </member>
+        <!-- Badly formed XML comment ignored for member "T:DotNetCore.HayateOP.ObjectPoolCompat.HayateObjectPoolCompatProvider" -->
+        <member name="M:DotNetCore.HayateOP.ObjectPoolCompat.HayateObjectPoolCompatProvider.#ctor">
+            <summary>以默认参数构建。</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.ObjectPoolCompat.HayateObjectPoolCompatProvider.#ctor(DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatOptions)">
+            <summary>以自定义参数构建。</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.ObjectPoolCompat.HayateObjectPoolCompatProvider.Create``1(Microsoft.Extensions.ObjectPool.IPooledObjectPolicy{``0})">
+            <inheritdoc />
+        </member>
+    </members>
+</doc>

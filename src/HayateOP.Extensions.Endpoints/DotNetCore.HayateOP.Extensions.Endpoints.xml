@@ -4,49 +4,59 @@
         <name>DotNetCore.HayateOP.Extensions.Endpoints</name>
     </assembly>
     <members>
-        <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.CreateDocumentationId(System.Type)">
+        <member name="T:Microsoft.AspNetCore.Routing.EndpointRouteBuilderExtensions">
             <summary>
-            Generates a documentation comment ID for a type.
-            Example: T:Namespace.Outer+Inner`1 becomes T:Namespace.Outer.Inner`1
+            为 .NET 6 提供 MapGroup 兼容实现
             </summary>
         </member>
-        <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.CreateDocumentationId(System.Reflection.PropertyInfo)">
+        <member name="M:Microsoft.AspNetCore.Routing.EndpointRouteBuilderExtensions.MapGroup(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder,System.String)">
             <summary>
-            Generates a documentation comment ID for a property.
-            Example: P:Namespace.ContainingType.PropertyName or for an indexer P:Namespace.ContainingType.Item(System.Int32)
+            兼容 .NET 7 的 MapGroup 方法，用法完全一致
+            </summary>
+            <param name="builder">Endpoint 构建器</param>
+            <param name="prefix">路由前缀</param>
+            <returns>路由组构建器</returns>
+        </member>
+        <member name="T:Microsoft.AspNetCore.Routing.RouteGroupBuilder">
+            <summary>
+            .NET 6 兼容的 RouteGroupBuilder 实现
             </summary>
         </member>
-        <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.CreateDocumentationId(System.Type,System.String)">
+        <member name="M:Microsoft.AspNetCore.Routing.RouteGroupBuilder.WithTags(System.String[])">
             <summary>
-            Generates a documentation comment ID for a property given its container type and property name.
-            Example: P:Namespace.ContainingType.PropertyName
+            为组内所有 Endpoint 添加 Tags（用于 Swagger 文档）
             </summary>
         </member>
-        <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.CreateDocumentationId(System.Reflection.MethodInfo)">
+        <member name="M:Microsoft.AspNetCore.Routing.RouteGroupBuilder.WithGroupName(System.String)">
             <summary>
-            Generates a documentation comment ID for a method (or constructor).
-            For example:
-              M:Namespace.ContainingType.MethodName(ParamType1,ParamType2)~ReturnType
-              M:Namespace.ContainingType.#ctor(ParamType)
+            为组内所有 Endpoint 设置 GroupName（用于 Swagger 文档分组）
             </summary>
         </member>
-        <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.GetTypeDocId(System.Type,System.Boolean,System.Boolean)">
+        <member name="M:Microsoft.AspNetCore.Routing.RouteGroupBuilder.RequireAuthorization">
             <summary>
-            Generates a documentation ID string for a type.
-            This method handles nested types (replacing '+' with '.'),
-            generic types, arrays, pointers, by-ref types, and generic parameters.
-            The <paramref name="includeGenericArguments"/> flag controls whether
-            constructed generic type arguments are emitted, while <paramref name="omitGenericArity"/>
-            controls whether the generic arity marker (e.g. "`1") is appended.
+            为组内所有 Endpoint 启用授权
             </summary>
         </member>
-        <member name="M:Microsoft.AspNetCore.OpenApi.Generated.DocumentationCommentIdHelper.NormalizeDocId(System.String)">
+        <member name="M:Microsoft.AspNetCore.Routing.RouteGroupBuilder.RequireAuthorization(System.String)">
             <summary>
-            Normalizes a documentation comment ID to match the compiler-style format.
-            Strips the return type suffix for ordinary methods but retains it for conversion operators.
+            为组内所有 Endpoint 启用授权（指定策略）
             </summary>
-            <param name="docId">The documentation comment ID to normalize.</param>
-            <returns>The normalized documentation comment ID.</returns>
+        </member>
+        <member name="M:Microsoft.AspNetCore.Routing.RouteGroupBuilder.WithMetadata(System.Object[])">
+            <summary>
+            为组内所有 Endpoint 添加自定义 Metadata（通用扩展）
+            </summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.Routing.RouteGroupBuilder.Microsoft#AspNetCore#Builder#IEndpointConventionBuilder#Add(System.Action{Microsoft.AspNetCore.Builder.EndpointBuilder})">
+            <summary>
+            添加组级别的约定（自动应用到所有子 Endpoint）
+            </summary>
+        </member>
+        <member name="M:Microsoft.Extensions.DependencyInjection.EndpointsExtensions.TryResolve(System.IServiceProvider,System.String,DotNetCore.HayateOP.IHayateObjectPool@)">
+            <summary>
+            T05：优先按逻辑池名查注册表；若未注入注册表（例如直接用 Builder 而非 DI 注册），
+            退回按类型名解析 DI 中注册的 IHayateObjectPool&lt;T&gt;。
+            </summary>
         </member>
     </members>
 </doc>
