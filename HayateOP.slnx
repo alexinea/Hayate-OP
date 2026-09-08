@@ -2,6 +2,7 @@
   <Folder Name="/samples/">
     <Project Path="samples/HayateOP.Samples.Endpoints/HayateOP.Samples.Endpoints.csproj" />
     <Project Path="samples/HayateOP.Samples/HayateOP.Samples.csproj" />
+    <Project Path="samples/HayateOP.Samples.ObjectPoolCompat/HayateOP.Samples.ObjectPoolCompat.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HayateOP.Extensions.Configuration/HayateOP.Extensions.Configuration.csproj" Id="197d2007-2165-43c8-b7d5-eb26153b7185" />
