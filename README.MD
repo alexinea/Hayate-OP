@@ -111,7 +111,10 @@ var pool = new HayatePoolBuilder<MyPooledObject>()
     .Build();
 ```
 
-> **Tip:** When auto-scaling is disabled, `MaxPoolSize` is forced to equal `MinPoolSize`.
+> **Tip:** When auto-scaling is disabled, the pool never grows on its own (scaling callbacks
+> and timeout-triggered scale-up are gated by `EnableAutoScaling`); your explicit `MaxPoolSize`
+> is kept as the hard capacity cap. (Breaking change in 2.1: previously `MaxPoolSize` was
+> forced to `MinPoolSize`, which silently collapsed capacity to 0 when `MinPoolSize = 0`.)
 > When sharding is disabled, `ShardCount` is forced to `1`.
 
 ### Custom Object Policy

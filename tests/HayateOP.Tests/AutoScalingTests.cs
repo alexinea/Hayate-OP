@@ -33,7 +33,8 @@ public class AutoScalingTests
 
         var options = new HayatePoolOptions { EnableAutoScaling = false, MinPoolSize = 10, MaxPoolSize = 100 };
         options.ApplyFeatureSwitches();
-        Assert.Equal(10, options.MaxPoolSize);
+        // PR-D L9（2.1 行为变更）：autoScaling off 不再塌缩 Max=Min，显式 Max 保留为硬上限
+        Assert.Equal(100, options.MaxPoolSize);
     }
 
     [Fact(Timeout = 60000)]

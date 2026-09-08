@@ -508,8 +508,12 @@ public class HayatePoolOptions
             ShardCount = 1;
         }
 
-        // 关闭自动扩缩容：强制池大小固定
-        if (!EnableAutoScaling)
+        // 关闭自动扩缩容（PR-D L9，2.1 行为变更）：
+        // 旧语义强制 MaxPoolSize = MinPoolSize —— Min=0 时容量塌缩为 0，
+        // 一切归还都被分片 max=0 静默拒绝（T11「极简池 Min 必须抬到 250」怪象同源）。
+        // 新语义：仅关闭自动扩缩（扩容回调/超时强扩均受 EnableAutoScaling 门控，不会突破 Max），
+        // MaxPoolSize 保留用户显式值作为硬上限；仅在 Max < Min 时保序抬升，避免 IsValid 校验失败。
+        if (!EnableAutoScaling && MaxPoolSize < MinPoolSize)
         {
             MaxPoolSize = MinPoolSize;
         }
