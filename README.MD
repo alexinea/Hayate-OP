@@ -459,6 +459,38 @@ pool.ReloadConfig(config =>
 pool.Clear();
 ```
 
+### OpenTelemetry metrics (optional package)
+
+`DotNetCore.HayateOP.Extensions.OpenTelemetry` bridges `IHayateMetrics` onto
+`System.Diagnostics.Metrics` (the native data source of the OpenTelemetry .NET SDK).
+The package itself has **zero external NuGet dependencies** — `Meter` is built into
+.NET 6+; you bring your own OpenTelemetry SDK/exporter (OTLP, Prometheus, …) on the
+consumer side.
+
+Published instruments (meter `DotNetCore.HayateOP`):
+
+| Instrument | Type | Tags |
+| :--- | :--- | :--- |
+| `HayatePoolAcquire` | Counter | `pool.name` |
+| `HayatePoolRelease` | Counter | `pool.name`, `valid` |
+| `HayatePoolMiss` | Counter | `pool.name` |
+| `HayatePoolScaled` | Counter | `pool.name`, `action` |
+| `HayatePoolWaitTime` | Histogram (ms) | `pool.name` |
+| `HayatePoolSize` | ObservableGauge | `pool.name` |
+| `HayatePoolAvailable` | ObservableGauge | `pool.name` |
+
+```csharp
+builder.Services.AddHayatePoolSupport()
+    .RegisterHayatePool<MyPooledObject>(builder.Configuration);
+
+// Publish HayateOP metrics to System.Diagnostics.Metrics
+builder.Services.AddHayateOpenTelemetryMetrics();
+
+// Consume them with the OpenTelemetry SDK (or observe via `dotnet-counters`)
+builder.Services.AddOpenTelemetry()
+    .WithMetrics(m => m.AddMeter("DotNetCore.HayateOP"));
+```
+
 ## Performance
 
 Benchmark suite (BenchmarkDotNet, short-iteration job: 3 warmup + 10 iterations, Server GC)

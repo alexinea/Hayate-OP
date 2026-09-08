@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <!-- T14 OTel 桥接验收：单 TFM net10.0（SDK 兼容性风险已通过桥接零外部依赖规避，
+             测试侧的 OpenTelemetry SDK 仅做消费端管线验证，不进核心包） -->
+        <TargetFramework>net10.0</TargetFramework>
+        <RootNamespace>DotNetCore.HayateOP.Tests.OpenTelemetry</RootNamespace>
+        <OutputType>Exe</OutputType>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsTestProject>true</IsTestProject>
+        <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+        <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+        <!-- 1.9.0 的 OpenTelemetry.Api 有已知中危漏洞（GHSA-g94r-2vxg-569j）。
+             本机 NuGet 镜像（nuget.alexinea.com）当前不可用，1.12.0 无法还原，
+             暂锁缓存中已有的 1.9.0 并压制告警；该依赖仅存在于测试工程，
+             不进入 DotNetCore.HayateOP.Extensions.OpenTelemetry 的任何发布物。 -->
+        <NoWarn>$(NoWarn);NU1902</NoWarn>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\src\HayateOP.Extensions.DependencyInjection\HayateOP.Extensions.DependencyInjection.csproj" />
+        <ProjectReference Include="..\..\src\HayateOP.Extensions.OpenTelemetry\HayateOP.Extensions.OpenTelemetry.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="xunit.v3" Version="4.0.0" />
+        <!-- 消费端管线验证：InMemory Exporter 走的采集管线与 OTLP Collector 相同（仅末端不同）；
+             版本锁定与 NU1902 压制理由见上方 PropertyGroup 注释 -->
+        <PackageReference Include="OpenTelemetry" Version="1.9.0" />
+        <PackageReference Include="OpenTelemetry.Exporter.InMemory" Version="1.9.0" />
+    </ItemGroup>
+
+</Project>
