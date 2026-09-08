@@ -1,0 +1,12 @@
+<Project>
+
+    <ItemGroup>
+      <ProjectReference Include="..\HayateOP\HayateOP.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <!-- 本机 NuGet 缓存已有 10.0.3（镜像 nuget.alexinea.com 当前不可用，勿升级版本号） -->
+      <PackageReference Include="Microsoft.Extensions.ObjectPool" Version="10.0.3" />
+    </ItemGroup>
+
+</Project>

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <!-- T15 兼容适配验收：单 TFM net10.0 -->
+        <TargetFramework>net10.0</TargetFramework>
+        <RootNamespace>DotNetCore.HayateOP.Tests.Compat</RootNamespace>
+        <OutputType>Exe</OutputType>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <IsTestProject>true</IsTestProject>
+        <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+        <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\src\HayateOP.Extensions.ObjectPoolCompat\HayateOP.Extensions.ObjectPoolCompat.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <PackageReference Include="xunit.v3" Version="4.0.0" />
+        <PackageReference Include="Microsoft.Extensions.ObjectPool" Version="10.0.3" />
+    </ItemGroup>
+
+</Project>
