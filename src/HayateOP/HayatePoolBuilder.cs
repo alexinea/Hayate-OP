@@ -512,6 +512,15 @@ public class HayatePoolBuilder<T> where T : class, new()
 
         if (!_options.EnableMetrics)
         {
+            // 2.2 行为变更：显式注册自定义 metrics 却未开启 EnableMetrics 时快速失败，
+            // 不再静默替换为 EmptyHayateMetrics（避免用户误以为自定义指标在生效）。
+            if (!ReferenceEquals(_metrics, EmptyHayateMetrics.Instance))
+            {
+                throw new InvalidOperationException(
+                    "HayatePool: a custom IHayateMetrics was registered via WithMetrics(), but metrics collection is disabled (EnableMetrics = false). " +
+                    "Call WithEnableMetrics(true) to activate it, or remove the WithMetrics() registration.");
+            }
+
             _metrics = EmptyHayateMetrics.Instance;
         }
 

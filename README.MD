@@ -441,6 +441,31 @@ var pool = new HayatePoolBuilder<MyPooledObject>()
     .Build();
 ```
 
+### Builder fails fast on orphaned custom metrics (breaking change in 2.2)
+
+Since 2.2, `Build()` throws `InvalidOperationException` when a custom `IHayateMetrics`
+is registered via `WithMetrics(...)` while metrics collection is disabled
+(`EnableMetrics = false`). In 2.1 and earlier the custom instance was **silently
+replaced** with `EmptyHayateMetrics`, so a forgotten `WithEnableMetrics(true)` went
+undetected. Either enable metrics or remove the `WithMetrics` registration:
+
+```csharp
+// Throws: custom metrics registered but never activated
+var pool = new HayatePoolBuilder<MyPooledObject>()
+    .WithMetrics(myMetrics)
+    .Build(); // InvalidOperationException since 2.2
+
+// Correct: activate the custom metrics
+var pool = new HayatePoolBuilder<MyPooledObject>()
+    .WithEnableMetrics(true)
+    .WithMetrics(myMetrics)
+    .Build();
+```
+
+> The DI / Configuration integration is unaffected: pools built through
+> `AddHayatePool` / `RegisterHayatePool` attach the DI-registered `IHayateMetrics`
+> only when metrics are enabled, exactly as in 2.1.
+
 ## Monitoring and Diagnostics
 
 ### Get current statistics

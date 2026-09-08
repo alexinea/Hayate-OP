@@ -63,12 +63,20 @@ public static class ConfigurationExtensions
             }
 
             // 池构建
-            var pool = new HayatePoolBuilder<T>()
+            // L8（2.2）：仅当 metrics 总开关开启时才挂接 DI 注册的自定义 metrics，
+            // 否则保持 2.1 语义（自定义实例不生效），避免 Build() 快速失败误伤 Configuration 用户。
+            var builder = new HayatePoolBuilder<T>()
                 .WithPoolName(poolName)
                 .WithPolicy(policy)
                 .WithScalingStrategy(scalingStrategy)
-                .WithMetrics(metrics)
-                .WithLogger(logger)
+                .WithLogger(logger);
+
+            if (mergedOptions.EnableMetrics)
+            {
+                builder.WithMetrics(metrics);
+            }
+
+            var pool = builder
                 .Configure(opt => mergedOptions.CopyTo(opt))
                 .Build();
 

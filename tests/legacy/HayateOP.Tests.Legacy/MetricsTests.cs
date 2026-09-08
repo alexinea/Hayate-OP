@@ -26,10 +26,8 @@ public class MetricsTests
     [Fact]
     public void DisableMetrics_ShouldNotUpdateStats()
     {
-        var mockMetrics = new Mock<IHayateMetrics>();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithEnableMetrics(false)
-            .WithMetrics(mockMetrics.Object)
             .Build();
 
         var obj = pool.Acquire();
@@ -37,6 +35,36 @@ public class MetricsTests
 
         var stats = pool.GetStats();
         Assert.Equal(0, stats.TotalReleased);
+    }
+
+    [Fact]
+    public void Build_WithCustomMetricsButMetricsDisabled_Throws()
+    {
+        // L8（2.2 行为变更）：显式注册自定义 metrics 却未开启 EnableMetrics 时，
+        // Build() 快速失败，不再静默替换为 EmptyHayateMetrics。
+        var mockMetrics = new Mock<IHayateMetrics>();
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+        {
+            using var pool = new HayatePoolBuilder<TestObject>()
+                .WithEnableMetrics(false)
+                .WithMetrics(mockMetrics.Object)
+                .Build();
+        });
+
+        Assert.Contains("WithMetrics", ex.Message);
+        Assert.Contains("WithEnableMetrics(true)", ex.Message);
+    }
+
+    [Fact]
+    public void Build_MetricsDisabledWithoutCustomMetrics_DoesNotThrow()
+    {
+        // 默认（未注册自定义 metrics）+ 禁用 metrics：合法配置，不抛错。
+        using var pool = new HayatePoolBuilder<TestObject>()
+            .WithEnableMetrics(false)
+            .Build();
+
+        Assert.NotNull(pool);
     }
 
     [Fact]
