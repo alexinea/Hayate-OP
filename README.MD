@@ -330,21 +330,27 @@ app.Run();
 
 ```csharp
 using DotNetCore.HayateOP;
+using DotNetCore.HayateOP.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddHayatePoolSupport()
-    .RegisterHayatePool<MyPooledObject>()
-    .RegisterDiagnostics<MyPooledObject>();   // System.Diagnostics bridge for pool metrics
+    .RegisterHayatePool<MyPooledObject>();
+
+// System.Diagnostics bridge for pool metrics (implements IHayateMetrics).
+// AddHayatePoolSupport registers the no-op EmptyHayateMetrics via TryAdd,
+// so adding HayateDiagnostics here replaces it as the active IHayateMetrics.
+builder.Services.AddSingleton<IHayateMetrics, HayateDiagnostics>();
 
 var app = builder.Build();
 app.Run();
 ```
 
-> The bridge is registered as `HayateOpDiagnosticsService` (which implements `IHayateMetrics`).
-> To actually capture `System.Diagnostics` events, supply it to a pool via the builder's
-> `WithMetrics(...)` (or replace the default `IHayateMetrics` in DI).
-```
+> The bridge is `HayateDiagnostics` (implements `IHayateMetrics`), which writes events to the
+> `HayateOP` `DiagnosticListener` when `HayatePoolOptions.EnableMetrics` is on. Subscribe via
+> `DiagnosticListener.AllListeners` to capture `HayateOP.Object.Acquire`, `HayateOP.Object.OnRelease`,
+> `HayateOP.Object.Miss`, and `HayateOp.Pool.Scaled` events. Alternatively, supply it to a
+> single pool via the builder's `WithMetrics(...)`.
 
 ### Configuration Options
 
