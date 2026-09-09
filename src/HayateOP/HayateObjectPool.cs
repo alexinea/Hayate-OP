@@ -986,7 +986,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             if (currentTotal == 0) return;
 
             var targetSize = _scalingStrategy.CalculateNewSize(currentTotal, totalIdle, _options);
+#if NET48
+            // .NET Framework 4.8 不支持 Math.Clamp（netcoreapp2.0+ / netstandard2.1 才引入），
+            // 用 Max/Min 组合等价实现；net6+ 等高版本走 #else 分支的原生 Math.Clamp。
+            targetSize = Math.Max(_options.MinPoolSize, Math.Min(_options.MaxPoolSize, targetSize));
+#else
             targetSize = Math.Clamp(targetSize, _options.MinPoolSize, _options.MaxPoolSize);
+#endif
 
             // 扩容冷却时间 3 秒，缩容冷却时间 15 秒，防止频繁抖动
             var canScaleUp = (Stopwatch.GetTimestamp() - _lastScaleUpTime) / (double)Stopwatch.Frequency >= _options.ScaleUpCooldownSeconds;
