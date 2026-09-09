@@ -346,16 +346,16 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         // 零取证开销；调用栈按 LeakTraceCaptureMode 独立控制——
                         // Off（默认）不抓栈（2.0 及之前每次借出抓全栈，37.5μs / 28.7KB 量级）；
                         // Sampled 每 N 次借出抓 1 次（第 1 次必抓）；EveryAcquire 维持旧行为，显式 opt-in。
-                        // M10（2.5）：采集形态 string 全文 → StackFrame[]（fNeedFileInfo:false 低开销），
-                        // 文本形态由 TakeSnapshot 按需格式化。
+                        // M16（2.5）：采集载体改 HayateLeaseContext（AsyncLocal 异步流 + 包装侧快照引用），
+                        // 租约 ID 单调递增，并发借还各自持有独立上下文实例，不再相互覆盖。
                         if (_leakTraceCaptureMode == HayateLeakTraceCaptureMode.EveryAcquire)
                         {
-                            w.AcquireStackFrames = CaptureAcquireFrames();
+                            CaptureLeaseContext(w);
                         }
                         else if (_leakTraceCaptureMode == HayateLeakTraceCaptureMode.Sampled &&
                                  (Interlocked.Increment(ref _leakTraceCounter) - 1) % _leakTraceSampleRate == 0)
                         {
-                            w.AcquireStackFrames = CaptureAcquireFrames();
+                            CaptureLeaseContext(w);
                         }
                     }
 
@@ -748,6 +748,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
             #endregion
 
+            // M16：租约结束——清空当前异步流的租约上下文（Current 归 null；
+            // AsyncLocal 写值有执行上下文复制成本，仅取证开启方付费）。
+            if (_enableLeakDetection && _leakTraceCaptureMode != HayateLeakTraceCaptureMode.Off)
+            {
+                HayateLeaseContext.DetachFromFlow();
+            }
+
             // T06：对象已成功回池，唤醒一个等待中的 Acquire（Block/BlockTimeout/CreateNew）。
             // 无等待者时计数累积，由借出路径 Wait(0) 消费，不会泄漏。
             try { _blockGate.Release(); }
@@ -935,6 +942,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             if (w.Value is IDisposable d) d.Dispose();
             UntrackObject(w);
             w.Location = HayateObjectLocation.Destroyed;
+            // M16：销毁时清空租约上下文引用，栈帧随上下文可被 GC（AsyncLocal 流侧
+            // 由各调用方 Release 时自行 Detach，此处不动他流上下文——AsyncLocal 语义如此）。
+            w.LeaseContext = null;
             _logger.LogDebug("Wrapped object destroyed. Type: {Type}", typeof(T).Name);
         }
         catch (Exception ex)
@@ -1010,33 +1020,42 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     }
 
     /// <summary>
-    /// M10：借出路径调用栈帧采集（fNeedFileInfo:false——不解析源文件/行号，避免 PDB I/O；
-    /// 相比 2.4 的 Environment.StackTrace 全文字符串，采集成本相当、结构化可编程消费）。
-    /// GetFrames 可能返回 null（栈为空的极端情形），统一回退空数组。
+    /// M16：借出路径租约上下文采集。创建不可变租约（租约 ID + 帧数组 + 借出时刻），
+    /// 同时写入包装对象（快照取证用）与当前异步流（AsyncLocal，调用方可经
+    /// <see cref="HayateLeaseContext.Current"/> 读取；并发借还各自隔离，不相互覆盖）。
+    /// 帧采集 fNeedFileInfo:false——不解析源文件/行号，避免 PDB I/O。
     /// </summary>
-    private static StackFrame[] CaptureAcquireFrames()
+    private void CaptureLeaseContext(HayateObject<T> w)
     {
-        var frames = new StackTrace(fNeedFileInfo: false).GetFrames();
-        return frames ?? Array.Empty<StackFrame>();
+        var frames = new StackTrace(fNeedFileInfo: false).GetFrames() ?? Array.Empty<StackFrame>();
+        var ctx = new HayateLeaseContext(frames, Stopwatch.GetTimestamp());
+        w.LeaseContext = ctx;
+        ctx.AttachToFlow();
     }
 
     /// <summary>
-    /// M10：将借出帧数组格式化为单行文本（供快照 LeakTraces 输出）。
+    /// M10/M16：将租约上下文格式化为单行文本（供快照 LeakTraces 输出）。
     /// 帧之间以 " <- " 连接（调用方向：最外层帧在前），帧格式
-    /// <c>Type.Method+0x偏移</c>；无帧时回退占位文本。
+    /// <c>Type.Method+0x偏移</c>；无上下文/无帧时回退占位文本。
     /// </summary>
-    private static string FormatLeaseTrace(StackFrame[] frames)
+    private static string FormatLeaseTrace(HayateLeaseContext ctx)
     {
+        var frames = ctx?.Frames;
         if (frames is null || frames.Length == 0)
             return "No stack trace available";
 
         var sb = new System.Text.StringBuilder(frames.Length * 48);
+        if (ctx.LeaseId > 0)
+        {
+            sb.Append("[Lease ").Append(ctx.LeaseId).Append("] ");
+        }
+
         for (var i = 0; i < frames.Length; i++)
         {
             var method = frames[i].GetMethod();
             if (method is null) continue;
 
-            if (sb.Length > 0) sb.Append(" <- ");
+            if (sb.Length > 0 && sb[sb.Length - 1] != ' ') sb.Append(" <- ");
             sb.Append(method.DeclaringType?.Name).Append('.').Append(method.Name)
               .Append("+0x").Append(frames[i].GetNativeOffset().ToString("X"));
         }
@@ -1403,9 +1422,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     if (w.IsBorrowed &&
                         (now - w.LastBorrowedAt) / (double)Stopwatch.Frequency > _options.LeakDetectionThreshold.TotalSeconds)
                     {
-                        // M10（2.5）：LeakTraces 仍为文本形态，但由池侧按 StackFrame[] 格式化
-                        //（2.4 及之前为 Environment.StackTrace 全文原样输出）
-                        leakTraces.Add(FormatLeaseTrace(w.AcquireStackFrames));
+                        // M16（2.5）：LeakTraces 仍为文本形态，由池侧按租约上下文格式化
+                        //（含租约 ID 前缀；2.4 及之前为 Environment.StackTrace 全文原样输出）
+                        leakTraces.Add(FormatLeaseTrace(w.LeaseContext));
                         Interlocked.Increment(ref _leakDetectedCount);
                     }
                 }

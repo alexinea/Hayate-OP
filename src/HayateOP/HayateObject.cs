@@ -66,13 +66,14 @@ public class HayateObject<T> where T : class
     public string OwnerPoolName { get; set; }
 
     /// <summary>
-    /// M10（2.5，breaking）：借出时刻的调用栈帧（低开销采集，
-    /// <c>new StackTrace(fNeedFileInfo: false)</c>——不解析源文件行号）。
-    /// 取证模式与采集频率由 <see cref="HayateLeakTraceCaptureMode"/> 控制（L1 语义不变）。
-    /// 2.4 及之前的 <c>AcquireTrace: string</c>（<see cref="Environment.StackTrace"/> 全文）
-    /// 已移除；文本形态经 <c>TakeSnapshot().LeakTraces</c> 获取（池侧格式化帧）。
+    /// M16（2.5，breaking）：借出租约上下文（租约 ID + 借出帧数组 + 借出时刻）。
+    /// 采集载体为 <see cref="HayateLeaseContext"/> 的 AsyncLocal 异步流 + 本属性（包装侧快照引用）；
+    /// 并发借还各自持有独立上下文实例，不再相互覆盖。取证模式与采集频率仍由
+    /// <see cref="HayateLeakTraceCaptureMode"/> 控制（L1 三模式语义不变）。
+    /// 2.5 批次二 M10 曾短暂引入 <c>AcquireStackFrames: StackFrame[]</c>，本属性为其最终形态；
+    /// 2.4 及之前的 <c>AcquireTrace: string</c> 已移除，文本形态经 <c>TakeSnapshot().LeakTraces</c> 获取。
     /// </summary>
-    public StackFrame[] AcquireStackFrames { get; set; }
+    public HayateLeaseContext LeaseContext { get; internal set; }
 
     /// <summary>
     /// P2-新-1：借出状态改为 <see cref="Location"/> 的计算属性，消除双源不一致窗口。

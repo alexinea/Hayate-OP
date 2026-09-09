@@ -17,7 +17,7 @@ public class ObservabilityFieldsTests
     // ---------- M10 ----------
 
     [Fact]
-    public void EveryAcquireMode_ShouldCaptureStructuredFrames()
+    public void EveryAcquireMode_ShouldCaptureLeaseContext()
     {
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m10-every")
@@ -27,22 +27,31 @@ public class ObservabilityFieldsTests
             .Build();
 
         var a = pool.Acquire();
-        var frames = GetWrapped(pool, a).AcquireStackFrames;
+        var w = GetWrapped(pool, a);
+        Assert.NotNull(w.LeaseContext);
+        var ctx = w.LeaseContext;
 
-        Assert.NotNull(frames);
+        // 结构化帧：包含借出调用链上的方法帧（Acquire 或测试辅助方法）
+        var frames = ctx.Frames;
         Assert.NotEmpty(frames);
-        // 帧数组应包含借出调用链上的方法帧（Acquire 或测试辅助方法）
-        var methodNames = frames!.Select(f => f.GetMethod()?.Name).ToList();
+        var methodNames = frames.Select(f => f.GetMethod()?.Name).ToList();
         Assert.Contains("Acquire", methodNames);
-        Assert.Contains("EveryAcquireMode_ShouldCaptureStructuredFrames", methodNames);
+        Assert.Contains("EveryAcquireMode_ShouldCaptureLeaseContext", methodNames);
         // 低开销口径：不解析源文件行号
         Assert.All(frames, f => Assert.Null(f.GetFileName()));
 
+        // M16：租约 ID 单调递增；AsyncLocal 流上下文在租约期内与包装侧一致
+        Assert.True(ctx.LeaseId > 0);
+        Assert.Same(ctx, HayateLeaseContext.Current);
+        Assert.True(ctx.BorrowedAt > 0); // 借出时刻（Stopwatch ticks）
+
         pool.Release(a);
+        // Release 结束租约：流上下文清空
+        Assert.Null(HayateLeaseContext.Current);
     }
 
     [Fact]
-    public void OffMode_ShouldNotCaptureFrames()
+    public void OffMode_ShouldNotCaptureLeaseContext()
     {
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m10-off")
@@ -51,7 +60,8 @@ public class ObservabilityFieldsTests
             .Build();
 
         var a = pool.Acquire();
-        Assert.Null(GetWrapped(pool, a).AcquireStackFrames);
+        Assert.Null(GetWrapped(pool, a).LeaseContext);
+        Assert.Null(HayateLeaseContext.Current);
         pool.Release(a);
     }
 
@@ -71,7 +81,8 @@ public class ObservabilityFieldsTests
         var snapshot = pool.TakeSnapshot();
         Assert.NotEmpty(snapshot.LeakTraces);
         var trace = snapshot.LeakTraces[0];
-        // 格式化形态：Type.Method+0x偏移，帧间 " <- " 连接，含借出链方法名
+        // M16 格式化形态：[Lease {id}] 前缀 + Type.Method+0x偏移，帧间 " <- " 连接
+        Assert.StartsWith("[Lease ", trace);
         Assert.Contains("ObservabilityFieldsTests", trace);
         Assert.Contains("+0x", trace);
         Assert.Contains(" <- ", trace);

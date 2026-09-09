@@ -70,8 +70,8 @@ public class LeakDetectionTests
         var a = pool.Acquire();
         var b = pool.Acquire();
 
-        Assert.Null(GetWrapped(pool, a).AcquireStackFrames);
-        Assert.Null(GetWrapped(pool, b).AcquireStackFrames);
+        Assert.Null(GetWrapped(pool, a).LeaseContext);
+        Assert.Null(GetWrapped(pool, b).LeaseContext);
 
         pool.Release(a);
         pool.Release(b);
@@ -90,12 +90,12 @@ public class LeakDetectionTests
         var a = pool.Acquire();
         var b = pool.Acquire();
 
-        var traceA = GetWrapped(pool, a).AcquireStackFrames;
-        var traceB = GetWrapped(pool, b).AcquireStackFrames;
-        Assert.NotNull(traceA);
-        Assert.NotEmpty(traceA); // M10：EveryAcquire 模式下首个借出应抓取调用栈帧
-        Assert.NotNull(traceB);
-        Assert.NotEmpty(traceB); // M10：每次借出都应抓取调用栈帧
+        var ctxA = GetWrapped(pool, a).LeaseContext;
+        var ctxB = GetWrapped(pool, b).LeaseContext;
+        Assert.NotNull(ctxA);
+        Assert.NotEmpty(ctxA.Frames);
+        Assert.NotNull(ctxB);
+        Assert.NotEmpty(ctxB.Frames);
 
         pool.Release(a);
         pool.Release(b);
@@ -113,7 +113,7 @@ public class LeakDetectionTests
 
         var items = new[] { pool.Acquire(), pool.Acquire(), pool.Acquire(), pool.Acquire() };
 
-        var captured = items.Count(i => GetWrapped(pool, i).AcquireStackFrames is not null);
+        var captured = items.Count(i => GetWrapped(pool, i).LeaseContext is not null);
         Assert.Equal(2, captured);
 
         foreach (var i in items) pool.Release(i);
