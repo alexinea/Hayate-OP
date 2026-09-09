@@ -396,6 +396,49 @@ public class HayatePoolOptions
 
     #endregion
 
+    #region 容量告警（M12）
+
+    /// <summary>
+    /// 容量告警阈值（使用率，借出数 / MaxPoolSize）。<br />
+    /// 默认值：<c>0</c>（0 表示不启用容量告警，零热路径开销）。
+    /// </summary>
+    /// <remarks>
+    /// 用途：借出水位越过该比例时触发一次 <see cref="OnCapacityWarning"/> 回调。<br />
+    /// 特例：状态翻转去抖——越线只触发一次，回落到阈值下方静默复位后可再次触发。<br />
+    /// 边界：0（禁用）或 (0, 1]；大于 1 会被 <see cref="ApplyFeatureSwitches"/> 钳制为 1。
+    /// </remarks>
+    public double WarnAtRatio { get; set; }
+
+    /// <summary>
+    /// 容量危急阈值（使用率，借出数 / MaxPoolSize）。<br />
+    /// 默认值：<c>0</c>（0 表示不启用危急告警）。
+    /// </summary>
+    /// <remarks>
+    /// 用途：借出水位越过该比例时触发一次 <see cref="OnCapacityCritical"/> 回调。<br />
+    /// 特例：与 <see cref="WarnAtRatio"/> 同时启用时不得小于后者（规范化时自动抬升至 WarnAtRatio）；<br />
+    /// 从 Normal 直接越线到 Critical 时仅触发 Critical 回调，不补发 Warning。<br />
+    /// 边界：0（禁用）或 (0, 1]；大于 1 会被 <see cref="ApplyFeatureSwitches"/> 钳制为 1。
+    /// </remarks>
+    public double CriticalAtRatio { get; set; }
+
+    /// <summary>
+    /// 容量告警回调（使用率 ≥ <see cref="WarnAtRatio"/> 时状态翻转触发一次）。默认 <c>null</c>。
+    /// </summary>
+    /// <remarks>
+    /// 回调在借/还路径内联执行，应保持轻量（毫秒级返回）；回调内抛出的异常会被池捕获并记录日志，不影响借还主流程。
+    /// </remarks>
+    public Action<HayatePoolCapacityAlarmEventArgs> OnCapacityWarning { get; set; }
+
+    /// <summary>
+    /// 容量危急回调（使用率 ≥ <see cref="CriticalAtRatio"/> 时状态翻转触发一次）。默认 <c>null</c>。
+    /// </summary>
+    /// <remarks>
+    /// 回调在借/还路径内联执行，应保持轻量（毫秒级返回）；回调内抛出的异常会被池捕获并记录日志，不影响借还主流程。
+    /// </remarks>
+    public Action<HayatePoolCapacityAlarmEventArgs> OnCapacityCritical { get; set; }
+
+    #endregion
+
     #region 统计指标
 
     /// <summary>
@@ -480,6 +523,12 @@ public class HayatePoolOptions
         options.LeakTraceCaptureMode = this.LeakTraceCaptureMode;
         options.LeakTraceSampleRate = this.LeakTraceSampleRate;
 
+        // 容量告警（M12）
+        options.WarnAtRatio = this.WarnAtRatio;
+        options.CriticalAtRatio = this.CriticalAtRatio;
+        options.OnCapacityWarning = this.OnCapacityWarning;
+        options.OnCapacityCritical = this.OnCapacityCritical;
+
         // 统计指标
         options.EnableMetrics = this.EnableMetrics;
 
@@ -530,6 +579,19 @@ public class HayatePoolOptions
         if (LeakTraceSampleRate < 1)
         {
             LeakTraceSampleRate = HayateConstant.DEFAULT_LEAK_TRACE_SAMPLE_RATE;
+        }
+
+        // 容量告警阈值规范化（M12）：负值视为禁用（0），大于 1 钳制为 1；
+        // 两阈值同时启用时 Critical 不得低于 Warn（低于则抬升至 Warn，保证状态机单调）。
+        if (WarnAtRatio < 0) WarnAtRatio = 0;
+        else if (WarnAtRatio > 1) WarnAtRatio = 1;
+
+        if (CriticalAtRatio < 0) CriticalAtRatio = 0;
+        else if (CriticalAtRatio > 1) CriticalAtRatio = 1;
+
+        if (WarnAtRatio > 0 && CriticalAtRatio > 0 && CriticalAtRatio < WarnAtRatio)
+        {
+            CriticalAtRatio = WarnAtRatio;
         }
     }
 
