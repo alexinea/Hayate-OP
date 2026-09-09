@@ -100,7 +100,21 @@
             缩短该值可降低冷启动延迟，或用 <see cref="P:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatOptions.MinSize"/> 预热规避。
             </summary>
         </member>
-        <!-- Badly formed XML comment ignored for member "T:DotNetCore.HayateOP.ObjectPoolCompat.HayateObjectPoolCompatProvider" -->
+        <member name="T:DotNetCore.HayateOP.ObjectPoolCompat.HayateObjectPoolCompatProvider">
+            <summary>
+            T15：<see cref="T:Microsoft.Extensions.ObjectPool.ObjectPoolProvider"/> 的 HayateOP 实现——
+            用既有 <see cref="T:Microsoft.Extensions.ObjectPool.IPooledObjectPolicy`1"/> 构建由 HayateOP 驱动的
+            <see cref="T:Microsoft.Extensions.ObjectPool.ObjectPool`1"/>，使 MEOP 调用方零代码改动切换。
+            </summary>
+            <example>
+            <code>
+            // 唯一需要改动的一行：
+            // ObjectPoolProvider provider = new DefaultObjectPoolProvider();
+            ObjectPoolProvider provider = new HayateObjectPoolCompatProvider();
+            var pool = provider.Create&lt;MyPolicy&gt;();   // 之后 Get/Return 与 MEOP 完全一致
+            </code>
+            </example>
+        </member>
         <member name="M:DotNetCore.HayateOP.ObjectPoolCompat.HayateObjectPoolCompatProvider.#ctor">
             <summary>以默认参数构建。</summary>
         </member>
