@@ -1,4 +1,6 @@
-﻿using DotNetCore.HayateOP;
+﻿using System;
+using System.Collections.Generic;
+using DotNetCore.HayateOP;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -45,6 +47,23 @@ public static class EndpointsExtensions
 #endif
             .WithName("GetHayatePoolOverview")
             .Produces<HayatePoolOverview>(StatusCodes.Status200OK);
+
+        // M11+：池列表（走注册表完整版枚举；未注入注册表时返回空列表，不影响 Type.GetType 兜底寻址）
+        group.MapGet("/pools", GetPoolsAsync)
+#if NET6_0
+            .WithMetadata(new SwaggerOperationAttribute(
+                summary: "获取池列表",
+                description: "枚举注册表中的全部池（名称、元素类型、注册时间、池内/借出计数）"))
+#else
+            .WithOpenApi(op =>
+            {
+                op.Summary = "获取池列表";
+                op.Description = "枚举注册表中的全部池（名称、元素类型、注册时间、池内/借出计数）";
+                return op;
+            })
+#endif
+            .WithName("GetHayatePoolList")
+            .Produces<IReadOnlyList<HayatePoolSummary>>(StatusCodes.Status200OK);
 
         // 池详情
         group.MapGet("/{poolName}", GetPoolDetailAsync)
@@ -130,6 +149,43 @@ public static class EndpointsExtensions
             Version: "1.0.0",
             Timestamp: DateTime.UtcNow
         ));
+    }
+
+    /// <summary>
+    /// M11+：枚举注册表中的全部池。未注入注册表（直接 Builder 场景）时返回空列表，
+    /// 不影响单池寻址端点的 Type.GetType 兜底。
+    /// </summary>
+    private static async Task<IResult> GetPoolsAsync(IServiceProvider sp)
+    {
+        await Task.CompletedTask;
+        var registry = sp.GetService<IHayateObjectPoolRegistry>();
+        if (registry is null || registry.Count == 0)
+            return Results.Ok(Array.Empty<HayatePoolSummary>());
+
+        var summaries = new List<HayatePoolSummary>(registry.Count);
+        foreach (var entry in registry.GetAll())
+        {
+            int pooled = 0, borrowed = 0;
+            try
+            {
+                var snapshot = entry.Pool.TakeSnapshot();
+                pooled = snapshot.PooledCount;
+                borrowed = snapshot.BorrowedCount;
+            }
+            catch
+            {
+                // 池可能已被 Dispose / 瞬时故障：该池返回 0 计数，不影响其余池枚举。
+            }
+
+            summaries.Add(new HayatePoolSummary(
+                entry.PoolName,
+                entry.ElementType?.FullName,
+                entry.RegisteredAt,
+                pooled,
+                borrowed));
+        }
+
+        return Results.Ok(summaries);
     }
 
     private static async Task<IResult> GetPoolDetailAsync(string poolName, IServiceProvider sp)
