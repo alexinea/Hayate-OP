@@ -335,3 +335,6 @@ NuGet.config
 
 # 损坏的 git 备份（2026-09-04 历史恢复）
 .git.broken-2026-09-04-23h33/
+
+# Endpoints XML 文档为震荡构建产物（增量/全新编译内容漂移约 44 行），移出 git 跟踪、由构建再生成
+src/HayateOP.Extensions.Endpoints/DotNetCore.HayateOP.Extensions.Endpoints.xml
