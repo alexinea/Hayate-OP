@@ -206,6 +206,15 @@ finally
 }
 ```
 
+Since 2.4, `AcquireAsync` also accepts a timeout and a `CancellationToken` (mirroring the
+synchronous `Acquire(TimeSpan)` semantics — timeout throws `TimeoutException`, external
+cancellation propagates `TaskCanceledException`):
+
+```csharp
+// wait at most 5 seconds, but abort early if the token fires
+var obj = await pool.AcquireAsync(TimeSpan.FromSeconds(5), cancellationToken);
+```
+
 ### With Dependency Injection
 
 ```csharp

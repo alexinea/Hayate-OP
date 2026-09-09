@@ -517,6 +517,35 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         throw new TaskCanceledException();
     }
 
+    /// <summary>
+    /// PR-E A3（=M5 统一 CT 传递）：异步获取池化对象，带超时边界。
+    /// 实现方式：链接 CTS 组合「外部取消 + 超时」两路取消源转调无超时版本，
+    /// 零新增池状态；超时语义与同步 <see cref="Acquire(TimeSpan)"/> 对齐——
+    /// 超时抛 <see cref="TimeoutException"/>（含 missed 计数与强制扩容一步），
+    /// 外部取消传播 <see cref="TaskCanceledException"/>，二者可通过取消源区分。
+    /// </summary>
+    public async Task<T> AcquireAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        if (timeout == Timeout.InfiniteTimeSpan)
+        {
+            return await AcquireAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        linkedCts.CancelAfter(timeout);
+        try
+        {
+            return await AcquireAsync(linkedCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // 仅超时触发（外部 CT 未取消）→ 与同步 Acquire(timeout) 的 BlockTimeout 分支对齐
+            if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
+            if (_enableAutoScaling) ForceScaleUpOneStep();
+            throw new TimeoutException($"HayatePool [{_name}] 获取对象超时（异步），超时时间：{timeout.TotalSeconds}s");
+        }
+    }
+
     public void Release(T item)
     {
         if (item is null)

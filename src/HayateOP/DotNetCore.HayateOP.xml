@@ -270,6 +270,15 @@
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.UntrackKey(`0)">
             <summary>T09：仅有裸对象引用（无包装）时，全分片扫描摘除登记项。</summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.AcquireAsync(System.TimeSpan,System.Threading.CancellationToken)">
+            <summary>
+            PR-E A3（=M5 统一 CT 传递）：异步获取池化对象，带超时边界。
+            实现方式：链接 CTS 组合「外部取消 + 超时」两路取消源转调无超时版本，
+            零新增池状态；超时语义与同步 <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Acquire(System.TimeSpan)"/> 对齐——
+            超时抛 <see cref="T:System.TimeoutException"/>（含 missed 计数与强制扩容一步），
+            外部取消传播 <see cref="T:System.Threading.Tasks.TaskCanceledException"/>，二者可通过取消源区分。
+            </summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryColdBootAcquire(System.Int64)">
             <summary>
             PR-D L5：冷池自举。池完全空（无空闲且无借出）且容量上限 &gt; 0 时，
@@ -1053,6 +1062,14 @@
             对象池通用接口
             </summary>
             <typeparam name="T"></typeparam>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPool`1.AcquireAsync(System.TimeSpan,System.Threading.CancellationToken)">
+            <summary>
+            异步获取池化对象，带超时边界（与同步 <see cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.Acquire(System.TimeSpan)"/> 语义对齐）：
+            超时抛 <see cref="T:System.TimeoutException"/>；外部取消传播 <see cref="T:System.Threading.Tasks.TaskCanceledException"/>。
+            </summary>
+            <param name="timeout">等待上限。</param>
+            <param name="cancellationToken">外部取消令牌，可随时中断等待。</param>
         </member>
         <member name="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry">
             <summary>
