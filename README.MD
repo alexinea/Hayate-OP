@@ -18,7 +18,7 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 - **Health Checks**: ASP.NET Core health check integration to monitor pool status in production.
 - **Diagnostics**: `System.Diagnostics` bridge for advanced performance monitoring and telemetry.
 - **Configuration Binding**: Load pool settings from `appsettings.json` (global + per-pool).
-- **Cross-Version Compatibility**: Supports .NET 6, .NET 8 and .NET 10.
+- **Cross-Version Compatibility**: Supports .NET Framework 4.8 (core, ObjectPoolCompat and DependencyInjection packages) and .NET 6/7/8/9/10 (all packages).
 
 ## Installation
 
@@ -32,6 +32,21 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 | `DotNetCore.HayateOP.Extensions.HealthCheck`         | ASP.NET Core Health Checks integration to monitor pool status in production.                         |
 | `DotNetCore.HayateOP.Extensions.Endpoints`           | Built-in management endpoints for monitoring and configuration.                                      |
 | `DotNetCore.HayateOP.Extensions.Diagnostics`         | Integration with System.Diagnostics for advanced performance monitoring and telemetry.               |
+
+#### Supported Target Frameworks
+
+| Package | Target Frameworks |
+| :--- | :--- |
+| `DotNetCore.HayateOP` | .NET Framework 4.8; .NET 6/7/8/9/10 |
+| `DotNetCore.HayateOP.Extensions.ObjectPoolCompat` | .NET Framework 4.8; .NET 6/7/8/9/10 |
+| `DotNetCore.HayateOP.Extensions.DependencyInjection` | .NET Framework 4.8; .NET 6/7/8/9/10 |
+| All other `DotNetCore.HayateOP.Extensions.*` packages | .NET 6/7/8/9/10 |
+
+> **.NET Framework 4.8 support (added in 2.4)** targets `net48` for classic ASP.NET 4.x / WPF / WinForms
+> hosts that consume the core pool or the `ObjectPool<T>` / DI bridges. Prefer `PackageReference` and add a
+> `bindingRedirect` when the host already loads `Microsoft.Extensions.*` (6.x/8.x/10.x) assemblies.
+> The ASP.NET Core–based packages (`Endpoints`, `HealthCheck`) and the `OpenTelemetry` / `Configuration` /
+> `Diagnostics` extensions do not ship `net48` assets; `netstandard2.0` assets are not shipped yet.
 
 ### .NET CLI
 
