@@ -62,6 +62,13 @@ public class HayatePoolStats
     public long LeakDetectedCount { get; set; }
 
     /// <summary>
+    /// 疑似泄漏次数（M4，泄漏检测关闭时的回查告警计数）。<br />
+    /// EnableLeakDetection=false 时，TakeSnapshot 按同一 LeakDetectionThreshold 统计
+    /// 「借出超阈值未归还」的对象次数；仅计数、不取证、不回收。
+    /// </summary>
+    public long LeakSuspectedCount { get; set; }
+
+    /// <summary>
     /// 平均等待时间（毫秒）
     /// Average wait time in milliseconds
     /// </summary>
@@ -131,6 +138,7 @@ public class HayatePoolStats
   累计归还总数(TotalReleased): {TotalReleased}
   累计未命中次数(TotalMissed): {TotalMissed}
   检测到的泄漏次数(LeakDetectedCount): {LeakDetectedCount}
+  疑似泄漏次数(LeakSuspectedCount): {LeakSuspectedCount}
 [等待时间统计(毫秒)]
   平均等待时间(AverageWaitTime): {AverageWaitTimeMs:F2}
   最大等待时间(MaxWaitTime): {MaxWaitTimeMs:F2}

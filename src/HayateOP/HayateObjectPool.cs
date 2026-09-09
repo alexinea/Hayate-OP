@@ -114,6 +114,15 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     // 保证池再次清空后仍可二次自举。
     private int _coldBootClaimed;
 
+    // M12：容量告警状态机（0=Normal, 1=Warning, 2=Critical）。
+    // 仅在状态翻转时触发一次回调（去抖）；回落到低水位静默复位，重新整备后可再次触发。
+    private int _capacityAlarmLevel;
+    private readonly bool _capacityAlarmEnabled;
+
+    // M4：泄漏回查告警计数（EnableLeakDetection=false 时 TakeSnapshot 按同一阈值
+    // 统计「借出超阈值未归还」的疑似泄漏次数，与 LeakDetectedCount 并列、互不替代）。
+    private long _leakSuspectedCount;
+
     internal HayatePoolBasic(
         IHayateObjectPolicy<T> policy,
         HayatePoolOptions options,
@@ -146,6 +155,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _enableLeakDetection = _options.EnableLeakDetection;
         _enableEviction = _options.EnableEviction;
         _enableMetrics = _options.EnableMetrics;
+
+        // M12：容量告警默认（WarnAtRatio=0 且 CriticalAtRatio=0）完全禁用——
+        // 构造期固化为只读标志，禁用时借/还路径仅多一次可预测分支（JIT 消除友好）。
+        _capacityAlarmEnabled = _options.WarnAtRatio > 0 || _options.CriticalAtRatio > 0;
 
         // PR-D L1：取证配置随构造快照（采样分母经 IsValid/ApplyFeatureSwitches 已钳制 ≥1，此处再兜底）
         _leakTraceCaptureMode = _options.LeakTraceCaptureMode;
@@ -328,6 +341,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         }
                     }
 
+                    // M4：借出时间戳无条件记录。原条件门控（eviction/leakDetection/generation）
+                    // 会使「全关」配置下 LastBorrowedAt 恒为 0，M4 泄漏回查（LeakSuspectedCount）
+                    // 结构性失效；单次 QPC（Stopwatch.GetTimestamp）无分配、无时区换算，
+                    // 成本远低于 PR-D A1 移除的 DateTime.UtcNow，可接受。
+                    w.LastBorrowedAt = Stopwatch.GetTimestamp();
+
                     // 分代升级，仅开启分代优化时执行
                     //if (_options.EnableGenerationOptimization &&
                     if (_enableGenerationOptimization &&
@@ -337,6 +356,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     }
 
                     Interlocked.Increment(ref _totalAcquired);
+
+                    // M12：容量告警埋点（禁用时内部立即返回）
+                    CheckCapacityAlarm();
 
                     #endregion
 
@@ -431,12 +453,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                             var shard = _shards[(int)(Interlocked.Increment(ref _createCursor) - 1) % _shards.Length];
                             var w = CreateWrappedObject(shard);   // 内部已完成 TryTrack 登记
                             w.Location = HayateObjectLocation.Borrowed;
-                            if (_enableEviction || _enableLeakDetection)
-                            {
-                                w.LastBorrowedAt = Stopwatch.GetTimestamp();
-                            }
+                            // M4：借出时间戳无条件记录（同 Acquire 主路径，保障泄漏回查可用）
+                            w.LastBorrowedAt = Stopwatch.GetTimestamp();
                             _policy.OnAcquire(w.Value);
                             Interlocked.Increment(ref _totalAcquired);
+
+                            // M12：容量告警埋点（禁用时内部立即返回）
+                            CheckCapacityAlarm();
 
                             var waitTime = (long)sw.Elapsed.TotalMilliseconds;
                             if (_enableMetrics)
@@ -487,13 +510,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     // D3：记录源分片索引，Release round-trip 用
                     w.ShardIndex = shard.Index;
 
-                    //if (_options.EnableEviction || _options.EnableLeakDetection)
-                    if (_enableEviction || _enableLeakDetection)
-                    {
-                        w.LastBorrowedAt = Stopwatch.GetTimestamp();
-                    }
+                    // M4：借出时间戳无条件记录（同步路径一致，保障泄漏回查可用）
+                    w.LastBorrowedAt = Stopwatch.GetTimestamp();
 
                     Interlocked.Increment(ref _totalAcquired);
+
+                    // M12：容量告警埋点（禁用时内部立即返回）
+                    CheckCapacityAlarm();
 
                     return w.Value;
                 }
@@ -699,6 +722,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 // int.MaxValue 计数上限保护，正常负载下不可达；吞掉以保证 Release 路径不中断。
             }
 
+            // M12：容量告警埋点——归还使借出水位的回落在此处被感知（状态翻转时复位/再触发）。
+            CheckCapacityAlarm();
+
             _logger.LogDebug("Object returned to pool. Type: {Type} LeaseTime: {LeaseTime:F2}ms, shard: {ShardIndex}", typeof(T).Name, w.LeaseTimeMs, shardIndex);
         }
         catch (Exception ex)
@@ -820,12 +846,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             var shard = _shards[(int)(Interlocked.Increment(ref _createCursor) - 1) % _shards.Length];
             var w = CreateWrappedObject(shard);   // 内部已完成 TryTrack 登记（含 _totalCreated 计数）
             w.Location = HayateObjectLocation.Borrowed;
-            if (_enableEviction || _enableLeakDetection)
-            {
-                w.LastBorrowedAt = Stopwatch.GetTimestamp();
-            }
+            // M4：借出时间戳无条件记录（同 Acquire 主路径，保障泄漏回查可用）
+            w.LastBorrowedAt = Stopwatch.GetTimestamp();
             _policy.OnAcquire(w.Value);
             Interlocked.Increment(ref _totalAcquired);
+
+            // M12：容量告警埋点（禁用时内部立即返回）
+            CheckCapacityAlarm();
 
             if (_enableMetrics)
             {
@@ -940,6 +967,65 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             var previous = Interlocked.CompareExchange(ref location, value, current);
             if (previous == current) break;
             current = previous;
+        }
+    }
+
+    /// <summary>
+    /// M12：容量告警检查。使用率口径 = 借出数 / MaxPoolSize（借出数由
+    /// 「真实存活总数 - 空闲数」派生，与 TakeSnapshot 同口径）。
+    /// 状态翻转去抖：只有经 CAS 成功翻转状态的线程触发一次回调；
+    /// 回落低水位静默复位（不触发回调），重新越线可再次触发。
+    /// 禁用（WarnAtRatio=0 且 CriticalAtRatio=0）时由调用方的只读标志短路，零开销。
+    /// </summary>
+    private void CheckCapacityAlarm()
+    {
+        if (!_capacityAlarmEnabled) return;
+
+        var max = _options.MaxPoolSize;
+        if (max <= 0) return;
+
+        var borrowed = TrackedObjectCount - _shards.Sum(s => s.Count);
+        if (borrowed < 0) borrowed = 0;
+        var ratio = (double)borrowed / max;
+
+        var critical = _options.CriticalAtRatio;
+        var warn = _options.WarnAtRatio;
+        int desired =
+            critical > 0 && ratio >= critical ? 2 :
+            warn > 0 && ratio >= warn ? 1 :
+            0;
+
+        var current = Volatile.Read(ref _capacityAlarmLevel);
+        if (current == desired) return;
+
+        // 并发翻转：CAS 赢家负责触发回调，输家直接放弃（水位事件允许最终一致）。
+        if (Interlocked.CompareExchange(ref _capacityAlarmLevel, desired, current) != current) return;
+
+        // 回落到 Normal：静默复位，仅整备状态机，不打扰用户。
+        if (desired == 0) return;
+
+        try
+        {
+            var level = desired == 2 ? HayatePoolCapacityAlarmLevel.Critical : HayatePoolCapacityAlarmLevel.Warning;
+            var args = new HayatePoolCapacityAlarmEventArgs(_name, level, ratio, borrowed, max);
+
+            if (desired == 2)
+            {
+                _logger.LogWarning("Pool [{PoolName}] capacity CRITICAL: usage {Ratio:P1} ({Borrowed}/{Max})",
+                    _name, ratio, borrowed, max);
+                _options.OnCapacityCritical?.Invoke(args);
+            }
+            else
+            {
+                _logger.LogWarning("Pool [{PoolName}] capacity WARNING: usage {Ratio:P1} ({Borrowed}/{Max})",
+                    _name, ratio, borrowed, max);
+                _options.OnCapacityWarning?.Invoke(args);
+            }
+        }
+        catch (Exception ex)
+        {
+            // 用户回调异常不得影响借还主流程
+            _logger.LogError(ex, "Capacity alarm callback failed for pool [{PoolName}]", _name);
         }
     }
 
@@ -1168,6 +1254,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             MinSize = _options.MinPoolSize,
             CurrentSize = totalObjects,
             LeakDetectedCount = Interlocked.Read(ref _leakDetectedCount),
+            LeakSuspectedCount = Interlocked.Read(ref _leakSuspectedCount),
             WaitTimeSum = waitSum,
             WaitTimeCount = waitCount,
             LeaseTimeSum = leaseSum,
@@ -1186,7 +1273,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         var wallClock = DateTimeOffset.UtcNow;
         var now = Stopwatch.GetTimestamp();
 
-        // 仅开启泄漏检测时执行扫描
+        // 仅开启泄漏检测时执行取证扫描；关闭时走 M4 回查告警通路（仅计数，不取证不改变 L1 行为）
         //if (_options.EnableLeakDetection)
         if (_enableLeakDetection)
         {
@@ -1203,6 +1290,26 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     {
                         leakTraces.Add(w.AcquireTrace ?? "No stack trace available");
                         Interlocked.Increment(ref _leakDetectedCount);
+                    }
+                }
+            }
+        }
+        else
+        {
+            // M4（2.5）：泄漏检测关闭时的回查告警通路。按同一 LeakDetectionThreshold
+            // 统计「借出超阈值未归还」的疑似泄漏次数（LeakSuspectedCount），与
+            // LeakDetectedCount 并列——只计数、不取证（无 AcquireTrace 采集）、
+            // 不触发任何回收行为，L1 取证三模式语义完全不变。
+            // LastBorrowedAt 自 2.5 起在借出路径无条件记录，因此「全功能关闭」配置下
+            // 回查依然可用（2.4 及之前该时间戳受功能开关门控，存在恒 0 的可能）。
+            foreach (var shard in _shards)
+            {
+                foreach (var w in shard.TrackedValues)
+                {
+                    if (w.IsBorrowed && w.LastBorrowedAt != 0 &&
+                        (now - w.LastBorrowedAt) / (double)Stopwatch.Frequency > _options.LeakDetectionThreshold.TotalSeconds)
+                    {
+                        Interlocked.Increment(ref _leakSuspectedCount);
                     }
                 }
             }
@@ -1228,6 +1335,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             TotalMissed = Interlocked.Read(ref _totalMissed),
             TotalAcquired = Interlocked.Read(ref _totalAcquired),
             LeakCount = Interlocked.Read(ref _leakDetectedCount),
+            LeakSuspectedCount = Interlocked.Read(ref _leakSuspectedCount),
             LeakTraces = leakTraces.AsReadOnly()
         };
     }
