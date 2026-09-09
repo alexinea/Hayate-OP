@@ -3,14 +3,14 @@
     <Import Project="..\..\..\common.tests.props" />
 
     <!-- ================================================================
-         LEGACY 世代测试项目（net6/net7 兼容覆盖）
-         - 目标框架：net6.0;net7.0
+         LEGACY 世代测试项目（net48 冒烟 + net6/net7 兼容覆盖）
+         - 目标框架：net48;net6.0;net7.0（net48 为 S2 向下兼容冒烟，xunit v2 原生支持）
          - 测试框架：xunit v2 + VSTest（库项目，由 dotnet test 注入 runner）
          - 与 tests/HayateOP.Tests（future, net8/9/10 + v3 + MTP）保持用例同步。
            新增用例需在 future 与 legacy 同步维护（除非某代不适用某特性）。
     ================================================================ -->
     <PropertyGroup>
-        <TargetFrameworks>net6.0;net7.0</TargetFrameworks>
+        <TargetFrameworks>net48;net6.0;net7.0</TargetFrameworks>
         <RootNamespace>DotNetCore.HayateOP.Tests</RootNamespace>
         <IsPackable>false</IsPackable>
     </PropertyGroup>
