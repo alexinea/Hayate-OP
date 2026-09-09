@@ -44,7 +44,7 @@ public sealed class HayateCompatOptions
 /// // 唯一需要改动的一行：
 /// // ObjectPoolProvider provider = new DefaultObjectPoolProvider();
 /// ObjectPoolProvider provider = new HayateObjectPoolCompatProvider();
-/// var pool = provider.Create<MyPolicy>();   // 之后 Get/Return 与 MEOP 完全一致
+/// var pool = provider.Create&lt;MyPolicy&gt;();   // 之后 Get/Return 与 MEOP 完全一致
 /// </code>
 /// </example>
 public sealed class HayateObjectPoolCompatProvider : ObjectPoolProvider
