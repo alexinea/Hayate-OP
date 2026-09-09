@@ -481,6 +481,19 @@ var pool = new HayatePoolBuilder<MyPooledObject>()
 > `AddHayatePool` / `RegisterHayatePool` attach the DI-registered `IHayateMetrics`
 > only when metrics are enabled, exactly as in 2.1.
 
+### Idle pools actually scale down (breaking change in 2.4)
+
+Since 2.4, the background scaling callback honors the scaling strategy's
+scale-down decision. In 2.3 and earlier, an internal gate
+(`totalIdle < currentTotal * 0.4f`, i.e. usage above 60%) contradicted the default
+`ThresholdScalingStrategy`, which only proposes shrinking when usage is below
+`ScaleDownThreshold` (0.2 by default). The two conditions could never hold at the
+same time, so **with default settings the pool never scaled down** — auto-scaling
+only grew. The gate has been removed: shrinking now proceeds whenever the strategy
+proposes a smaller target and the scale-down cooldown has elapsed, still bounded by
+`MinPoolSize`. If you relied on pools staying at their high-water mark, set
+`EnableAutoScaling = false` or raise `ScaleDownThreshold`.
+
 ## Monitoring and Diagnostics
 
 ### Get current statistics

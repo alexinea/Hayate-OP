@@ -125,8 +125,9 @@ public class PressureScenarios
             Assert.Equal(0, errors);
 
             // 轮间等待缩容收敛：轮询直至 ≤ min+5（上限 10s）。
-            // 固定 sleep 会与缩容冷却（1s，自最近一次扩容起算）/步长语义赛跑
-            // （实测 round 2 残留 current=60），轮询收敛才是确定性断言。
+            // 2.3 及以前此处存在「实测 round 2 残留 current=60」：池内缩容门控
+            // （usage>0.6 才放行）与策略层（usage<0.2 才缩）互斥成死代码，缩容从不触发。
+            // S1（2.4）移除门控后缩容真实生效，轮询收敛成为确定性断言（本场景自此转正为缩容回归守卫）。
             var deadline = DateTime.UtcNow.AddSeconds(10);
             var current = pool.GetStats().CurrentSize;
             while (current > minSize + 5 && DateTime.UtcNow < deadline)
