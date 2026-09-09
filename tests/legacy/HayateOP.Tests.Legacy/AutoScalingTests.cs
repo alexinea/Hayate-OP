@@ -98,4 +98,44 @@ public class AutoScalingTests
         Assert.True(minObserved >= 5, $"缩容不得跌破 MinPoolSize，实际观察到的最小 CurrentSize={minObserved}");
         Assert.True(pool.GetStats().CurrentSize >= 5);
     }
+
+    [Fact]
+    public void ScaleDown_ShouldActuallyShrinkWhenIdle()
+    {
+        // S1（2.4 行为变更）回归守卫：修复前缩容分支存在互斥门控
+        // （池内要求占用率>0.6 放行 vs 策略要求占用率<ScaleDownThreshold 才给缩小目标），
+        // 缩容为死代码——autoScaling 只扩不缩。本用例以强断言锁定「缩容真实发生」。
+        using var pool = new HayatePoolBuilder<TestObject>()
+            .WithEnableAutoScaling(true)
+            .WithMinSize(2)
+            .WithMaxSize(30)
+            .WithScalingInterval(200)          // 缩短定时器周期
+            .WithScaleDownThreshold(0.5)       // usage<0.5 即给出缩小目标
+            .WithScaleDownStep(5)
+            .WithScaleDownCooldownSeconds(0)
+            .WithScaleUpCooldownSeconds(0)
+            .Build();
+
+        // Act 1：借出 10 个（池按需创建，CurrentSize=空闲+借出 → 抬至 ≥10）
+        var leases = new List<TestObject>();
+        for (var i = 0; i < 10; i++) leases.Add(pool.Acquire());
+        var peak = pool.GetStats().CurrentSize;
+        Assert.True(peak >= 10, $"借出后 CurrentSize 应≥10，实际 {peak}");
+
+        // Act 2：全部归还 → usage=0 < ScaleDownThreshold(0.5)，策略目标 = Max(peak-5, 2)
+        foreach (var o in leases) pool.Release(o);
+
+        // 事件驱动轮询：缩容一旦发生 CurrentSize 必然回落（低于峰值）
+        var deadline = Environment.TickCount + 5000;
+        var shrunk = false;
+        while (Environment.TickCount < deadline)
+        {
+            if (pool.GetStats().CurrentSize < peak) { shrunk = true; break; }
+            Thread.Sleep(50);
+        }
+
+        // Assert：缩容真实发生 + 不跌破 Min
+        Assert.True(shrunk, $"高空闲率下池应真实缩容（S1 前为死代码：peak={peak}, final={pool.GetStats().CurrentSize}）");
+        Assert.True(pool.GetStats().CurrentSize >= 2, $"缩容不得跌破 MinPoolSize，实际 {pool.GetStats().CurrentSize}");
+    }
 }
