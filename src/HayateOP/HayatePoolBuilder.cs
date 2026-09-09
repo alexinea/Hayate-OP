@@ -96,6 +96,43 @@ public class HayatePoolBuilder<T> where T : class, new()
         return this;
     }
 
+    /// <summary>
+    /// 设置容量告警阈值（M12）。使用率口径为「借出数 / MaxPoolSize」。
+    /// </summary>
+    /// <param name="warnAtRatio">警告阈值（0~1；0 表示禁用警告档）。</param>
+    /// <param name="criticalAtRatio">危急阈值（0~1；0 表示禁用危急档；与警告同时启用时不得小于警告阈值，越界时自动修正）。</param>
+    public HayatePoolBuilder<T> WithCapacityAlarm(double warnAtRatio, double criticalAtRatio = 0)
+    {
+        if (warnAtRatio < 0 || warnAtRatio > 1)
+            throw new ArgumentOutOfRangeException(nameof(warnAtRatio), "WarnAtRatio must be between 0 and 1");
+        if (criticalAtRatio < 0 || criticalAtRatio > 1)
+            throw new ArgumentOutOfRangeException(nameof(criticalAtRatio), "CriticalAtRatio must be between 0 and 1");
+        if (warnAtRatio > 0 && criticalAtRatio > 0 && criticalAtRatio < warnAtRatio)
+            throw new ArgumentOutOfRangeException(nameof(criticalAtRatio), "CriticalAtRatio must be >= WarnAtRatio when both are enabled");
+
+        _options.WarnAtRatio = warnAtRatio;
+        _options.CriticalAtRatio = criticalAtRatio;
+        return this;
+    }
+
+    /// <summary>
+    /// 设置容量警告回调（使用率 ≥ WarnAtRatio 时状态翻转触发一次）
+    /// </summary>
+    public HayatePoolBuilder<T> WithOnCapacityWarning(Action<HayatePoolCapacityAlarmEventArgs> handler)
+    {
+        _options.OnCapacityWarning = handler ?? throw new ArgumentNullException(nameof(handler));
+        return this;
+    }
+
+    /// <summary>
+    /// 设置容量危急回调（使用率 ≥ CriticalAtRatio 时状态翻转触发一次）
+    /// </summary>
+    public HayatePoolBuilder<T> WithOnCapacityCritical(Action<HayatePoolCapacityAlarmEventArgs> handler)
+    {
+        _options.OnCapacityCritical = handler ?? throw new ArgumentNullException(nameof(handler));
+        return this;
+    }
+
     #endregion
 
     #region 基础配置
@@ -533,6 +570,82 @@ public class HayatePoolBuilder<T> where T : class, new()
             _poolName);
 
         _logger.LogInformation("HayatePool [{PoolName}] initialized successfully", _poolName);
+
+        return pool;
+    }
+
+    /// <summary>
+    /// 容错构建入口（M13）。<br />
+    /// <paramref name="throwOnError"/> 为 <c>true</c>（默认）时与 <see cref="Build()"/> 行为完全一致；
+    /// 为 <c>false</c> 时构建失败（配置非法 / metrics 注册冲突等）不抛出，降级返回一个
+    /// 「Min=0、Max=0、全部功能开关关闭」的可用空池并记录错误日志——后续 Acquire 走
+    /// 拒绝策略语义（如 BlockTimeout 超时抛出），池本身可安全 Dispose 与观测。
+    /// </summary>
+    /// <param name="throwOnError">构建失败时是否抛出异常；<c>false</c> 降级为空池。</param>
+    /// <remarks>
+    /// 典型场景：配置来自外部输入（Configuration / 远端下发），构建失败时业务需要
+    /// 「可运行的降级池 + 告警日志」而非进程崩溃。注意：预热阶段的创建失败本就被池内
+    /// 捕获（PreWarm 记录日志后继续），因此空池降级主要覆盖构建期配置校验失败。
+    /// </remarks>
+    public IHayateObjectPool<T> BuildOrThrow(bool throwOnError = true)
+    {
+        if (throwOnError)
+        {
+            return Build();
+        }
+
+        try
+        {
+            return Build();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "HayatePool [{PoolName}] build failed (BuildOrThrow(false)); degrading to empty pool",
+                _poolName);
+
+            return BuildDegradedEmptyPool();
+        }
+    }
+
+    /// <summary>
+    /// M13：构建降级空池。Min=0 / Max=0 / 全部功能开关关闭，仅保留与拒绝策略相关的
+    /// 语义配置（超时 / 拒绝策略 / 创建重试），保证 Acquire 行为可预期。
+    /// </summary>
+    private IHayateObjectPool<T> BuildDegradedEmptyPool()
+    {
+        var degraded = new HayatePoolOptions
+        {
+            MinPoolSize = 0,
+            MaxPoolSize = 0,
+            EnableSharding = false,
+            EnableAutoScaling = false,
+            EnableEviction = false,
+            EnableValidation = false,
+            EnableGenerationOptimization = false,
+            EnableLeakDetection = false,
+            EnableMetrics = false,
+            // 保留拒绝语义；原配置超时非法（≤0）时回落默认值，保证降级池可通过 IsValid
+            DefaultAcquireTimeout = _options.DefaultAcquireTimeout > TimeSpan.Zero
+                ? _options.DefaultAcquireTimeout
+                : TimeSpan.FromSeconds(HayateConstant.DEFAULT_ACQUIRE_TIMEOUT_SECONDS),
+            RejectPolicy = _options.RejectPolicy,
+            CreationRetryCount = _options.CreationRetryCount,
+            CreationRetryDelay = _options.CreationRetryDelay
+        };
+
+        var pool = new HayatePoolBasic<T>(
+            _policy,
+            degraded,
+            new ThresholdScalingStrategy(),
+            EmptyHayateMetrics.Instance,
+            _logger,
+            _poolName);
+
+        _logger.LogWarning(
+            "HayatePool [{PoolName}] degraded to empty pool: Min=0/Max=0, all features off; " +
+            "Acquire follows reject policy ({Policy}) until the pool is rebuilt with valid options",
+            _poolName, degraded.RejectPolicy);
 
         return pool;
     }
