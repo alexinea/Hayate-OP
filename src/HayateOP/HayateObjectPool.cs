@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using DotNetCore.HayateOP.Common;
 using DotNetCore.HayateOP.Logging;
@@ -925,14 +925,18 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         try
         {
             var now = Stopwatch.GetTimestamp();
+            int sampleCapacity = _options.NumTestsPerEvictionRun < 1 ? 1 : _options.NumTestsPerEvictionRun;
+            var evictionSample = new HayateObject<T>[sampleCapacity];
+
             foreach (var shard in _shards)
             {
-                // 分批检查
-                var itemsToCheck = shard.GetAll().Take(_options.NumTestsPerEvictionRun).ToArray();
+                // 分批检查（PR-D A2：复用采样缓冲，避免每次对整条空闲链表 ToArray 的长尾分配）
                 int evictedCount = 0;
+                int sampleCount = shard.SnapshotHead(evictionSample, evictionSample.Length);
 
-                foreach (var w in itemsToCheck)
+                for (int samplerIndex = 0; samplerIndex < sampleCount; samplerIndex++)
                 {
+                    var w = evictionSample[samplerIndex];
                     // 跳过正在使用的对象
                     if (w.IsBorrowed) continue;
 

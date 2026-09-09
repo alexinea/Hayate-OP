@@ -1,4 +1,4 @@
-﻿using DotNetCore.HayateOP.Logging;
+using DotNetCore.HayateOP.Logging;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -237,6 +237,33 @@ public partial class HayatePoolBasic<T>
             {
                 _lock.Enter(ref taken);
                 return _list.ToArray();
+            }
+            finally { if (taken) _lock.Exit(); }
+        }
+        /// <summary>
+        /// Copies up to <paramref name="count"/> idle objects from the head of the shard free
+        /// list into <paramref name="buffer"/> while holding the shard lock, returning the number
+        /// copied. The caller may reuse the same buffer across shards / invocations to avoid
+        /// per-call array allocations (PR-D A2). The buffer is overwritten from index 0 each call.
+        /// </summary>
+        public int SnapshotHead(HayateObject<T>[] buffer, int count)
+        {
+            if (buffer is null) throw new ArgumentNullException(nameof(buffer));
+            if (count < 0) throw new ArgumentOutOfRangeException(nameof(count));
+
+            var taken = false;
+            try
+            {
+                _lock.Enter(ref taken);
+                var limit = Math.Min(count, buffer.Length);
+                var copied = 0;
+                var node = _list.First;
+                while (node != null && copied < limit)
+                {
+                    buffer[copied++] = node.Value;
+                    node = node.Next;
+                }
+                return copied;
             }
             finally { if (taken) _lock.Exit(); }
         }

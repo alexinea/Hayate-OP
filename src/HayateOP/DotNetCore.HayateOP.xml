@@ -318,6 +318,14 @@
             caller MUST NOT destroy it.
             </returns>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.SnapshotHead(DotNetCore.HayateOP.HayateObject{`0}[],System.Int32)">
+            <summary>
+            Copies up to <paramref name="count"/> idle objects from the head of the shard free
+            list into <paramref name="buffer"/> while holding the shard lock, returning the number
+            copied. The caller may reuse the same buffer across shards / invocations to avoid
+            per-call array allocations (PR-D A2). The buffer is overwritten from index 0 each call.
+            </summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.SafeDispose(DotNetCore.HayateOP.HayateObject{`0},System.String)">
             <summary>
             在锁外安全释放对象，吞掉用户 Dispose 抛出的异常并返回是否释放成功。
