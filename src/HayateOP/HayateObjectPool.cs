@@ -665,12 +665,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             // P2-新-1：归还状态不再单独清位——下方 shard.Add 成功即把 Location 迁回
             // InPool（IsBorrowed 随之为 false）；Add 被拒则走 Destroy（Location=Destroyed）。
 
-            //if (_options.EnableEviction || _options.EnableMetrics)
-            if (_enableEviction || _enableMetrics)
-            {
-                w.LastReleasedAt = Stopwatch.GetTimestamp();
-                w.LeaseTimeMs = (long)((w.LastReleasedAt - w.LastBorrowedAt) * 1000.0 / Stopwatch.Frequency);
-            }
+            // 归还时间戳无条件记录（M15/M4 同款 2.5 不变量）：原条件门控
+            // （eviction/metrics）会使「全关」配置下 LastReleasedAt 停留在创建时刻，
+            // Evict(Idle) 的空闲判定结构性失效；单次 QPC 成本与借出侧一致，可接受。
+            w.LastReleasedAt = Stopwatch.GetTimestamp();
+            w.LeaseTimeMs = (long)((w.LastReleasedAt - w.LastBorrowedAt) * 1000.0 / Stopwatch.Frequency);
 
             // 重置对象；策略层可通过返回 false 拒绝回池（例如对象已损坏或不可复用）
             if (!_policy.OnRelease(item))
@@ -778,6 +777,73 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 _metrics.RecordObjectReleased(_name, item, false);
             }
         }
+    }
+
+    /// <summary>
+    /// M15：按分类依据主动驱逐空闲对象（Touched/Idle/Expired，语义见 <see cref="HayateEvictReason"/>）。
+    /// 实现要点：
+    /// ① 仅作用于空闲对象——借出中的对象不在分片链表内（TryTake 已物理摘出），
+    ///    <see cref="Shard.GetAll"/> 快照天然不含；即便时序竞态下链表项刚被借出，
+    ///    <see cref="Shard.Remove"/> 的原子认领也会失败并跳过，绝不销毁使用中的对象；
+    /// ② 销毁复用与后台驱逐完全相同的 <see cref="Destroy"/> 幂等 CAS——与后台驱逐 /
+    ///    空闲校验 / 归还拒绝并发命中同一对象时只有一方真正销毁，不产生二次 Dispose；
+    /// ③ 默认后台驱逐行为不变，本 API 是叠加的主动运维出口（驱逐计数计入各自的
+    ///    Destroy 路径，不额外记账）。
+    /// </summary>
+    public int Evict(HayateEvictReason reason)
+    {
+        if (reason != HayateEvictReason.Touched &&
+            reason != HayateEvictReason.Idle &&
+            reason != HayateEvictReason.Expired)
+        {
+            throw new ArgumentOutOfRangeException(nameof(reason), "未知的驱逐依据");
+        }
+
+        var now = Stopwatch.GetTimestamp();
+        var evicted = 0;
+
+        foreach (var shard in _shards)
+        {
+            // GetAll 返回锁内快照（空闲链表数组），遍历期间不在锁内，认领走 Remove CAS
+            foreach (var w in shard.GetAll())
+            {
+                var match = false;
+                if (reason == HayateEvictReason.Touched)
+                {
+                    // 「用过即清」：曾借出过（prewarm 未用对象 LeaseCount=0，保留）
+                    match = w.LeaseCount > 0;
+                }
+                else if (reason == HayateEvictReason.Idle)
+                {
+                    // 与后台驱逐 idle-too-long 同口径（PR-D A1：Stopwatch ticks → 秒）
+                    match = (now - w.LastReleasedAt) / (double)Stopwatch.Frequency > _options.MaxIdleTime.TotalSeconds;
+                }
+                else // Expired
+                {
+                    // 与后台驱逐 expired 同口径
+                    match = (now - w.CreatedAt) / (double)Stopwatch.Frequency > _options.MaxLifeTime.TotalSeconds;
+                }
+
+                if (!match) continue;
+
+                // 认领成功的调用方才有权销毁（对象若此刻已被借出，Remove 返回 false）
+                if (shard.Remove(w))
+                {
+                    Destroy(w);
+                    evicted++;
+                }
+            }
+
+            if (evicted > 0)
+            {
+                _logger.LogInformation("[Shard {Index}] Manual evict ({Reason}) removed objects so far: {Count}",
+                    shard.Index, reason, evicted);
+            }
+        }
+
+        _logger.LogInformation("Manual evict ({Reason}) on pool [{PoolName}] evicted {Count} objects",
+            reason, _name, evicted);
+        return evicted;
     }
 
     #endregion
