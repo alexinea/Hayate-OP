@@ -614,6 +614,22 @@ Contributions are welcome.
 
 Please feel free to submit issues, feature requests, or pull requests.
 
+### Committers
+
+Automated and release commits on this repository are attributed to the project
+commit account so the history stays consistent across agents/tools:
+
+- **Name:** `alexinea-intelligence`
+- **GitHub:** <https://github.com/alexinea-intelligence>
+- **Email:** `imliuyi@live.com` (temporary — will be replaced)
+
+When committing in this repo, mirror that identity so authorship is uniform:
+
+```bash
+git config user.name "alexinea-intelligence"
+git config user.email "imliuyi@live.com"
+```
+
 ### Development Requirements
 
 - .NET 10 SDK (for development)
