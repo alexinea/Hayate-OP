@@ -123,6 +123,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     // 统计「借出超阈值未归还」的疑似泄漏次数，与 LeakDetectedCount 并列、互不替代）。
     private long _leakSuspectedCount;
 
+    // M18：分片亲和模式（构造期快照）。None 为默认且零开销（起始索引恒 0）；
+    // Thread 按线程 ID 稳定映射起始分片；Custom 走用户委托（异常/越界/null 回落顺序扫描）。
+    private readonly HayateShardAffinityMode _affinityMode;
+    private readonly Func<int> _customShardAffinity;
+
     internal HayatePoolBasic(
         IHayateObjectPolicy<T> policy,
         HayatePoolOptions options,
@@ -163,6 +168,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         // PR-D L1：取证配置随构造快照（采样分母经 IsValid/ApplyFeatureSwitches 已钳制 ≥1，此处再兜底）
         _leakTraceCaptureMode = _options.LeakTraceCaptureMode;
         _leakTraceSampleRate = Math.Max(1, _options.LeakTraceSampleRate);
+
+        // M18：affinity 配置随构造快照（ApplyFeatureSwitches 已保证 Custom 模式必有委托）
+        _affinityMode = _options.ShardAffinityMode;
+        _customShardAffinity = _options.CustomShardAffinity;
 
         // 初始化分片
         _shards = new Shard[shardCount];
@@ -255,10 +264,17 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         var sw = ValueStopwatch.StartNew();
 
+        // M18：affinity 起始分片每次 Acquire 仅求值一次（None 恒 0，零额外开销）。
+        var affinityStart = _affinityMode == HayateShardAffinityMode.None ? 0 : SelectStartShardIndex();
+
         while (true)
         {
-            foreach (var shard in _shards)
+            // M18：从亲和分片起环形扫描（等价 foreach 顺序扫描当 start=0）。
+            for (var offset = 0; offset < _shards.Length; offset++)
             {
+                var hop = affinityStart + offset;
+                var shard = _shards[hop >= _shards.Length ? hop - _shards.Length : hop];
+
                 if (shard.TryTake(out var w))
                 {
                     // T06：借出成功即消费一个唤醒信号（若有），保持信号数与池内空闲对象对齐，
@@ -486,10 +502,17 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     public async Task<T> AcquireAsync(CancellationToken cancellationToken = default)
     {
+        // M18：affinity 起始分片每次 AcquireAsync 仅求值一次（None 恒 0，零额外开销）。
+        var affinityStart = _affinityMode == HayateShardAffinityMode.None ? 0 : SelectStartShardIndex();
+
         while (!cancellationToken.IsCancellationRequested)
         {
-            foreach (var shard in _shards)
+            // M18：从亲和分片起环形扫描（等价 foreach 顺序扫描当 start=0）。
+            for (var offset = 0; offset < _shards.Length; offset++)
             {
+                var hop = affinityStart + offset;
+                var shard = _shards[hop >= _shards.Length ? hop - _shards.Length : hop];
+
                 //if (shard.TryTake(out var w, TimeSpan.Zero))
                 if (shard.TryTake(out var w))
                 {
@@ -940,6 +963,37 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         Interlocked.Increment(ref _leaseTimeCount);
         InterlockedMax(ref _leaseTimeMaxMs, leaseTimeMs);
         InterlockedMin(ref _leaseTimeMinMs, leaseTimeMs);
+    }
+
+    /// <summary>
+    /// M18：计算本次借出的起始分片索引。
+    /// None 恒返 0（调用方以 <c>_affinityMode != None</c> 前置短路，保证默认路径零开销）；
+    /// Thread 按托管线程 ID 黄金比例散列稳定映射（同线程恒优先命中同一分片，且与分片数无公约数耦合）；
+    /// Custom 走用户委托，null/越界/异常一律回落 0（借出路径健壮性优先，绝不因策略缺失中断借出）。
+    /// </summary>
+    private int SelectStartShardIndex()
+    {
+        switch (_affinityMode)
+        {
+            case HayateShardAffinityMode.Thread:
+                return (int)((uint)Environment.CurrentManagedThreadId * 2654435761u % (uint)_shards.Length);
+
+            case HayateShardAffinityMode.Custom:
+                try
+                {
+                    var idx = _customShardAffinity?.Invoke();
+                    if (idx.HasValue && (uint)idx.Value < (uint)_shards.Length)
+                        return idx.Value;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "CustomShardAffinity selector failed; falling back to sequential scan");
+                }
+                return 0;
+
+            default:
+                return 0;
+        }
     }
 
     /// <summary>

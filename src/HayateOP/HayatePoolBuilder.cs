@@ -177,6 +177,34 @@ public class HayatePoolBuilder<T> where T : class, new()
         return this;
     }
 
+    /// <summary>
+    /// M18：设置分片亲和模式（None=默认顺序扫描 / Thread=线程亲和 / Custom=自定义委托）。
+    /// 传 <see cref="HayateShardAffinityMode.Custom"/> 时须随后调用
+    /// <see cref="WithCustomShardAffinity(Func{int})"/>，否则 Build 时回落 None。
+    /// </summary>
+    public HayatePoolBuilder<T> WithShardAffinity(HayateShardAffinityMode mode)
+    {
+        if (mode != HayateShardAffinityMode.None &&
+            mode != HayateShardAffinityMode.Thread &&
+            mode != HayateShardAffinityMode.Custom)
+        {
+            throw new ArgumentOutOfRangeException(nameof(mode), "未知的分片亲和模式");
+        }
+        _options.ShardAffinityMode = mode;
+        return this;
+    }
+
+    /// <summary>
+    /// M18：设置自定义起始分片委托并切入 Custom 模式。
+    /// 返回值建议落在 [0, ShardCount)；null/越界/异常时本次借出回落顺序扫描（不抛出）。
+    /// </summary>
+    public HayatePoolBuilder<T> WithCustomShardAffinity(Func<int> shardSelector)
+    {
+        _options.CustomShardAffinity = shardSelector ?? throw new ArgumentNullException(nameof(shardSelector));
+        _options.ShardAffinityMode = HayateShardAffinityMode.Custom;
+        return this;
+    }
+
     #endregion
 
     #region 超时配置

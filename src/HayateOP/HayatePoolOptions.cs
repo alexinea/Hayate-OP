@@ -118,6 +118,25 @@ public class HayatePoolOptions
     /// </remarks>
     public int ShardCount { get; set; } = HayateConstant.DEFAULT_SHARD_COUNT;
 
+    /// <summary>
+    /// M18（2.5）：借出路径的分片亲和模式。默认 <see cref="HayateShardAffinityMode.None"/>（顺序扫描，现状语义）。
+    /// </summary>
+    /// <remarks>
+    /// None：从 0 号分片开始顺序扫描（与 2.4 及之前一致，零额外开销）。<br />
+    /// Thread：按托管线程 ID 稳定映射起始分片（同线程始终优先命中同一分片，提升缓存/句柄局部性；
+    /// 起始分片忙时仍按环形继续扫描其余分片，不损失可用性）。<br />
+    /// Custom：使用 <see cref="CustomShardAffinity"/> 委托返回的起始分片索引；委托返回 null 或越界时回落 None。
+    /// 注意：Close 关闭分片（单分片）时本配置无实际效果。
+    /// </remarks>
+    public HayateShardAffinityMode ShardAffinityMode { get; set; } = HayateShardAffinityMode.None;
+
+    /// <summary>
+    /// M18：<see cref="HayateShardAffinityMode.Custom"/> 模式下的起始分片索引委托。
+    /// 返回值建议落在 [0, ShardCount)；返回越界值或 null 时本次借出回落顺序扫描。
+    /// 仅在 <see cref="ShardAffinityMode"/> = Custom 时被调用（每次借出至多一次）。
+    /// </summary>
+    public Func<int> CustomShardAffinity { get; set; }
+
     #endregion
 
     #region 扩缩容策略
@@ -486,6 +505,8 @@ public class HayatePoolOptions
         // 分片策略
         options.EnableSharding = this.EnableSharding;
         options.ShardCount = this.ShardCount;
+        options.ShardAffinityMode = this.ShardAffinityMode;
+        options.CustomShardAffinity = this.CustomShardAffinity;
 
         // 扩缩容策略
         options.EnableAutoScaling = this.EnableAutoScaling;
@@ -579,6 +600,19 @@ public class HayatePoolOptions
         if (LeakTraceSampleRate < 1)
         {
             LeakTraceSampleRate = HayateConstant.DEFAULT_LEAK_TRACE_SAMPLE_RATE;
+        }
+
+        // M18：affinity 规范化——Custom 模式未提供委托时回落 None（借出路径健壮性优先，
+        // 不在 IsValid 层拒绝，避免纯策略缺失导致整个池构建失败）；未知枚举值同样回落 None。
+        if (ShardAffinityMode == HayateShardAffinityMode.Custom && CustomShardAffinity is null)
+        {
+            ShardAffinityMode = HayateShardAffinityMode.None;
+        }
+        else if (ShardAffinityMode != HayateShardAffinityMode.None &&
+                 ShardAffinityMode != HayateShardAffinityMode.Thread &&
+                 ShardAffinityMode != HayateShardAffinityMode.Custom)
+        {
+            ShardAffinityMode = HayateShardAffinityMode.None;
         }
 
         // 容量告警阈值规范化（M12）：负值视为禁用（0），大于 1 钳制为 1；
