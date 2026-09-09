@@ -211,6 +211,19 @@
         <member name="F:DotNetCore.HayateOP.HayateObjectLocation.Destroyed">
             <summary>Already destroyed; must never be handed out again.</summary>
         </member>
+        <member name="P:DotNetCore.HayateOP.HayateObject`1.CreatedAt">
+            <summary>
+            PR-D A1（2.3 行为变更）：时间戳由 <c>DateTime</c> 改为 <see cref="M:System.Diagnostics.Stopwatch.GetTimestamp"/> 值，
+            消除热路径（创建/借出/归还/驱逐判定）上 <see cref="P:System.DateTime.UtcNow"/> 的 5–10× 系统调用开销。
+            时长换算：<c>(end - start) / Stopwatch.Frequency</c>（秒）或 <c>(end - start) * 1000.0 / Stopwatch.Frequency</c>（毫秒）。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateObject`1.LastBorrowedAt">
+            <inheritdoc cref="P:DotNetCore.HayateOP.HayateObject`1.CreatedAt"/>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateObject`1.LastReleasedAt">
+            <inheritdoc cref="P:DotNetCore.HayateOP.HayateObject`1.CreatedAt"/>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayateObject`1.IsBorrowed">
             <summary>
             P2-新-1：借出状态改为 <see cref="F:DotNetCore.HayateOP.HayateObject`1.Location"/> 的计算属性，消除双源不一致窗口。

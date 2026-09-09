@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 
 namespace DotNetCore.HayateOP;
@@ -31,9 +32,20 @@ internal enum HayateObjectLocation
 public class HayateObject<T> where T : class
 {
     public T Value { get; set; }
-    public DateTime CreatedAt { get; set; }
-    public DateTime LastBorrowedAt { get; set; }
-    public DateTime LastReleasedAt { get; set; }
+
+    /// <summary>
+    /// PR-D A1（2.3 行为变更）：时间戳由 <c>DateTime</c> 改为 <see cref="Stopwatch.GetTimestamp"/> 值，
+    /// 消除热路径（创建/借出/归还/驱逐判定）上 <see cref="DateTime.UtcNow"/> 的 5–10× 系统调用开销。
+    /// 时长换算：<c>(end - start) / Stopwatch.Frequency</c>（秒）或 <c>(end - start) * 1000.0 / Stopwatch.Frequency</c>（毫秒）。
+    /// </summary>
+    public long CreatedAt { get; set; }
+
+    /// <inheritdoc cref="CreatedAt"/>
+    public long LastBorrowedAt { get; set; }
+
+    /// <inheritdoc cref="CreatedAt"/>
+    public long LastReleasedAt { get; set; }
+
     public string AcquireTrace { get; set; }
 
     /// <summary>
@@ -78,7 +90,7 @@ public class HayateObject<T> where T : class
     public HayateObject(T value)
     {
         Value = value ?? throw new ArgumentNullException(nameof(value));
-        CreatedAt = DateTime.UtcNow;
-        LastReleasedAt = DateTime.UtcNow;
+        CreatedAt = Stopwatch.GetTimestamp();
+        LastReleasedAt = CreatedAt;
     }
 }

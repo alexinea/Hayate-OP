@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using DotNetCore.HayateOP.Common;
 using DotNetCore.HayateOP.Logging;
 using DotNetCore.HayateOP.Metrics;
@@ -70,8 +71,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private Timer _validationTimer;
 
     // 扩缩容冷却控制，防止抖动
-    private DateTime _lastScaleUpTime = DateTime.MinValue;
-    private DateTime _lastScaleDownTime = DateTime.MinValue;
+    // PR-D A1：Stopwatch timestamp（0 = 从未扩缩容，等效原 DateTime.MinValue 语义）
+    private long _lastScaleUpTime;
+    private long _lastScaleDownTime;
 
     // 统计数据
     private long _totalCreated;
@@ -305,7 +307,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     //if (_options.EnableEviction || _options.EnableLeakDetection || _options.EnableGenerationOptimization)
                     if (_enableEviction || _enableLeakDetection || _enableGenerationOptimization)
                     {
-                        w.LastBorrowedAt = DateTime.UtcNow;
+                        w.LastBorrowedAt = Stopwatch.GetTimestamp();
                     }
 
                     //if (_options.EnableLeakDetection)
@@ -329,7 +331,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     // 分代升级，仅开启分代优化时执行
                     //if (_options.EnableGenerationOptimization &&
                     if (_enableGenerationOptimization &&
-                        DateTime.UtcNow - w.CreatedAt > TimeSpan.FromMilliseconds(_options.GenerationThresholdMs))
+                        (Stopwatch.GetTimestamp() - w.CreatedAt) * 1000.0 / Stopwatch.Frequency > _options.GenerationThresholdMs)
                     {
                         w.Generation = 1;
                     }
@@ -431,7 +433,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                             w.Location = HayateObjectLocation.Borrowed;
                             if (_enableEviction || _enableLeakDetection)
                             {
-                                w.LastBorrowedAt = DateTime.UtcNow;
+                                w.LastBorrowedAt = Stopwatch.GetTimestamp();
                             }
                             _policy.OnAcquire(w.Value);
                             Interlocked.Increment(ref _totalAcquired);
@@ -488,7 +490,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     //if (_options.EnableEviction || _options.EnableLeakDetection)
                     if (_enableEviction || _enableLeakDetection)
                     {
-                        w.LastBorrowedAt = DateTime.UtcNow;
+                        w.LastBorrowedAt = Stopwatch.GetTimestamp();
                     }
 
                     Interlocked.Increment(ref _totalAcquired);
@@ -580,8 +582,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             //if (_options.EnableEviction || _options.EnableMetrics)
             if (_enableEviction || _enableMetrics)
             {
-                w.LastReleasedAt = DateTime.UtcNow;
-                w.LeaseTimeMs = (long)(w.LastReleasedAt - w.LastBorrowedAt).TotalMilliseconds;
+                w.LastReleasedAt = Stopwatch.GetTimestamp();
+                w.LeaseTimeMs = (long)((w.LastReleasedAt - w.LastBorrowedAt) * 1000.0 / Stopwatch.Frequency);
             }
 
             // 重置对象；策略层可通过返回 false 拒绝回池（例如对象已损坏或不可复用）
@@ -732,7 +734,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         {
             int currentTotal = TrackedObjectCount;
             if (currentTotal >= _options.MaxPoolSize) return;
-            if ((DateTime.UtcNow - _lastScaleUpTime).TotalSeconds < _options.ScaleUpCooldownSeconds) return;
+            if ((Stopwatch.GetTimestamp() - _lastScaleUpTime) / (double)Stopwatch.Frequency < _options.ScaleUpCooldownSeconds) return;
 
             // 每次超时 +5 个，防止雪崩
             int add = Math.Min(_options.ScaleUpStep, _options.MaxPoolSize - currentTotal);
@@ -752,7 +754,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 added++;
             }
 
-            _lastScaleUpTime = DateTime.UtcNow;
+            _lastScaleUpTime = Stopwatch.GetTimestamp();
             _logger.LogWarning("FORCE SCALE UP Pool [{PoolName}] (because timeout) → total: {Total}, added: {Count}",
                 _name, TrackedObjectCount, added);
 
@@ -791,7 +793,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             w.Location = HayateObjectLocation.Borrowed;
             if (_enableEviction || _enableLeakDetection)
             {
-                w.LastBorrowedAt = DateTime.UtcNow;
+                w.LastBorrowedAt = Stopwatch.GetTimestamp();
             }
             _policy.OnAcquire(w.Value);
             Interlocked.Increment(ref _totalAcquired);
@@ -922,7 +924,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         if (!_enableEviction) return;
         try
         {
-            var now = DateTime.UtcNow;
+            var now = Stopwatch.GetTimestamp();
             foreach (var shard in _shards)
             {
                 // 分批检查
@@ -934,10 +936,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     // 跳过正在使用的对象
                     if (w.IsBorrowed) continue;
 
-                    // 判断是否需要驱逐
-                    var isExpired = now - w.CreatedAt > _options.MaxLifeTime;
-                    var isIdleTooLong = now - w.LastReleasedAt > _options.MaxIdleTime;
-                    var isSoftIdle = now - w.LastReleasedAt > _options.SoftMinEvictableIdleTime;
+                    // 判断是否需要驱逐（PR-D A1：Stopwatch ticks → 秒换算）
+                    var isExpired = (now - w.CreatedAt) / (double)Stopwatch.Frequency > _options.MaxLifeTime.TotalSeconds;
+                    var isIdleTooLong = (now - w.LastReleasedAt) / (double)Stopwatch.Frequency > _options.MaxIdleTime.TotalSeconds;
+                    var isSoftIdle = (now - w.LastReleasedAt) / (double)Stopwatch.Frequency > _options.SoftMinEvictableIdleTime.TotalSeconds;
 
                     // 软最小空闲逻辑
                     // 只有当空闲数超过最小池大小时才驱逐软空闲对象
@@ -983,8 +985,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             targetSize = Math.Clamp(targetSize, _options.MinPoolSize, _options.MaxPoolSize);
 
             // 扩容冷却时间 3 秒，缩容冷却时间 15 秒，防止频繁抖动
-            var canScaleUp = (DateTime.UtcNow - _lastScaleUpTime).TotalSeconds >= _options.ScaleUpCooldownSeconds;
-            var canScaleDown = (DateTime.UtcNow - _lastScaleDownTime).TotalSeconds >= _options.ScaleDownCooldownSeconds;
+            var canScaleUp = (Stopwatch.GetTimestamp() - _lastScaleUpTime) / (double)Stopwatch.Frequency >= _options.ScaleUpCooldownSeconds;
+            var canScaleDown = (Stopwatch.GetTimestamp() - _lastScaleDownTime) / (double)Stopwatch.Frequency >= _options.ScaleDownCooldownSeconds;
 
             if (targetSize > currentTotal && canScaleUp)
             {
@@ -999,7 +1001,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     if (!shard.Add(w)) Destroy(w);
                 }
 
-                _lastScaleUpTime = DateTime.UtcNow;
+                _lastScaleUpTime = Stopwatch.GetTimestamp();
                 _logger.LogInformation("Pool [{PoolName}] scaled UP. {CurrentCapacity} → {TargetCapacity}", _name, currentTotal, targetSize);
                 if (_enableMetrics)
                 {
@@ -1039,7 +1041,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 }
 
                 UpdateShardMaxSizes();
-                _lastScaleDownTime = DateTime.UtcNow;
+                _lastScaleDownTime = Stopwatch.GetTimestamp();
                 _logger.LogInformation("Pool [{PoolName}] scaled DOWN. {CurrentCapacity} → {TargetCapacity}", _name, currentTotal, targetSize);
 
                 if (_enableMetrics)
@@ -1135,7 +1137,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     public HayatePoolSnapshot TakeSnapshot()
     {
         var leakTraces = new List<string>();
-        var now = DateTime.UtcNow;
+        // 快照 Timestamp 保留墙钟时间（对外语义不变）；泄漏判定改用 Stopwatch ticks（PR-D A1）
+        var wallClock = DateTimeOffset.UtcNow;
+        var now = Stopwatch.GetTimestamp();
 
         // 仅开启泄漏检测时执行扫描
         //if (_options.EnableLeakDetection)
@@ -1148,9 +1152,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             {
                 foreach (var w in shard.TrackedValues)
                 {
-                    // 检查泄露
+                    // 检查泄露（PR-D A1：Stopwatch ticks → 秒换算）
                     if (w.IsBorrowed &&
-                        now - w.LastBorrowedAt > _options.LeakDetectionThreshold)
+                        (now - w.LastBorrowedAt) / (double)Stopwatch.Frequency > _options.LeakDetectionThreshold.TotalSeconds)
                     {
                         leakTraces.Add(w.AcquireTrace ?? "No stack trace available");
                         Interlocked.Increment(ref _leakDetectedCount);
@@ -1172,7 +1176,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         return new HayatePoolSnapshot
         {
-            Timestamp = now,
+            Timestamp = wallClock,
             PooledCount = pooledCount,
             BorrowedCount = borrowedCount,
             TotalCreated = Interlocked.Read(ref _totalCreated),
