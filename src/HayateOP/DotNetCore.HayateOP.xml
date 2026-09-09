@@ -937,7 +937,8 @@
         </member>
         <member name="F:DotNetCore.HayateOP.HayatePoolRejectPolicy.CreateNew">
             <summary>
-             直接创建一个新的对象，绕过池的限制，拒绝请求
+             先等待归还、等满 acquire timeout 后才创建新对象（并非名字暗示的「立即绕过池建新」）。
+             创建的对象会登记进池、归还时可回池复用（T15）；空池冷启动首次调用最多付出一个完整超时延迟。
             </summary>
         </member>
         <member name="T:DotNetCore.HayateOP.HayatePoolStats">
