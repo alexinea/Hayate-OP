@@ -1018,7 +1018,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     _metrics.RecordPoolScaled(_name, "UP", currentTotal, targetSize);
                 }
             }
-            else if (targetSize < currentTotal && canScaleDown && totalIdle < currentTotal * 0.4f)
+            // S1（2.4 行为变更）：移除缩容互斥门控。原 `totalIdle < currentTotal * 0.4f`
+            // 要求占用率 >0.6 才放行，而策略层（ThresholdScalingStrategy）要求占用率
+            // <ScaleDownThreshold(默认0.2) 才给出缩小目标——两者永远无法同时成立，
+            // 导致默认配置下缩容分支为死代码（autoScaling 只扩不缩）。
+            // 现缩容判定完全信任策略层：targetSize < currentTotal && 冷却期已过即放行；
+            // 抖动由 canScaleDown 冷却 + ScaleDownStep 步长双重防线约束。
+            else if (targetSize < currentTotal && canScaleDown)
             {
                 // 缩容
                 var remove = currentTotal - targetSize;
