@@ -46,7 +46,33 @@ public class HayateObject<T> where T : class
     /// <inheritdoc cref="CreatedAt"/>
     public long LastReleasedAt { get; set; }
 
-    public string AcquireTrace { get; set; }
+    /// <summary>
+    /// M20（2.5）：创建时刻的挂钟时间戳（<see cref="DateTimeOffset.UtcNow.Ticks"/>）。
+    /// 与 <see cref="CreatedAt"/>（Stopwatch ticks，用于时长测量）互补——
+    /// 本字段面向快照/日志输出的人类可读口径，不参与任何时长判定。
+    /// </summary>
+    public long CreatedAtTick { get; set; }
+
+    /// <summary>
+    /// M20（2.5）：累计借出次数。借出路径单调递增（借出瞬间包装对象由本线程独占，
+    /// 驱逐/校验无法认领借出中对象，故普通自增即可，无需 Interlocked）。
+    /// </summary>
+    public int LeaseCount { get; internal set; }
+
+    /// <summary>
+    /// M20（2.5）：所属池的逻辑名（创建时由池写入，生命周期内不变）。
+    /// 供跨池诊断 / 快照输出定位对象归属。
+    /// </summary>
+    public string OwnerPoolName { get; set; }
+
+    /// <summary>
+    /// M10（2.5，breaking）：借出时刻的调用栈帧（低开销采集，
+    /// <c>new StackTrace(fNeedFileInfo: false)</c>——不解析源文件行号）。
+    /// 取证模式与采集频率由 <see cref="HayateLeakTraceCaptureMode"/> 控制（L1 语义不变）。
+    /// 2.4 及之前的 <c>AcquireTrace: string</c>（<see cref="Environment.StackTrace"/> 全文）
+    /// 已移除；文本形态经 <c>TakeSnapshot().LeakTraces</c> 获取（池侧格式化帧）。
+    /// </summary>
+    public StackFrame[] AcquireStackFrames { get; set; }
 
     /// <summary>
     /// P2-新-1：借出状态改为 <see cref="Location"/> 的计算属性，消除双源不一致窗口。
@@ -92,5 +118,7 @@ public class HayateObject<T> where T : class
         Value = value ?? throw new ArgumentNullException(nameof(value));
         CreatedAt = Stopwatch.GetTimestamp();
         LastReleasedAt = CreatedAt;
+        // M20：挂钟创建时间（快照输出口径，不参与时长判定）
+        CreatedAtTick = DateTimeOffset.UtcNow.Ticks;
     }
 }

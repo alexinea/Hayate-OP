@@ -346,14 +346,16 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         // 零取证开销；调用栈按 LeakTraceCaptureMode 独立控制——
                         // Off（默认）不抓栈（2.0 及之前每次借出抓全栈，37.5μs / 28.7KB 量级）；
                         // Sampled 每 N 次借出抓 1 次（第 1 次必抓）；EveryAcquire 维持旧行为，显式 opt-in。
+                        // M10（2.5）：采集形态 string 全文 → StackFrame[]（fNeedFileInfo:false 低开销），
+                        // 文本形态由 TakeSnapshot 按需格式化。
                         if (_leakTraceCaptureMode == HayateLeakTraceCaptureMode.EveryAcquire)
                         {
-                            w.AcquireTrace = Environment.StackTrace;
+                            w.AcquireStackFrames = CaptureAcquireFrames();
                         }
                         else if (_leakTraceCaptureMode == HayateLeakTraceCaptureMode.Sampled &&
                                  (Interlocked.Increment(ref _leakTraceCounter) - 1) % _leakTraceSampleRate == 0)
                         {
-                            w.AcquireTrace = Environment.StackTrace;
+                            w.AcquireStackFrames = CaptureAcquireFrames();
                         }
                     }
 
@@ -362,6 +364,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     // 结构性失效；单次 QPC（Stopwatch.GetTimestamp）无分配、无时区换算，
                     // 成本远低于 PR-D A1 移除的 DateTime.UtcNow，可接受。
                     w.LastBorrowedAt = Stopwatch.GetTimestamp();
+
+                    // M20：累计借出次数。借出瞬间包装对象由本线程独占（TryTake 已摘链认领，
+                    // 驱逐/校验无法认领 Borrowed 对象），普通自增即可，无需 Interlocked。
+                    w.LeaseCount++;
 
                     // 分代升级，仅开启分代优化时执行
                     //if (_options.EnableGenerationOptimization &&
@@ -471,6 +477,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                             w.Location = HayateObjectLocation.Borrowed;
                             // M4：借出时间戳无条件记录（同 Acquire 主路径，保障泄漏回查可用）
                             w.LastBorrowedAt = Stopwatch.GetTimestamp();
+                            // M20：累计借出次数（新建即借出，包装对象此刻由本线程独占）
+                            w.LeaseCount++;
                             _policy.OnAcquire(w.Value);
                             Interlocked.Increment(ref _totalAcquired);
 
@@ -535,6 +543,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                     // M4：借出时间戳无条件记录（同步路径一致，保障泄漏回查可用）
                     w.LastBorrowedAt = Stopwatch.GetTimestamp();
+
+                    // M20：累计借出次数（TryTake 已摘链认领，包装对象此刻由本线程独占）
+                    w.LeaseCount++;
 
                     Interlocked.Increment(ref _totalAcquired);
 
@@ -777,7 +788,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 // T09：登记并入目标分片（同步写入 ShardIndex 作为归属）。
                 // 对象 round-trip 永远回到该分片，登记项与对象生命周期同步，
                 // TrackedCount 之和即为池的真实存活对象数。
-                var w = new HayateObject<T>(o) { ShardIndex = targetShard.Index };
+                var w = new HayateObject<T>(o) { ShardIndex = targetShard.Index, OwnerPoolName = _name };
                 if (targetShard.TryTrack(o, w))
                 {
                     if (_enableMetrics) Interlocked.Increment(ref _totalCreated);
@@ -871,6 +882,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             w.Location = HayateObjectLocation.Borrowed;
             // M4：借出时间戳无条件记录（同 Acquire 主路径，保障泄漏回查可用）
             w.LastBorrowedAt = Stopwatch.GetTimestamp();
+            // M20：累计借出次数（自举即借出，包装对象此刻由本线程独占）
+            w.LeaseCount++;
             _policy.OnAcquire(w.Value);
             Interlocked.Increment(ref _totalAcquired);
 
@@ -994,6 +1007,41 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             default:
                 return 0;
         }
+    }
+
+    /// <summary>
+    /// M10：借出路径调用栈帧采集（fNeedFileInfo:false——不解析源文件/行号，避免 PDB I/O；
+    /// 相比 2.4 的 Environment.StackTrace 全文字符串，采集成本相当、结构化可编程消费）。
+    /// GetFrames 可能返回 null（栈为空的极端情形），统一回退空数组。
+    /// </summary>
+    private static StackFrame[] CaptureAcquireFrames()
+    {
+        var frames = new StackTrace(fNeedFileInfo: false).GetFrames();
+        return frames ?? Array.Empty<StackFrame>();
+    }
+
+    /// <summary>
+    /// M10：将借出帧数组格式化为单行文本（供快照 LeakTraces 输出）。
+    /// 帧之间以 " <- " 连接（调用方向：最外层帧在前），帧格式
+    /// <c>Type.Method+0x偏移</c>；无帧时回退占位文本。
+    /// </summary>
+    private static string FormatLeaseTrace(StackFrame[] frames)
+    {
+        if (frames is null || frames.Length == 0)
+            return "No stack trace available";
+
+        var sb = new System.Text.StringBuilder(frames.Length * 48);
+        for (var i = 0; i < frames.Length; i++)
+        {
+            var method = frames[i].GetMethod();
+            if (method is null) continue;
+
+            if (sb.Length > 0) sb.Append(" <- ");
+            sb.Append(method.DeclaringType?.Name).Append('.').Append(method.Name)
+              .Append("+0x").Append(frames[i].GetNativeOffset().ToString("X"));
+        }
+
+        return sb.Length > 0 ? sb.ToString() : "No stack trace available";
     }
 
     /// <summary>
@@ -1323,43 +1371,52 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     public HayatePoolSnapshot TakeSnapshot()
     {
         var leakTraces = new List<string>();
+        // M20：逐对象生命周期明细（快照为诊断路径，O(n) 汇总可接受）
+        var details = new List<HayatePoolObjectDetail>();
         // 快照 Timestamp 保留墙钟时间（对外语义不变）；泄漏判定改用 Stopwatch ticks（PR-D A1）
         var wallClock = DateTimeOffset.UtcNow;
         var now = Stopwatch.GetTimestamp();
 
-        // 仅开启泄漏检测时执行取证扫描；关闭时走 M4 回查告警通路（仅计数，不取证不改变 L1 行为）
-        //if (_options.EnableLeakDetection)
-        if (_enableLeakDetection)
+        // M10：泄漏取证扫描与 M4 回查告警共用一次登记表遍历（两分支判定条件与 2.4/2.5
+        // 既有语义逐一保持一致），同时顺带产出 M20 的逐对象明细，避免三遍 O(n) 扫描。
+        foreach (var shard in _shards)
         {
-            // T13/穿插修复 + T09：泄漏扫描必须遍历分片登记表（全部存活包装对象）。
-            // 原实现遍历 shard.GetAll()（仅池内空闲对象），而 TryTake 会把借出对象
-            // 物理摘出分片链表——借出对象从未被扫描，泄漏检测结构上恒不触发。
-            foreach (var shard in _shards)
+            foreach (var w in shard.TrackedValues)
             {
-                foreach (var w in shard.TrackedValues)
+                details.Add(new HayatePoolObjectDetail
                 {
+                    ShardIndex = w.ShardIndex,
+                    IsBorrowed = w.IsBorrowed,
+                    LeaseCount = w.LeaseCount,
+                    CreatedAtTick = w.CreatedAtTick,
+                    LeaseTimeMs = w.LeaseTimeMs,
+                    Generation = w.Generation,
+                    OwnerPoolName = w.OwnerPoolName
+                });
+
+                if (_enableLeakDetection)
+                {
+                    // T13/穿插修复 + T09：泄漏扫描必须遍历分片登记表（全部存活包装对象）。
+                    // 原实现遍历 shard.GetAll()（仅池内空闲对象），而 TryTake 会把借出对象
+                    // 物理摘出分片链表——借出对象从未被扫描，泄漏检测结构上恒不触发。
                     // 检查泄露（PR-D A1：Stopwatch ticks → 秒换算）
                     if (w.IsBorrowed &&
                         (now - w.LastBorrowedAt) / (double)Stopwatch.Frequency > _options.LeakDetectionThreshold.TotalSeconds)
                     {
-                        leakTraces.Add(w.AcquireTrace ?? "No stack trace available");
+                        // M10（2.5）：LeakTraces 仍为文本形态，但由池侧按 StackFrame[] 格式化
+                        //（2.4 及之前为 Environment.StackTrace 全文原样输出）
+                        leakTraces.Add(FormatLeaseTrace(w.AcquireStackFrames));
                         Interlocked.Increment(ref _leakDetectedCount);
                     }
                 }
-            }
-        }
-        else
-        {
-            // M4（2.5）：泄漏检测关闭时的回查告警通路。按同一 LeakDetectionThreshold
-            // 统计「借出超阈值未归还」的疑似泄漏次数（LeakSuspectedCount），与
-            // LeakDetectedCount 并列——只计数、不取证（无 AcquireTrace 采集）、
-            // 不触发任何回收行为，L1 取证三模式语义完全不变。
-            // LastBorrowedAt 自 2.5 起在借出路径无条件记录，因此「全功能关闭」配置下
-            // 回查依然可用（2.4 及之前该时间戳受功能开关门控，存在恒 0 的可能）。
-            foreach (var shard in _shards)
-            {
-                foreach (var w in shard.TrackedValues)
+                else
                 {
+                    // M4（2.5）：泄漏检测关闭时的回查告警通路。按同一 LeakDetectionThreshold
+                    // 统计「借出超阈值未归还」的疑似泄漏次数（LeakSuspectedCount），与
+                    // LeakDetectedCount 并列——只计数、不取证（无 AcquireStackFrames 采集）、
+                    // 不触发任何回收行为，L1 取证三模式语义完全不变。
+                    // LastBorrowedAt 自 2.5 起在借出路径无条件记录，因此「全功能关闭」配置下
+                    // 回查依然可用（2.4 及之前该时间戳受功能开关门控，存在恒 0 的可能）。
                     if (w.IsBorrowed && w.LastBorrowedAt != 0 &&
                         (now - w.LastBorrowedAt) / (double)Stopwatch.Frequency > _options.LeakDetectionThreshold.TotalSeconds)
                     {
@@ -1390,7 +1447,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             TotalAcquired = Interlocked.Read(ref _totalAcquired),
             LeakCount = Interlocked.Read(ref _leakDetectedCount),
             LeakSuspectedCount = Interlocked.Read(ref _leakSuspectedCount),
-            LeakTraces = leakTraces.AsReadOnly()
+            LeakTraces = leakTraces.AsReadOnly(),
+            ObjectDetails = details.AsReadOnly()
         };
     }
 

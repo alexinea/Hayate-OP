@@ -19,4 +19,9 @@ public class HayatePoolSnapshot
     public long LeakSuspectedCount { get; set; }
 
     public IReadOnlyList<string> LeakTraces { get; set; } = [];
+
+    /// <summary>
+    /// M20（2.5）：逐对象生命周期明细（覆盖全部存活包装对象：空闲 + 借出）。
+    /// </summary>
+    public IReadOnlyList<HayatePoolObjectDetail> ObjectDetails { get; set; } = [];
 }
