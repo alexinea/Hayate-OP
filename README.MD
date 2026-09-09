@@ -551,18 +551,22 @@ comparing HayateOP against `Microsoft.Extensions.ObjectPool.DefaultObjectPool<T>
 Run it with `dotnet run -c Release --project tests/HayateOP.Benchmarks`; archived reports live
 in [`docs/benchmarks/`](docs/benchmarks).
 
-Latest run (2026-09-08, .NET 10.0, Release):
+Latest run (2026-09-09, .NET 10.0, Release):
 
 | Suite | MEOOP (baseline) | HayateOP minimal | HayateOP 4-shard | HayateOP full-feature |
 | :--- | ---: | ---: | ---: | ---: |
-| Acquire+Release (single-thread) | 17.1 ns | 199.6 ns (11.7×) | 227.2 ns (13.3×) | 37,487.6 ns (2190×)¹ |
-| Release-only (with refill acquire) | 19.8 ns | 207.4 ns | — | — |
-| Mixed 50/50 acquire/release | 39.2 ns | 238.9 ns | 212.5 ns | — |
-| 100-thread concurrent borrow/return | 12.2 µs | 112.4 µs | 110.6 µs | — |
+| Acquire+Release (single-thread) | 22.7 ns | 188.8 ns (8.3×) | 212.6 ns (9.4×) | 304.7 ns (13.5×)¹ |
+| Release-only (with refill acquire) | 22.8 ns | 186.4 ns (8.2×) | — | — |
+| Mixed 50/50 acquire/release | 42.3 ns | 226.4 ns (10.0×) | 200.4 ns (8.9×) | — |
+| 100-thread concurrent borrow/return | 20.0 µs | ~1033 µs² | ~1292 µs² | — |
 
-> ¹ Full-feature mode (validation + metrics + leak detection + eviction enabled) carries heavy
-> per-acquire cost and allocation (~28.7 KB/acquire) — treat as a known optimization target, not
-> a recommended production configuration for latency-sensitive paths.
+> ¹ Fixed in 2.3: full-feature mode (validation + metrics + leak detection + eviction enabled)
+> dropped from ~37.5 µs / ~28.7 KB per acquire to ~305 ns / ~0.4 KB after the PR-C/PR-D eviction &
+> timestamp rework (was dominated by per-iteration full free-list `ToArray()` allocation).
+>
+> ² The concurrent 100-thread suite is **high-variance** on this dev box (a hybrid-core laptop under a
+> debugger); per-run means fluctuate by an order of magnitude. Treat it as a sanity/regression smoke
+> test, not a cross-run numeric comparison.
 
 HayateOP's single acquire/release round-trip is currently slower than MEOOP's minimal `Get()/Return()`
 (HayateOP tracks per-object state, shard index, and supports validation/metrics hooks that MEOOP does not).
