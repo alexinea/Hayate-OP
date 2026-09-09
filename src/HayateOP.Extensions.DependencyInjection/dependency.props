@@ -1,5 +1,11 @@
 <Project>
 
+    <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+        <!-- net48 兼容（S2）：M.E 8.x 包族含 net48 资产（评估已实证） -->
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+        <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
+    </ItemGroup>
+
     <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
         <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.3" />
         <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.3" />

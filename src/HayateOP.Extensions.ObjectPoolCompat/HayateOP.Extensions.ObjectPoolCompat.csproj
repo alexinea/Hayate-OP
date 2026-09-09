@@ -17,6 +17,11 @@
 
     <Import Project="..\..\common.props" />
 
+    <!-- net48 兼容（S2）：仅本库追加，不动 common.props 以免波及测试与全部扩展 -->
+    <PropertyGroup>
+        <TargetFrameworks>net48;$(TargetFrameworks)</TargetFrameworks>
+    </PropertyGroup>
+
     <Import Project="references.props" />
 
 </Project>
