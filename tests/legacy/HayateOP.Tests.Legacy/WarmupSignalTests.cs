@@ -114,7 +114,15 @@ public class WarmupSignalTests
         Assert.False(pending.IsCompleted, "预热未完成时 AcquireAsync 不应完成");
 
         gate.Set();
+#if NET48
+        // net48 无 Task<T>.WaitAsync(TimeSpan)（.NET 6 引入），用 WhenAny + Delay 等价实现超时等待；
+        // net6.0/net7.0 等高版本走 #else 分支的原生 WaitAsync。
+        var completed = await Task.WhenAny(pending, Task.Delay(TimeSpan.FromSeconds(15)));
+        Assert.Same(pending, completed);
+        var item = await pending;
+#else
         var item = await pending.WaitAsync(TimeSpan.FromSeconds(15));
+#endif
         Assert.NotNull(item);
         Assert.Equal(4, policy.CreatedCount);
     }
