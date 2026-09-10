@@ -16,8 +16,9 @@ public class HayatePoolBuilder<T> where T : class, new()
     private IHayateLogger _logger;
     private string _poolName;
 
-    // M19：池级日志工厂与「显式日志器」标记。默认无工厂 + 内建单例日志器，
-    // 与 2.4 及之前行为完全一致；显式 WithLogger 优先于工厂（见 ResolveLogger）。
+    // Pool-level logger factory and the "explicit logger" flag. Defaults to no factory plus the
+    // built-in singleton logger, identical to the behavior before 2.4; an explicit WithLogger
+    // takes precedence over the factory (see ResolveLogger).
     private IHayateLoggerFactory _loggerFactory;
     private bool _loggerExplicitlySet;
 
@@ -30,11 +31,18 @@ public class HayatePoolBuilder<T> where T : class, new()
         _poolName = typeof(T).Name;
     }
 
-    #region 功能开关配置
+    #region Feature toggles
 
     /// <summary>
-    /// 启用/禁用分片功能
+    /// Enables or disables sharding.
     /// </summary>
+    /// <param name="enable">Whether to enable sharding; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableSharding(false);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithEnableSharding(bool enable = true)
     {
         _options.EnableSharding = enable;
@@ -42,8 +50,15 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 启用/禁用自动扩缩容
+    /// Enables or disables automatic scaling.
     /// </summary>
+    /// <param name="enable">Whether to enable automatic scaling; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableAutoScaling(false);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithEnableAutoScaling(bool enable = true)
     {
         _options.EnableAutoScaling = enable;
@@ -51,8 +66,15 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 启用/禁用对象验证
+    /// Enables or disables object validation.
     /// </summary>
+    /// <param name="enable">Whether to enable validation; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableValidation(false);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithEnableValidation(bool enable = true)
     {
         _options.EnableValidation = enable;
@@ -66,8 +88,15 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 启用/禁用空闲对象驱逐
+    /// Enables or disables idle-object eviction.
     /// </summary>
+    /// <param name="enable">Whether to enable eviction; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableEviction(false);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithEnableEviction(bool enable = true)
     {
         _options.EnableEviction = enable;
@@ -75,8 +104,15 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 启用/禁用分代优化
+    /// Enables or disables generational optimization.
     /// </summary>
+    /// <param name="enable">Whether to enable generational optimization; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableGenerationOptimization(false);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithEnableGenerationOptimization(bool enable = true)
     {
         _options.EnableGenerationOptimization = enable;
@@ -84,8 +120,15 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 启用/禁用泄漏检测
+    /// Enables or disables leak detection.
     /// </summary>
+    /// <param name="enable">Whether to enable leak detection; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableLeakDetection(false);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithEnableLeakDetection(bool enable = true)
     {
         _options.EnableLeakDetection = enable;
@@ -93,8 +136,15 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 启用/禁用指标统计
+    /// Enables or disables metrics collection.
     /// </summary>
+    /// <param name="enable">Whether to enable metrics; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableMetrics(true);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithEnableMetrics(bool enable = true)
     {
         _options.EnableMetrics = enable;
@@ -102,9 +152,17 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置是否等待预热完成（M17）。<c>true</c> 时预热转后台执行，借出操作在预热完成前阻塞。
+    /// Sets whether to wait for warmup to complete. When <c>true</c>, warmup runs in the background
+    /// and borrow operations block until warmup finishes.
     /// </summary>
-    /// <param name="wait">是否等待预热完成；默认 <c>false</c>（构造函数内同步预热，借出零额外等待）。</param>
+    /// <param name="wait">Whether to wait for warmup; defaults to <c>false</c> (synchronous warmup
+    /// inside the constructor, with no extra wait on borrow).</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithWaitForWarmup(true);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithWaitForWarmup(bool wait = true)
     {
         _options.WaitForWarmup = wait;
@@ -112,9 +170,17 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置是否启用分配追踪（M3）。开启后 <c>GetStats()</c> / <c>TakeSnapshot()</c> 暴露
-    /// 借出 / 归还路径的分配字节增量与样本数。
+    /// Sets whether to enable allocation tracking. When enabled, <c>GetStats()</c> /
+    /// <c>TakeSnapshot()</c> expose the per-path allocation byte delta and sample count for the
+    /// borrow and return paths.
     /// </summary>
+    /// <param name="enable">Whether to enable allocation tracking; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableAllocationTracking(true);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithEnableAllocationTracking(bool enable = true)
     {
         _options.EnableAllocationTracking = enable;
@@ -122,10 +188,22 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置容量告警阈值（M12）。使用率口径为「借出数 / MaxPoolSize」。
+    /// Sets the capacity alarm thresholds. Utilization is measured as borrowed count / MaxPoolSize.
     /// </summary>
-    /// <param name="warnAtRatio">警告阈值（0~1；0 表示禁用警告档）。</param>
-    /// <param name="criticalAtRatio">危急阈值（0~1；0 表示禁用危急档；与警告同时启用时不得小于警告阈值，越界时自动修正）。</param>
+    /// <param name="warnAtRatio">Warning threshold (0~1; 0 disables the warning tier).</param>
+    /// <param name="criticalAtRatio">Critical threshold (0~1; 0 disables the critical tier; when
+    /// both tiers are enabled it must not be smaller than the warning threshold, and is auto-corrected
+    /// if out of range).</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="warnAtRatio"/> or
+    /// <paramref name="criticalAtRatio"/> is outside the range [0, 1], or <paramref name="criticalAtRatio"/>
+    /// is smaller than <paramref name="warnAtRatio"/> while both are enabled.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithCapacityAlarm(0.8, 0.95);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithCapacityAlarm(double warnAtRatio, double criticalAtRatio = 0)
     {
         if (warnAtRatio < 0 || warnAtRatio > 1)
@@ -141,8 +219,18 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置容量警告回调（使用率 ≥ WarnAtRatio 时状态翻转触发一次）
+    /// Sets the capacity warning callback (fires once on a state flip when utilization &gt;=
+    /// WarnAtRatio).
     /// </summary>
+    /// <param name="handler">The callback invoked when the warning threshold is crossed.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="handler"/> is <c>null</c>.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithOnCapacityWarning(args =&gt; Log.Warn("pool near capacity"));
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithOnCapacityWarning(Action<HayatePoolCapacityAlarmEventArgs> handler)
     {
         _options.OnCapacityWarning = handler ?? throw new ArgumentNullException(nameof(handler));
@@ -150,8 +238,18 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置容量危急回调（使用率 ≥ CriticalAtRatio 时状态翻转触发一次）
+    /// Sets the capacity critical callback (fires once on a state flip when utilization &gt;=
+    /// CriticalAtRatio).
     /// </summary>
+    /// <param name="handler">The callback invoked when the critical threshold is crossed.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="handler"/> is <c>null</c>.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithOnCapacityCritical(args =&gt; Log.Error("pool at capacity"));
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithOnCapacityCritical(Action<HayatePoolCapacityAlarmEventArgs> handler)
     {
         _options.OnCapacityCritical = handler ?? throw new ArgumentNullException(nameof(handler));
@@ -160,11 +258,19 @@ public class HayatePoolBuilder<T> where T : class, new()
 
     #endregion
 
-    #region 基础配置
+    #region Basic configuration
 
     /// <summary>
-    /// 设置池名称
+    /// Sets the pool name.
     /// </summary>
+    /// <param name="name">The name used for logging and metrics.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is <c>null</c>.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithPoolName("orders");
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithPoolName(string name)
     {
         _poolName = name ?? throw new ArgumentNullException(nameof(name));
@@ -172,8 +278,16 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置最小池大小
+    /// Sets the minimum pool size.
     /// </summary>
+    /// <param name="minSize">The minimum number of objects to keep in the pool.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="minSize"/> is negative.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithMinSize(10);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithMinSize(int minSize)
     {
         if (minSize < 0) throw new ArgumentOutOfRangeException(nameof(minSize), "MinSize cannot be negative");
@@ -182,8 +296,16 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置最大池大小
+    /// Sets the maximum pool size.
     /// </summary>
+    /// <param name="maxSize">The maximum number of objects the pool may hold.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxSize"/> is negative.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithMaxSize(256);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithMaxSize(int maxSize)
     {
         if (maxSize < 0) throw new ArgumentOutOfRangeException(nameof(maxSize), "MaxSize cannot be negative");
@@ -192,8 +314,17 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置分片数量
+    /// Sets the number of shards.
     /// </summary>
+    /// <param name="shardCount">The number of shards (1~32).</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="shardCount"/> is outside the
+    /// range [1, 32].</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithShardCount(8);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithShardCount(int shardCount)
     {
         if (shardCount < 1 || shardCount > 32)
@@ -203,26 +334,47 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// M18：设置分片亲和模式（None=默认顺序扫描 / Thread=线程亲和 / Custom=自定义委托）。
-    /// 传 <see cref="HayateShardAffinityMode.Custom"/> 时须随后调用
-    /// <see cref="WithCustomShardAffinity(Func{int})"/>，否则 Build 时回落 None。
+    /// Sets the shard affinity mode (None = default sequential scan / Thread = thread affinity /
+    /// Custom = custom delegate). When <see cref="HayateShardAffinityMode.Custom"/> is passed, you
+    /// must subsequently call <see cref="WithCustomShardAffinity(Func{int})"/>, otherwise it falls
+    /// back to None at build time.
     /// </summary>
+    /// <param name="mode">The shard affinity mode to use.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="mode"/> is not one of the
+    /// supported affinity modes.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithShardAffinity(HayateShardAffinityMode.Thread);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithShardAffinity(HayateShardAffinityMode mode)
     {
         if (mode != HayateShardAffinityMode.None &&
             mode != HayateShardAffinityMode.Thread &&
             mode != HayateShardAffinityMode.Custom)
         {
-            throw new ArgumentOutOfRangeException(nameof(mode), "未知的分片亲和模式");
+            throw new ArgumentOutOfRangeException(nameof(mode), "Unknown shard affinity mode");
         }
         _options.ShardAffinityMode = mode;
         return this;
     }
 
     /// <summary>
-    /// M18：设置自定义起始分片委托并切入 Custom 模式。
-    /// 返回值建议落在 [0, ShardCount)；null/越界/异常时本次借出回落顺序扫描（不抛出）。
+    /// Sets the custom starting-shard delegate and switches into Custom mode. The return value should
+    /// fall in [0, ShardCount); on null / out-of-range / exception it falls back to a sequential scan
+    /// for that borrow (without throwing).
     /// </summary>
+    /// <param name="shardSelector">The delegate that returns the preferred starting shard index.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="shardSelector"/> is <c>null</c>.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithCustomShardAffinity(() =&gt; Thread.CurrentThread.ManagedThreadId % 8);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithCustomShardAffinity(Func<int> shardSelector)
     {
         _options.CustomShardAffinity = shardSelector ?? throw new ArgumentNullException(nameof(shardSelector));
@@ -232,11 +384,21 @@ public class HayatePoolBuilder<T> where T : class, new()
 
     #endregion
 
-    #region 超时配置
+    #region Timeout
 
     /// <summary>
-    /// 设置默认获取超时时间
+    /// Sets the default acquire timeout.
     /// </summary>
+    /// <param name="timeout">The maximum time to wait for a borrow.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeout"/> is not greater than
+    /// <see cref="TimeSpan.Zero"/>.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithAcquireTimeout(TimeSpan.FromSeconds(3));
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithAcquireTimeout(TimeSpan timeout)
     {
         if (timeout <= TimeSpan.Zero)
@@ -247,11 +409,19 @@ public class HayatePoolBuilder<T> where T : class, new()
 
     #endregion
 
-    #region 扩缩容配置
+    #region Scaling
 
     /// <summary>
-    /// 设置扩缩容检查间隔
+    /// Sets the scaling check interval.
     /// </summary>
+    /// <param name="intervalMs">The scaling decision interval in milliseconds (minimum 100).</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="intervalMs"/> is below 100ms.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithScalingInterval(2000);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithScalingInterval(int intervalMs)
     {
         if (intervalMs < 100)
@@ -261,8 +431,17 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置扩容阈值（使用率）
+    /// Sets the scale-up threshold (utilization).
     /// </summary>
+    /// <param name="threshold">The utilization ratio (0~1) above which the pool scales up.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="threshold"/> is outside the
+    /// range [0, 1].</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithScaleUpThreshold(0.85);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithScaleUpThreshold(double threshold)
     {
         if (threshold < 0 || threshold > 1)
@@ -272,8 +451,17 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置缩容阈值（使用率）
+    /// Sets the scale-down threshold (utilization).
     /// </summary>
+    /// <param name="threshold">The utilization ratio (0~1) below which the pool scales down.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="threshold"/> is outside the
+    /// range [0, 1].</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithScaleDownThreshold(0.2);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithScaleDownThreshold(double threshold)
     {
         if (threshold < 0 || threshold > 1)
@@ -283,8 +471,16 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置扩容冷却时间（秒）
+    /// Sets the scale-up cooldown (seconds).
     /// </summary>
+    /// <param name="seconds">The cooldown in seconds before another scale-up is allowed.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="seconds"/> is negative.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithScaleUpCooldownSeconds(30);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithScaleUpCooldownSeconds(int seconds)
     {
         if (seconds < 0)
@@ -294,8 +490,16 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置缩容冷却时间（秒）
+    /// Sets the scale-down cooldown (seconds).
     /// </summary>
+    /// <param name="seconds">The cooldown in seconds before another scale-down is allowed.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="seconds"/> is negative.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithScaleDownCooldownSeconds(60);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithScaleDownCooldownSeconds(int seconds)
     {
         if (seconds < 0)
@@ -305,8 +509,16 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置扩容步长
+    /// Sets the scale-up step.
     /// </summary>
+    /// <param name="step">The number of objects added per scale-up (minimum 1).</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="step"/> is below 1.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithScaleUpStep(4);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithScaleUpStep(int step)
     {
         if (step < 1)
@@ -316,8 +528,16 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置缩容步长
+    /// Sets the scale-down step.
     /// </summary>
+    /// <param name="step">The number of objects removed per scale-down (minimum 1).</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="step"/> is below 1.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithScaleDownStep(2);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithScaleDownStep(int step)
     {
         if (step < 1)
@@ -328,11 +548,18 @@ public class HayatePoolBuilder<T> where T : class, new()
 
     #endregion
 
-    #region 验证配置
+    #region Validation
 
     /// <summary>
-    /// 设置是否在借出时验证对象
+    /// Sets whether to validate objects on borrow.
     /// </summary>
+    /// <param name="enable">Whether to validate before borrowing; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithValidateOnBorrow(true);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithValidateOnBorrow(bool enable = true)
     {
         if (_options.EnableValidation)
@@ -341,8 +568,15 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置是否在归还时验证对象
+    /// Sets whether to validate objects on return.
     /// </summary>
+    /// <param name="enable">Whether to validate before returning; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithValidateOnReturn(true);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithValidateOnReturn(bool enable = true)
     {
         if (_options.EnableValidation)
@@ -351,8 +585,15 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置是否在空闲时验证对象
+    /// Sets whether to validate objects while idle.
     /// </summary>
+    /// <param name="enable">Whether to validate idle objects; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithValidateWhileIdle(true);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithValidateWhileIdle(bool enable = true)
     {
         if (_options.EnableValidation)
@@ -361,8 +602,16 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置空闲验证间隔（毫秒）
+    /// Sets the idle validation interval (milliseconds).
     /// </summary>
+    /// <param name="intervalMs">The validation interval in milliseconds (minimum 1000).</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="intervalMs"/> is below 1000ms.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithValidateInterval(30000);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithValidateInterval(int intervalMs)
     {
         if (intervalMs < 1000)
@@ -375,8 +624,17 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置老年代验证间隔（次数）
+    /// Sets the old-generation validation interval (number of passes).
     /// </summary>
+    /// <param name="interval">The number of regular validation passes between full old-generation
+    /// validations (minimum 1).</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="interval"/> is below 1.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithOldGenerationValidationInterval(5);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithOldGenerationValidationInterval(int interval)
     {
         if (interval < 1)
@@ -389,8 +647,17 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置分代升级阈值（毫秒）
+    /// Sets the generation-promotion threshold (milliseconds).
     /// </summary>
+    /// <param name="thresholdMs">The age in milliseconds before an object is promoted to an older
+    /// generation (minimum 1000).</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="thresholdMs"/> is below 1000ms.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithGenerationThreshold(30000);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithGenerationThreshold(int thresholdMs)
     {
         if (thresholdMs < 1000)
@@ -404,11 +671,21 @@ public class HayatePoolBuilder<T> where T : class, new()
 
     #endregion
 
-    #region 驱逐配置
+    #region Eviction
 
     /// <summary>
-    /// 设置对象最大生命周期
+    /// Sets the maximum object lifetime.
     /// </summary>
+    /// <param name="lifetime">The maximum allowed object lifetime.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="lifetime"/> is not greater than
+    /// <see cref="TimeSpan.Zero"/>.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithMaxLifeTime(TimeSpan.FromMinutes(15));
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithMaxLifeTime(TimeSpan lifetime)
     {
         if (lifetime <= TimeSpan.Zero)
@@ -418,8 +695,18 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置对象最大空闲时间
+    /// Sets the maximum object idle time.
     /// </summary>
+    /// <param name="idleTime">The maximum time an object may stay idle before eviction.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="idleTime"/> is not greater than
+    /// <see cref="TimeSpan.Zero"/>.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithMaxIdleTime(TimeSpan.FromMinutes(5));
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithMaxIdleTime(TimeSpan idleTime)
     {
         if (idleTime <= TimeSpan.Zero)
@@ -429,8 +716,18 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置软最小空闲驱逐时间
+    /// Sets the soft minimum evictable idle time.
     /// </summary>
+    /// <param name="idleTime">The minimum idle duration before an object becomes evictable.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="idleTime"/> is not greater than
+    /// <see cref="TimeSpan.Zero"/>.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithSoftMinEvictableIdleTime(TimeSpan.FromMinutes(2));
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithSoftMinEvictableIdleTime(TimeSpan idleTime)
     {
         if (idleTime <= TimeSpan.Zero)
@@ -440,8 +737,16 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置驱逐检查间隔（毫秒）
+    /// Sets the eviction check interval (milliseconds).
     /// </summary>
+    /// <param name="intervalMs">The eviction scan interval in milliseconds (minimum 1000).</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="intervalMs"/> is below 1000ms.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEvictionInterval(30000);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithEvictionInterval(int intervalMs)
     {
         if (intervalMs < 1000)
@@ -451,8 +756,16 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置每次驱逐检查的对象数量
+    /// Sets the number of objects tested per eviction run.
     /// </summary>
+    /// <param name="count">The number of samples scanned per eviction run (minimum 1).</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is below 1.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithNumTestsPerEvictionRun(16);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithNumTestsPerEvictionRun(int count)
     {
         if (count < 1)
@@ -463,11 +776,19 @@ public class HayatePoolBuilder<T> where T : class, new()
 
     #endregion
 
-    #region 创建配置
+    #region Creation
 
     /// <summary>
-    /// 设置对象创建重试次数
+    /// Sets the object creation retry count.
     /// </summary>
+    /// <param name="count">The maximum number of retries after a creation failure (minimum 0).</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithCreationRetryCount(3);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithCreationRetryCount(int count)
     {
         if (count < 0)
@@ -477,8 +798,17 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置对象创建重试延迟
+    /// Sets the object creation retry delay.
     /// </summary>
+    /// <param name="delay">The backoff between creation retries.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="delay"/> is negative.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithCreationRetryDelay(TimeSpan.FromMilliseconds(200));
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithCreationRetryDelay(TimeSpan delay)
     {
         if (delay < TimeSpan.Zero)
@@ -489,11 +819,22 @@ public class HayatePoolBuilder<T> where T : class, new()
 
     #endregion
 
-    #region 泄漏检测配置
+    #region Leak detection
 
     /// <summary>
-    /// 设置泄漏检测阈值
+    /// Sets the leak detection threshold.
     /// </summary>
+    /// <param name="threshold">The maximum time a borrowed object may stay out before it is treated
+    /// as a suspected leak.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="threshold"/> is not greater than
+    /// <see cref="TimeSpan.Zero"/>.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithLeakDetectionThreshold(TimeSpan.FromMinutes(5));
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithLeakDetectionThreshold(TimeSpan threshold)
     {
         if (threshold <= TimeSpan.Zero)
@@ -503,8 +844,15 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置是否启用泄漏检测
+    /// Sets whether to enable leak detection.
     /// </summary>
+    /// <param name="enable">Whether to enable leak detection; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithLeakDetection(true);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithLeakDetection(bool enable = true)
     {
         _options.EnableLeakDetection = enable;
@@ -512,12 +860,21 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置泄漏取证模式与采样率（PR-D L1）。<br />
-    /// 默认 <see cref="HayateLeakTraceCaptureMode.Off"/>：借出热路径不抓取调用栈，泄漏扫描不受影响。
-    /// 如需 2.0 及之前的"每次借出抓全栈"旧行为，显式传入 <see cref="HayateLeakTraceCaptureMode.EveryAcquire"/>。
+    /// Sets the leak trace capture mode and sample rate.<br />
+    /// Defaults to <see cref="HayateLeakTraceCaptureMode.Off"/>: the borrow hot path does not capture
+    /// a call stack and leak scanning is unaffected. To restore the pre-2.0 behavior of capturing a
+    /// full stack on every borrow, pass <see cref="HayateLeakTraceCaptureMode.EveryAcquire"/>.
     /// </summary>
-    /// <param name="mode">取证模式（Off / Sampled / EveryAcquire）。</param>
-    /// <param name="sampleRate">采样分母（1/N），仅 Sampled 模式生效；≤0 时由选项自动修正为默认值 1024。</param>
+    /// <param name="mode">The capture mode (Off / Sampled / EveryAcquire).</param>
+    /// <param name="sampleRate">The sample denominator (1/N), only used in Sampled mode; values
+    /// &lt;= 0 are auto-corrected to the default of 1024.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithLeakTraceCapture(HayateLeakTraceCaptureMode.Sampled, 512);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithLeakTraceCapture(HayateLeakTraceCaptureMode mode, int sampleRate = HayateConstant.DEFAULT_LEAK_TRACE_SAMPLE_RATE)
     {
         _options.LeakTraceCaptureMode = mode;
@@ -527,11 +884,19 @@ public class HayatePoolBuilder<T> where T : class, new()
 
     #endregion
 
-    #region 拒绝策略配置
+    #region Reject policy
 
     /// <summary>
-    /// 设置拒绝策略
+    /// Sets the reject policy.
     /// </summary>
+    /// <param name="policy">The policy to apply when a borrow fails.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithRejectPolicy(HayatePoolRejectPolicy.BlockTimeout);
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithRejectPolicy(HayatePoolRejectPolicy policy)
     {
         _options.RejectPolicy = policy;
@@ -540,11 +905,20 @@ public class HayatePoolBuilder<T> where T : class, new()
 
     #endregion
 
-    #region 依赖注入配置
+    #region Dependency injection
 
     /// <summary>
-    /// 设置对象池策略
+    /// Sets the object pool policy.
     /// </summary>
+    /// <param name="policy">The policy used to create, validate and reset pooled objects.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="policy"/> is <c>null</c>.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithPolicy(new MyResourcePolicy());
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithPolicy(IHayateObjectPolicy<T> policy)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
@@ -552,8 +926,17 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置扩缩容策略
+    /// Sets the scaling strategy.
     /// </summary>
+    /// <param name="strategy">The strategy that decides when and how much to scale.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="strategy"/> is <c>null</c>.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithScalingStrategy(new ThresholdScalingStrategy());
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithScalingStrategy(IHayateScalingStrategy strategy)
     {
         _scalingStrategy = strategy ?? throw new ArgumentNullException(nameof(strategy));
@@ -561,8 +944,17 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置指标收集器
+    /// Sets the metrics collector.
     /// </summary>
+    /// <param name="metrics">The metrics sink used to record pool runtime metrics.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="metrics"/> is <c>null</c>.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithMetrics(new MyMetricsCollector());
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithMetrics(IHayateMetrics metrics)
     {
         _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
@@ -570,8 +962,18 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置日志记录器（显式实例，优先于 <see cref="WithLoggerFactory"/>）
+    /// Sets the logger (explicit instance, takes precedence over
+    /// <see cref="WithLoggerFactory"/>).
     /// </summary>
+    /// <param name="logger">The logger instance to use.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="logger"/> is <c>null</c>.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithLogger(new MyLogger());
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithLogger(IHayateLogger logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -580,13 +982,22 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置池级日志工厂（M19）：构建时按池名调用一次
-    /// <see cref="IHayateLoggerFactory.CreateLogger"/>，为每个池创建独立日志器。
+    /// Sets the pool-level logger factory. At build time, <see cref="IHayateLoggerFactory.CreateLogger"/>
+    /// is called once per pool name to create an independent logger for each pool.
     /// </summary>
+    /// <param name="loggerFactory">The logger factory used to create per-pool loggers.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="loggerFactory"/> is <c>null</c>.</exception>
     /// <remarks>
-    /// 零破坏：未调用本方法时沿用内建单例日志器；与 <see cref="WithLogger"/> 同时使用时，
-    /// 显式 <see cref="WithLogger"/> 实例优先。
+    /// Non-breaking: when this method is not called, the built-in singleton logger is used; when both
+    /// this and <see cref="WithLogger"/> are set, the explicit <see cref="WithLogger"/> instance wins.
     /// </remarks>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithLoggerFactory(new MyLoggerFactory());
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> WithLoggerFactory(IHayateLoggerFactory loggerFactory)
     {
         _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
@@ -594,9 +1005,11 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// M19：解析本次构建使用的日志器。显式 <see cref="WithLogger"/> 优先；
-    /// 否则按池名向工厂索取；无工厂时回落内建单例日志器（2.4 行为）。
+    /// Resolves the logger used for this build. An explicit <see cref="WithLogger"/> wins; otherwise
+    /// the factory is queried by pool name; when no factory is set, the built-in singleton logger is
+    /// used (behavior before 2.4).
     /// </summary>
+    /// <returns>The logger to use for this pool.</returns>
     private IHayateLogger ResolveLogger()
     {
         if (_loggerExplicitlySet) return _logger;
@@ -605,11 +1018,19 @@ public class HayatePoolBuilder<T> where T : class, new()
 
     #endregion
 
-    #region 全量配置
+    #region Full configuration
 
     /// <summary>
-    /// 全量配置（覆盖所有选项）
+    /// Applies full configuration by invoking a callback against the underlying options.
     /// </summary>
+    /// <param name="configure">The callback that mutates the options instance.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .Configure(o =&gt; { o.MinPoolSize = 8; o.MaxPoolSize = 128; });
+    /// </code>
+    /// </example>
     public HayatePoolBuilder<T> Configure(Action<HayatePoolOptions> configure)
     {
         configure(_options);
@@ -618,6 +1039,20 @@ public class HayatePoolBuilder<T> where T : class, new()
 
     #endregion
 
+    /// <summary>
+    /// Builds the configured object pool.
+    /// </summary>
+    /// <returns>A ready-to-use <see cref="IHayateObjectPool{T}"/>.</returns>
+    /// <exception cref="InvalidOperationException">The configuration is invalid, or a custom
+    /// <c>IHayateMetrics</c> was registered via <see cref="WithMetrics"/> while metrics collection is
+    /// disabled.</exception>
+    /// <example>
+    /// <code>
+    /// var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithMaxSize(128)
+    ///     .Build();
+    /// </code>
+    /// </example>
     public IHayateObjectPool<T> Build()
     {
         if (!_options.IsValid())
@@ -627,8 +1062,9 @@ public class HayatePoolBuilder<T> where T : class, new()
 
         if (!_options.EnableMetrics)
         {
-            // 2.2 行为变更：显式注册自定义 metrics 却未开启 EnableMetrics 时快速失败，
-            // 不再静默替换为 EmptyHayateMetrics（避免用户误以为自定义指标在生效）。
+            // Behavior change in 2.2: when a custom metrics collector is explicitly registered but
+            // EnableMetrics is off, fail fast instead of silently substituting EmptyHayateMetrics
+            // (which would let the user wrongly believe their custom metrics are active).
             if (!ReferenceEquals(_metrics, EmptyHayateMetrics.Instance))
             {
                 throw new InvalidOperationException(
@@ -639,7 +1075,8 @@ public class HayatePoolBuilder<T> where T : class, new()
             _metrics = EmptyHayateMetrics.Instance;
         }
 
-        // M19：按池名解析日志器（显式 WithLogger 优先 → 工厂 → 内建单例）
+        // Resolve the logger by pool name (explicit WithLogger takes precedence -> factory ->
+        // built-in singleton).
         var logger = ResolveLogger();
 
         var pool = new HayatePoolBasic<T>(
@@ -656,18 +1093,33 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 容错构建入口（M13）。<br />
-    /// <paramref name="throwOnError"/> 为 <c>true</c>（默认）时与 <see cref="Build()"/> 行为完全一致；
-    /// 为 <c>false</c> 时构建失败（配置非法 / metrics 注册冲突等）不抛出，降级返回一个
-    /// 「Min=0、Max=0、全部功能开关关闭」的可用空池并记录错误日志——后续 Acquire 走
-    /// 拒绝策略语义（如 BlockTimeout 超时抛出），池本身可安全 Dispose 与观测。
+    /// Fault-tolerant build entry point.<br />
+    /// When <paramref name="throwOnError"/> is <c>true</c> (the default), behavior is identical to
+    /// <see cref="Build()"/>; when <c>false</c>, a build failure (invalid configuration, metrics
+    /// registration conflict, etc.) does not throw but degrades to a usable empty pool with
+    /// Min=0/Max=0 and all feature toggles off, while logging an error — subsequent Acquire calls
+    /// follow the reject-policy semantics (e.g. BlockTimeout throwing on timeout), and the pool
+    /// itself can be safely disposed and observed.
     /// </summary>
-    /// <param name="throwOnError">构建失败时是否抛出异常；<c>false</c> 降级为空池。</param>
+    /// <param name="throwOnError">Whether to throw on a build failure; <c>false</c> degrades to an
+    /// empty pool.</param>
+    /// <returns>A ready-to-use <see cref="IHayateObjectPool{T}"/>.</returns>
+    /// <exception cref="InvalidOperationException">When <paramref name="throwOnError"/> is
+    /// <c>true</c> and the configuration is invalid.</exception>
     /// <remarks>
-    /// 典型场景：配置来自外部输入（Configuration / 远端下发），构建失败时业务需要
-    /// 「可运行的降级池 + 告警日志」而非进程崩溃。注意：预热阶段的创建失败本就被池内
-    /// 捕获（PreWarm 记录日志后继续），因此空池降级主要覆盖构建期配置校验失败。
+    /// Typical scenario: configuration comes from external input (appsettings / remote push) and, on
+    /// build failure, the business needs a "runnable degraded pool + alert log" rather than a process
+    /// crash. Note: creation failures during warmup are already captured inside the pool (PreWarm logs
+    /// and continues), so the empty-pool degradation mainly covers build-time configuration validation
+    /// failures.
     /// </remarks>
+    /// <example>
+    /// <code>
+    /// var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .Configure(o =&gt; LoadFromConfig(o))
+    ///     .BuildOrThrow(throwOnError: false);
+    /// </code>
+    /// </example>
     public IHayateObjectPool<T> BuildOrThrow(bool throwOnError = true)
     {
         if (throwOnError)
@@ -681,7 +1133,8 @@ public class HayatePoolBuilder<T> where T : class, new()
         }
         catch (Exception ex)
         {
-            // M19：失败日志同样走池级日志器（工厂优先），保证降级告警落到该池的日志通道
+            // The failure log also goes through the pool-level logger (factory takes precedence), so
+            // the degraded alert lands on that pool's log channel.
             ResolveLogger().LogError(ex,
                 "HayatePool [{PoolName}] build failed (BuildOrThrow(false)); degrading to empty pool",
                 _poolName);
@@ -691,9 +1144,11 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// M13：构建降级空池。Min=0 / Max=0 / 全部功能开关关闭，仅保留与拒绝策略相关的
-    /// 语义配置（超时 / 拒绝策略 / 创建重试），保证 Acquire 行为可预期。
+    /// Builds the degraded empty pool. Min=0 / Max=0 / all feature toggles off, keeping only the
+    /// reject-policy-related semantic configuration (timeout / reject policy / creation retry) so
+    /// that Acquire behavior stays predictable.
     /// </summary>
+    /// <returns>A degraded <see cref="IHayateObjectPool{T}"/> that rejects via the configured policy.</returns>
     private IHayateObjectPool<T> BuildDegradedEmptyPool()
     {
         var degraded = new HayatePoolOptions
@@ -707,7 +1162,8 @@ public class HayatePoolBuilder<T> where T : class, new()
             EnableGenerationOptimization = false,
             EnableLeakDetection = false,
             EnableMetrics = false,
-            // 保留拒绝语义；原配置超时非法（≤0）时回落默认值，保证降级池可通过 IsValid
+            // Keep reject semantics; when the original timeout is invalid (<= 0) fall back to the
+            // default so the degraded pool still passes IsValid.
             DefaultAcquireTimeout = _options.DefaultAcquireTimeout > TimeSpan.Zero
                 ? _options.DefaultAcquireTimeout
                 : TimeSpan.FromSeconds(HayateConstant.DEFAULT_ACQUIRE_TIMEOUT_SECONDS),
@@ -716,7 +1172,7 @@ public class HayatePoolBuilder<T> where T : class, new()
             CreationRetryDelay = _options.CreationRetryDelay
         };
 
-        // M19：降级池同样按池名解析日志器（保持日志分流一致）
+        // The degraded pool also resolves its logger by pool name (keeping log routing consistent).
         var logger = ResolveLogger();
 
         var pool = new HayatePoolBasic<T>(

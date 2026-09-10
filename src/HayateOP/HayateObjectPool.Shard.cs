@@ -13,24 +13,23 @@ public partial class HayatePoolBasic<T>
     {
         private readonly IHayateLogger _logger;
 
-        // 空闲对象链表：Add 尾插、TryTake 头取，天然保持 FIFO；
-        // Remove 通过 HayateObject<T>.Node 做 O(1) 摘除。
-        // 旧实现是 ConcurrentQueue + "ToList → Remove → Clear → Enqueue" 重建队列，
-        // 重建窗口内并发的 TryTake / Add 会丢对象或产生重复项，本次彻底替换为链表。
+        // Free-object linked list: Add appends to the tail and TryTake removes from the head, naturally preserving FIFO order.
+        // Remove performs an O(1) unlink via HayateObject<T>.Node.
+        // The old implementation rebuilt the queue with ConcurrentQueue + "ToList -> Remove -> Clear -> Enqueue";
+        // during the rebuild window concurrent TryTake / Add could lose objects or produce duplicates, so it was replaced entirely with a linked list.
         private readonly LinkedList<HayateObject<T>> _list = new();
 
-        // T09：本分片的登记表（T → 包装对象），原为池级单张 _objectMap。
-        // 借出对象长期驻留 + 各分片并发写入同一张表，导致桶数组随并发峰值扩张后永不回落，
-        // 内存峰值不收敛；拆分到分片后，登记项随对象的创建/销毁固定在本分片，
-        // 容量与分片容量对齐、随销毁真正回落。
-        // 对象 round-trip 永远回到创建分片（Acquire 记录 ShardIndex、Release 按此回源），
-        // 同一键只会出现在一个分片的登记表中，键空间天然互斥，无需跨分片同步。
+        // Per-shard registry (T -> wrapper object); previously a single pool-wide _objectMap.
+        // Borrowed objects live in the pool for a long time, and all shards wrote to the same table, so the bucket array grew with concurrency peaks and never shrank back, leaving the memory peak unconverged.
+        // After splitting per shard, registry entries are pinned to the shard where the object was created / destroyed, so capacity aligns with the shard capacity and truly reclaims on destruction.
+        // Objects always round-trip back to their creating shard (Acquire records ShardIndex; Release returns to that shard),
+        // so a given key appears in only one shard's registry -- the key space is mutually exclusive and needs no cross-shard synchronization.
         private readonly ConcurrentDictionary<T, HayateObject<T>> _objects = new();
 
-        /// <summary>本分片登记的存活对象数（空闲 + 借出）。</summary>
+        /// <summary>The number of live objects registered in this shard (idle + borrowed).</summary>
         internal int TrackedCount => _objects.Count;
 
-        /// <summary>本分片登记的全部包装对象（含借出中）。</summary>
+        /// <summary>All wrapper objects registered in this shard (including those currently borrowed).</summary>
         internal IEnumerable<HayateObject<T>> TrackedValues => _objects.Values;
 
         internal bool TryTrack(T key, HayateObject<T> w) => _objects.TryAdd(key, w);
@@ -41,17 +40,16 @@ public partial class HayatePoolBasic<T>
 
         internal void ClearTracked() => _objects.Clear();
 
-        // 保护 _list 以及对象位置状态迁移。临界区只做若干指针操作，极短。
-        // 硬约束：临界区内绝不回调用户代码（Dispose / policy 一律在锁外执行），避免重入死锁。
+        // Protects _list and the object-location state transitions. The critical section only performs a few pointer operations and is extremely short.
+        // Hard constraint: user code is never called back inside the critical section (Dispose / policy always run outside the lock) to avoid re-entrant deadlocks.
         private SpinLock _lock = new(enableThreadOwnerTracking: false);
 
         private int _maxSize;
 
-        // 借出计数说明（为何 Shard 不维护 BorrowedCount）：
-        // TryTake 先把对象物理摘出本分片链表、再置 Borrowed，借出的对象根本不在
-        // 链表中，因此「链表内 IsBorrowed 计数」结构上恒为 0；且归还时若被 Release
-        // 拒绝（OnRelease=false）会直接销毁、不经过本分片 Add，增减无法一一配对。
-        // 池级借出数由 TakeSnapshot 以「各分片登记表 TrackedCount 之和 - 各分片 Count 之和」派生。
+        // Why the shard does not maintain a BorrowedCount:
+        // TryTake first physically unlinks the object from this shard's list, then sets Borrowed, so the borrowed object is never in the list;
+        // therefore the "in-list IsBorrowed count" is structurally always 0. And on return, if Release rejects it (OnRelease=false) the object is destroyed directly without going through this shard's Add, so increments and decrements cannot be paired one-to-one.
+        // The pool-level borrowed count is derived by TakeSnapshot as "sum of each shard's registry TrackedCount" minus "sum of each shard's Count".
 
         public int Index { get; }
 
@@ -108,15 +106,15 @@ public partial class HayatePoolBasic<T>
             {
                 _lock.Enter(ref taken);
 
-                // 只接收「刚创建」或「已借出后归还」两种状态。
-                // 被驱逐 / 校验 / 销毁流程认领过（Removing / Destroyed）的对象一律拒绝，
-                // 否则 Dispose 过的对象会被重新放回池中——这是上一轮 T04 回归的直接根因。
+                // Only accept the two states "just created" or "returned after borrow".
+                // Objects already claimed by eviction / validation / destroy (Removing / Destroyed) are rejected outright,
+                // otherwise a disposed object could be placed back into the pool -- the direct root cause of a prior regression.
                 var location = w.Location;
                 if (location != HayateObjectLocation.None && location != HayateObjectLocation.Borrowed)
                     return false;
 
-                // 兜底：理论上对象归还时 Node 必为 null，若因异常路径残留则先摘除再尾插，
-                // 保证同一个对象在链表中最多只出现一次。
+                // Fallback: in theory Node is always null when an object is returned; if an abnormal path leaves a stale node, unlink it first then append to the tail,
+                // guaranteeing the same object appears at most once in the list.
                 var stale = w.Node;
                 if (stale != null && ReferenceEquals(stale.List, _list))
                     _list.Remove(stale);
@@ -138,11 +136,11 @@ public partial class HayatePoolBasic<T>
                 if (taken) _lock.Exit();
             }
 
-            // P0-新-1 修复：overflow 时不在本方法内自行处置（裸 Dispose 会漏掉 _policy.OnDestroy，
-            // 且提前置 Destroyed=1 会让调用方的完整 Destroy(w) 因幂等 CAS 直接 return，OnDestroy 永不触发）。
-            // 故这里只做日志 + 返回 false，把销毁完整地交给唯一真实调用方（Release → Destroy(w)，
-            // 其内部会触发 _policy.OnDestroy → Dispose → 登记表 Untrack，且带幂等保护）。
-            // PreWarm / ForceScaleUp 均先按容量 clamp / UpdateShardMaxSizes，不会在此真实 overflow。
+            // Fix: on overflow this method does not dispose the object itself (a bare Dispose would skip _policy.OnDestroy,
+            // and setting Destroyed=1 early would make the caller's full Destroy(w) return immediately via the idempotent CAS, so OnDestroy would never fire).
+            // So here we only log and return false, handing the full destruction to the sole real caller (Release -> Destroy(w),
+            // which triggers _policy.OnDestroy -> Dispose -> registry Untrack, with idempotent protection).
+            // PreWarm / ForceScaleUp both clamp by capacity / call UpdateShardMaxSizes first, so a real overflow never happens here.
             if (overflow != null)
             {
                 _logger.LogWarning("[Shard {Index}] capacity exceeded, object rejected and will be destroyed by caller (shard size: {Size}, max: {Max})",
@@ -172,9 +170,9 @@ public partial class HayatePoolBasic<T>
                 _list.Remove(node);
                 w.Node = null;
 
-                // 关键顺序：先摘链再置 Borrowed。
-                // 此后 Remove 无法再认领该对象（其 Node 已不属于任何链表），
-                // 因此驱逐线程不可能销毁一个已经交到调用方手里的对象。
+                // Critical ordering: unlink first, then set Borrowed.
+                // After this, Remove can no longer claim the object (its Node no longer belongs to any list),
+                // so the eviction thread can never destroy an object already handed to the caller.
                 w.Location = HayateObjectLocation.Borrowed;
 
                 _logger.LogDebug("[Shard {Index}] Object taken from shard (current size: {Size})", Index, _list.Count);
@@ -204,8 +202,8 @@ public partial class HayatePoolBasic<T>
             {
                 _lock.Enter(ref taken);
 
-                // 双重确认：状态为 InPool 且节点确实挂在本分片的链表上。
-                // 二者缺一都说明对象此刻不在"可安全销毁"的位置（已借出 / 已认领 / 在他分片）。
+                // Double-check: the state is InPool and the node is actually attached to this shard's list.
+                // If either is missing, the object is not in a "safe to destroy" position right now (borrowed / already claimed / in another shard).
                 if (w.Location != HayateObjectLocation.InPool) return false;
 
                 var node = w.Node;
@@ -244,7 +242,7 @@ public partial class HayatePoolBasic<T>
         /// Copies up to <paramref name="count"/> idle objects from the head of the shard free
         /// list into <paramref name="buffer"/> while holding the shard lock, returning the number
         /// copied. The caller may reuse the same buffer across shards / invocations to avoid
-        /// per-call array allocations (PR-D A2). The buffer is overwritten from index 0 each call.
+        /// per-call array allocations. The buffer is overwritten from index 0 each call.
         /// </summary>
         public int SnapshotHead(HayateObject<T>[] buffer, int count)
         {
@@ -297,7 +295,8 @@ public partial class HayatePoolBasic<T>
         }
 
         /// <summary>
-        /// 在锁外安全释放对象，吞掉用户 Dispose 抛出的异常并返回是否释放成功。
+        /// Safely releases the object outside the lock, swallowing any exception thrown by the user's
+        /// Dispose and reporting whether the release succeeded.
         /// </summary>
         private bool SafeDispose(HayateObject<T> w, string reason)
         {

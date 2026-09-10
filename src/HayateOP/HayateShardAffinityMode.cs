@@ -1,26 +1,27 @@
 namespace DotNetCore.HayateOP;
 
 /// <summary>
-/// M18（2.5）：借出路径的分片亲和模式。
-/// 决定 Acquire / AcquireAsync 扫描分片时的起始位置——命中起始分片后仍按环形
-/// 继续扫描其余分片，因此任何模式都不损失可用性，只影响命中优先级与局部性。
+/// The shard-affinity mode for the borrow path (2.5).
+/// Determines the starting position when Acquire / AcquireAsync scan shards - after hitting the starting shard it continues scanning in a ring,
+/// so no mode sacrifices availability; they only affect hit priority and locality.
 /// </summary>
 public enum HayateShardAffinityMode
 {
     /// <summary>
-    /// 顺序扫描（默认）：从 0 号分片开始按索引顺序扫描，与 2.4 及之前行为完全一致，零额外开销。
+    /// Sequential scan (default): starts from shard 0 and scans in index order, identical to the pre-2.5 behavior with zero extra overhead.
     /// </summary>
     None = 0,
 
     /// <summary>
-    /// 线程亲和：按托管线程 ID 稳定映射起始分片（同一线程始终优先命中同一分片，
-    /// 利于对象在 CPU 缓存 / NUMA 节点 / 线程本地资源上的复用）。
+    /// Thread affinity: stably maps the starting shard from the managed thread id (the same thread
+    /// always prefers the same shard first), which helps reuse objects in the CPU cache / NUMA node /
+    /// thread-local resources.
     /// </summary>
     Thread = 1,
 
     /// <summary>
-    /// 自定义委托：由 <see cref="HayatePoolOptions.CustomShardAffinity"/> 决定起始分片。
-    /// 委托返回 null 或越界时本次借出回落顺序扫描（不抛异常，保证借出路径健壮性）。
+    /// Custom delegate: the starting shard is decided by <see cref="HayatePoolOptions.CustomShardAffinity"/>.
+    /// When the delegate returns null or an out-of-range value, the borrow falls back to sequential scanning (it does not throw, preserving borrow-path robustness).
     /// </summary>
     Custom = 2
 }

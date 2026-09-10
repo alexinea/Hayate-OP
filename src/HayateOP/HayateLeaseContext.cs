@@ -5,38 +5,47 @@ using System.Threading;
 namespace DotNetCore.HayateOP;
 
 /// <summary>
-/// M16（2.5，breaking）：借出租约上下文。
+/// Borrow lease context (2.5, breaking change).
 /// <para>
-/// 一次借出对应一个不可变租约上下文：租约 ID（进程级单调递增）+ 借出帧数组 +
-/// 借出时刻（Stopwatch ticks）。采集载体为 <see cref="AsyncLocal{T}"/>（<see cref="Current"/>）——
-/// 上下文随调用方的异步执行流（ExecutionContext）流动，<b>并发借还各自持有独立副本，
-/// 不再相互覆盖</b>（2.4 及之前包装对象上的 string 采集会被同对象复借覆盖，且跨异步
-/// 流共享时无法区分归属）。
+/// One borrow corresponds to one immutable lease context: a process-wide monotonically increasing lease id,
+/// a borrow-time timestamp (Stopwatch ticks), and a borrow-frame array. The carrier is <see cref="AsyncLocal{T}"/>
+/// (<see cref="Current"/>): the context flows with the caller's asynchronous execution flow (ExecutionContext), and <b>concurrent borrows and returns each hold an independent copy,
+/// so they no longer overwrite each other</b> (in 2.4 and earlier, string-based capture on the wrapper object was overwritten by re-borrows of the same object, and could not be attributed correctly across asynchronous
+/// flows when shared).
 /// </para>
 /// <para>
-/// 生命周期：Acquire 取证采集时创建并写入当前异步流 + 包装对象；Release 结束租约时
-/// 清空当前异步流；Destroy 时清空包装对象上的引用。取证开关与频率仍由
-/// <see cref="HayateLeakTraceCaptureMode"/> 控制（Off 默认不采集，L1 语义不变）。
+/// Lifecycle: created and written to the current async flow and the wrapper object when Acquire captures evidence; when Release ends the lease,
+/// the current async flow is cleared; when Destroy runs, the reference on the wrapper object is cleared. The capture switch and frequency remain controlled by
+/// <see cref="HayateLeakTraceCaptureMode"/> (Off disables capture by default; the semantics are unchanged).
 /// </para>
 /// </summary>
+/// <example>
+/// <code>
+/// var ctx = HayateLeaseContext.Current;
+/// if (ctx is not null)
+/// {
+///     Console.WriteLine($"Lease {ctx.LeaseId} borrowed at tick {ctx.BorrowedAt}");
+/// }
+/// </code>
+/// </example>
 public sealed class HayateLeaseContext
 {
-    // M16：异步流载体。static readonly——每次对 AsyncLocal 写值都是「复制当前执行上下文 +
-    // 覆盖本流槽位」，兄弟异步流互不可见，天然并发隔离；上下文实例本身不可变。
+    // Async-flow carrier. static readonly: each write to AsyncLocal copies the current execution context and
+    // overwrites this flow's slot; sibling async flows are mutually invisible, giving natural concurrency isolation; the context instance itself is immutable.
     internal static readonly AsyncLocal<HayateLeaseContext> Flow = new();
 
     private static long _leaseIdCounter;
 
-    /// <summary>进程级唯一的租约 ID（单调递增）。</summary>
+    /// <summary>The process-wide unique lease id (monotonically increasing).</summary>
     public long LeaseId { get; }
 
-    /// <summary>借出时刻的调用栈帧（fNeedFileInfo:false 低开销采集；可能为空数组）。</summary>
+    /// <summary>The call-stack frames captured at borrow time (low-overhead capture with fNeedFileInfo:false; may be an empty array).</summary>
     public StackFrame[] Frames { get; }
 
-    /// <summary>借出时刻（Stopwatch ticks，与池内时长判定同口径）。</summary>
+    /// <summary>The borrow timestamp (Stopwatch ticks, same basis as the pool's duration checks).</summary>
     public long BorrowedAt { get; }
 
-    /// <summary>当前异步流的租约上下文；未在租约期（未采集/已结束）为 null。</summary>
+    /// <summary>The lease context for the current async flow; null when not within a lease period (not captured, or already ended).</summary>
     public static HayateLeaseContext Current => Flow.Value;
 
     internal HayateLeaseContext(StackFrame[] frames, long borrowedAt)
@@ -46,9 +55,9 @@ public sealed class HayateLeaseContext
         BorrowedAt = borrowedAt;
     }
 
-    /// <summary>把本租约写入当前异步流（借出路径调用）。</summary>
+    /// <summary>Writes this lease into the current async flow (called on the borrow path).</summary>
     internal void AttachToFlow() => Flow.Value = this;
 
-    /// <summary>结束当前异步流的租约（Release 路径调用；写值有执行上下文复制成本，由调用方门控）。</summary>
+    /// <summary>Ends the lease for the current async flow (called on the Release path; the write has an execution-context copy cost and is gated by the caller).</summary>
     internal static void DetachFromFlow() => Flow.Value = null;
 }

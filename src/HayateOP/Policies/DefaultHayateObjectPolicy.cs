@@ -1,7 +1,7 @@
 ﻿namespace DotNetCore.HayateOP.Policies;
 
 /// <summary>
-/// 默认对象策略池
+/// The default object-pool policy.
 /// </summary>
 /// <typeparam name="T"></typeparam>
 public class DefaultHayateObjectPolicy<T> : IHayateObjectPolicy<T> where T : class, new()

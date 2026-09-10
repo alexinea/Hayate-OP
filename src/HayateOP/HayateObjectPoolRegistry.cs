@@ -10,8 +10,9 @@ namespace DotNetCore.HayateOP;
 /// <see cref="ConcurrentDictionary{TKey,TValue}"/>. Pools self-register here as
 /// they are created; callers resolve by the same logical name.
 /// <para>
-/// M11+（2.5）：内部条目升级为 <see cref="HayatePoolMetadata"/>（池 + 元数据），
-/// 对外暴露 GetAll / Remove / Count 完整版管理面；Register / TryGet / Names 原语义不变。
+/// Internal entries are upgraded to <see cref="HayatePoolMetadata"/> (pool + metadata) and expose the
+/// full management surface — GetAll / Remove / Count — while Register / TryGet / Names keep their
+/// original semantics.
 /// </para>
 /// </summary>
 public class HayateObjectPoolRegistry : IHayateObjectPoolRegistry
@@ -48,7 +49,7 @@ public class HayateObjectPoolRegistry : IHayateObjectPoolRegistry
     /// <inheritdoc />
     public IReadOnlyList<HayatePoolMetadata> GetAll()
     {
-        // ToArray 天然是某一瞬间的快照，枚举期间的其他注册/移除不影响本次结果。
+        // ToArray naturally produces a point-in-time snapshot; registrations or removals made while enumerating do not affect this result.
         var snapshot = _pools.Values.ToArray();
         return snapshot;
     }

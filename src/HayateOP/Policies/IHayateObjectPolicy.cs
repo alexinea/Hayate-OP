@@ -1,33 +1,29 @@
 ﻿namespace DotNetCore.HayateOP.Policies;
 
 /// <summary>
-/// 对象池策略接口，定义了对象池创建对象的规则
+/// Defines the policy that controls how the pool creates, validates, and disposes pooled objects.
 /// </summary>
-/// <typeparam name="T">池化对象类型</typeparam>
+/// <typeparam name="T">The pooled object type.</typeparam>
 public interface IHayateObjectPolicy<T> where T : class
 {
-    /// <summary>
-    /// 创建对象
-    /// </summary>
+    /// <summary>Creates a new pooled object.</summary>
+    /// <returns>A new instance of <typeparamref name="T"/>; must not be <c>null</c>.</returns>
     T Create();
-    /// <summary>
-    /// 归还对象时触发
-    /// </summary>
+    /// <summary>Called when an object is returned to the pool.</summary>
+    /// <param name="item">The object being returned.</param>
+    /// <returns><c>true</c> to accept the object back into the pool; <c>false</c> to destroy it.</returns>
     bool OnRelease(T item);
-    /// <summary>
-    /// 验证对象有效性
-    /// </summary>
+    /// <summary>Validates whether an object is still usable before it is handed out or returned.</summary>
+    /// <param name="item">The object to validate.</param>
+    /// <returns><c>true</c> if the object is valid; <c>false</c> to destroy it.</returns>
     bool Validate(T item);
-    /// <summary>
-    /// 借出对象时触发
-    /// </summary>
+    /// <summary>Called when an object is acquired (borrowed) from the pool.</summary>
+    /// <param name="item">The object being acquired.</param>
     void OnAcquire(T item);
-    /// <summary>
-    /// 对象归还到池前触发
-    /// </summary>
+    /// <summary>Called just before an object is placed back into the pool after return.</summary>
+    /// <param name="item">The object about to be passivated.</param>
     void OnPassivate(T item);
-    /// <summary>
-    /// 对象销毁时触发
-    /// </summary>
+    /// <summary>Called when an object is destroyed (removed from the pool for good).</summary>
+    /// <param name="item">The object being destroyed.</param>
     void OnDestroy(T item);
 }

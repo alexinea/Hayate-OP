@@ -61,11 +61,11 @@ internal class DefaultHayateLogger : IHayateLogger
 #endif
 
     /// <summary>
-    /// T13：取代原 NormalizeFormatString 正则改写。
-    /// 按占位符出现顺序把参数依次代入：{Name} → 参数值，{Name:F2} → 应用格式说明符。
-    /// 池内模板约定：每个命名占位符按出现顺序对应一个参数（与调用点一一对应），
-    /// 生产结构化日志请使用 HayateMicrosoftLoggerAdapter{T}（MEL 原生支持命名模板）。
-    /// 无正则、单趟扫描，消除每次日志调用的 Regex 开销。
+    /// Replaces the original NormalizeFormatString regex rewrite. Substitutes arguments in placeholder
+    /// order: {Name} -> argument value, {Name:F2} -> applies the format specifier. The in-pool template
+    /// convention is that each named placeholder maps to one argument in order (matching the call site).
+    /// For production structured logging use HayateMicrosoftLoggerAdapter{T} (MEL natively supports named templates).
+    /// No regex, single-pass scan -- eliminates the per-call Regex overhead.
     /// </summary>
     private static string RenderTemplate(string message, object[] args)
     {

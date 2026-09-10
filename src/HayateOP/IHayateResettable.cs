@@ -1,9 +1,10 @@
 ﻿namespace DotNetCore.HayateOP;
 
 /// <summary>
-/// 标记对象可在归还时自动重置状态
+/// Marks an object whose state can be automatically reset when it is returned to the pool.
 /// </summary>
 public interface IHayateResettable
 {
+    /// <summary>Resets the object to a reusable initial state before it is handed back to a caller.</summary>
     void Reset();
 }

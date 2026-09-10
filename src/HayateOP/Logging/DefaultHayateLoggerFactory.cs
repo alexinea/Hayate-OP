@@ -3,11 +3,11 @@
 namespace DotNetCore.HayateOP.Logging;
 
 /// <summary>
-/// 默认日志工厂（M19）：忽略分类名，返回与 2.4 及之前等价的内建日志器。
+/// The default logger factory: it ignores the category name and returns the built-in logger equivalent to the one used in 2.4 and earlier.
 /// </summary>
 public sealed class DefaultHayateLoggerFactory : IHayateLoggerFactory
 {
-    /// <summary>共享实例（无状态，可安全复用）。</summary>
+    /// <summary>Shared instance (stateless, safe to reuse).</summary>
     public static readonly DefaultHayateLoggerFactory Instance = new();
 
     /// <inheritdoc />
@@ -15,17 +15,18 @@ public sealed class DefaultHayateLoggerFactory : IHayateLoggerFactory
 }
 
 /// <summary>
-/// 委托式日志工厂（M19）：把分类名交给用户提供的委托，便于把池日志桥接到
-/// MEL <c>ILoggerFactory</c>、Serilog、NLog 等任意后端。
+/// A delegate-based logger factory: it hands the category name to a user-supplied delegate, making it easy
+/// to bridge pool logging into any backend such as MEL <c>ILoggerFactory</c>, Serilog, or NLog.
 /// </summary>
 public sealed class DelegateHayateLoggerFactory : IHayateLoggerFactory
 {
     private readonly Func<string, IHayateLogger> _factory;
 
     /// <summary>
-    /// 创建委托式工厂。
+    /// Creates a delegate-based logger factory.
     /// </summary>
-    /// <param name="factory">分类名 → 日志器 的映射委托。</param>
+    /// <param name="factory">A mapping delegate from category name to logger.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="factory"/> is <c>null</c>.</exception>
     public DelegateHayateLoggerFactory(Func<string, IHayateLogger> factory)
     {
         _factory = factory ?? throw new ArgumentNullException(nameof(factory));

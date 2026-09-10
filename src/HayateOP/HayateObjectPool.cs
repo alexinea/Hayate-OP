@@ -21,16 +21,16 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private readonly IHayateLogger _logger;
     private readonly IHayateMetrics _metrics;
 
-    // T09：原池级单张 _objectMap（ConcurrentDictionary<T, HayateObject<T>>）已按分片拆分，
-    // 迁移至各 Shard 内部的登记表（见 HayateObjectPool.Shard.cs）。登记项随对象的创建/销毁
-    // 固定在其归属分片，消除多分片并发写同一张表导致的桶数组峰值不收敛。
-    // 池级只保留两个派生视图：
-    /// <summary>真实存活对象总数（空闲 + 借出），由各分片登记表求和派生。</summary>
+    // The original pool-level single _objectMap (ConcurrentDictionary<T, HayateObject<T>>) has been split by shard,
+    // and moved into each Shard's internal registry (see HayateObjectPool.Shard.cs). Registry entries are written on object create/destroy
+    // to their owning shard, eliminating the non-converging bucket-array peak caused by multiple shards writing the same table concurrently.
+    // The pool level keeps only two derived views:
+    /// <summary>Total number of live objects (idle + borrowed), derived by summing each shard's registry.</summary>
     private int TrackedObjectCount => _shards.Sum(s => s.TrackedCount);
 
     /// <summary>
-    /// T09：按包装对象的归属分片摘除登记项；ShardIndex 异常时兜底全分片扫描（理论不可达，
-    /// 登记项在 CreateWrappedObject 即写入目标分片并同步 ShardIndex）。
+    /// Removes the registry entry from the wrapper's owning shard; if ShardIndex is invalid, falls back to a full-shard scan (theoretically unreachable,
+    /// since the entry is written to the target shard and its ShardIndex synced in CreateWrappedObject).
     /// </summary>
     private void UntrackObject(HayateObject<T> w)
     {
@@ -45,7 +45,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         }
     }
 
-    /// <summary>T09：仅有裸对象引用（无包装）时，全分片扫描摘除登记项。</summary>
+    /// <summary>When only a bare object reference (no wrapper) is available, scans all shards to remove the registry entry.</summary>
     private void UntrackKey(T o)
     {
         if (o is null) return;
@@ -56,38 +56,38 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         }
     }
 
-    // T06：归还事件通知门。Release 成功回池时 Release() 一次，Block/BlockTimeout/CreateNew
-    // 等待者以 Wait 取代 SpinWait 忙等，消除等待期 CPU 100% 空转。
-    // 计数语义为"可消费的唤醒信号数"；借出成功时以 Wait(0) 消费一个信号，
-    // 防止陈旧信号积累导致等待者被逐个伪唤醒形成忙循环。
+    // Return-event notification gate. Released once by Release() on a successful return to the pool; Block/BlockTimeout/CreateNew
+    // waiters use Wait instead of SpinWait busy-waiting, eliminating the 100% CPU idle spin during the wait.
+    // The counter means "number of consumable wake-up signals"; on a successful borrow it consumes one signal via Wait(0),
+    // preventing stale signals from accumulating and causing waiters to be spuriously woken one by one into a busy loop.
     private readonly SemaphoreSlim _blockGate = new(0, int.MaxValue);
 
-    // T06：无信号时的挂起等待切片。信号到达会立即唤醒，切片仅封顶无信号时的重检间隔。
+    // The suspended-wait slice used when no signal arrives. A signal wakes immediately; the slice merely caps the re-check interval when no signal arrives.
     private const int BlockWaitSliceMs = 100;
 
-    // 后台任务
+    // Background tasks
     private Timer _evictionTimer;
     private Timer _scalingTimer;
     private Timer _validationTimer;
 
-    // 扩缩容冷却控制，防止抖动
-    // PR-D A1：Stopwatch timestamp（0 = 从未扩缩容，等效原 DateTime.MinValue 语义）
+    // Scale-up/down cooldown control to prevent thrashing
+    // Stopwatch timestamp (0 = never scaled, equivalent to the original DateTime.MinValue semantics)
     private long _lastScaleUpTime;
     private long _lastScaleDownTime;
 
-    // 统计数据
+    // Statistics
     private long _totalCreated;
     private long _totalReleased;
     private long _totalMissed;
     private long _totalAcquired;
 
-    // T15：CreateNew 分片的轮询游标（避免新建对象全部落在首个分片）
+    // CreateNew shard polling cursor (avoids all newly created objects landing on the first shard)
     private int _createCursor;
     private long _leakDetectedCount;
 
-    // PR-D L2：统计数据去全局锁——借/还热路径改为 Interlocked 原子累加，
-    // Min/Max 用 CAS 环（long 毫秒存储，GetStats 快照时转 double 汇总）。
-    // 更新语义不变；GetStats 不再持全局锁，改为逐字段原子读取的最终一致快照。
+    // Statistics are lock-free on the hot path — borrow/return paths now use Interlocked atomic accumulation,
+    // and Min/Max use a CAS loop (stored as long milliseconds, converted to double when GetStats snapshots).
+    // Update semantics are unchanged; GetStats no longer holds a global lock and instead reads each field atomically for an eventually-consistent snapshot.
     private long _waitTimeSum;
     private long _waitTimeCount;
     private long _waitTimeMaxMs;
@@ -104,44 +104,46 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private readonly bool _enableEviction;
     private readonly bool _enableAutoScaling;
 
-    // PR-D L1：泄漏取证模式（与泄漏检测解耦）。默认 Off——借出热路径不抓栈。
+    // Leak forensics capture mode (decoupled from leak detection). Off by default — the borrow hot path does not capture stacks.
     private readonly HayateLeakTraceCaptureMode _leakTraceCaptureMode;
     private readonly int _leakTraceSampleRate;
     private int _leakTraceCounter;
 
-    // PR-D L5：冷池自举防重标志。0=无人认领，1=已有线程正在冷启动创建。
-    // CAS 赢家负责创建首个对象，输家回落到正常等待路径；创建结束（含异常）即复位，
-    // 保证池再次清空后仍可二次自举。
+    // Cold-start guard flag. 0 = unclaimed, 1 = a thread is already cold-starting the first object.
+    // The CAS winner creates the first object; the loser falls back to the normal wait path. The flag is reset when creation finishes (including on exception),
+    // so the empty pool can cold-start again later.
     private int _coldBootClaimed;
 
-    // M12：容量告警状态机（0=Normal, 1=Warning, 2=Critical）。
-    // 仅在状态翻转时触发一次回调（去抖）；回落到低水位静默复位，重新整备后可再次触发。
+    // Capacity-alarm state machine (0 = Normal, 1 = Warning, 2 = Critical).
+    // The callback fires once on a state transition (debounced); it silently resets at the low-water mark and can fire again after re-arming.
     private int _capacityAlarmLevel;
     private readonly bool _capacityAlarmEnabled;
 
-    // M4：泄漏回查告警计数（EnableLeakDetection=false 时 TakeSnapshot 按同一阈值
-    // 统计「借出超阈值未归还」的疑似泄漏次数，与 LeakDetectedCount 并列、互不替代）。
+    // Leak-recheck alert counter (when EnableLeakDetection = false, TakeSnapshot counts suspected leaks —
+    // "borrowed beyond the threshold and not returned" — alongside LeakDetectedCount, not replacing it).
     private long _leakSuspectedCount;
 
-    // M18：分片亲和模式（构造期快照）。None 为默认且零开销（起始索引恒 0）；
-    // Thread 按线程 ID 稳定映射起始分片；Custom 走用户委托（异常/越界/null 回落顺序扫描）。
+    // Shard-affinity mode (constructor-time snapshot). None is the default and has zero overhead (start index is always 0);
+    // Thread maps the start shard stably by thread ID; Custom uses the user delegate (falling back to sequential scan on exception/out-of-range/null).
     private readonly HayateShardAffinityMode _affinityMode;
     private readonly Func<int> _customShardAffinity;
 
-    // M17：预热就绪信号。默认 false（构造期同步预热，借出零额外等待，与 2.4 一致）；
-    // true 时预热转后台执行，借出路径阻塞在 _warmupCompletion 上直到预热结束
-    // （含失败——信号必置位，不出现永久阻塞）。等待期内 L5 冷池自举让位。
+    // Pre-warm readiness signal. false by default (synchronous pre-warm at construction, zero extra wait on borrow, consistent with 2.4);
+    // when true, pre-warm runs in the background and the borrow path blocks on _warmupCompletion until pre-warm completes
+    // (including on failure — the signal is always set, so there is no permanent block). During the wait the cold-start path yields.
     private readonly bool _waitForWarmup;
     private readonly TaskCompletionSource<object> _warmupCompletion;
 
-    // M3：分配追踪（默认关闭）。统计同步借出 / 归还路径的线程分配增量（字节）与样本数；
-    // 仅作诊断口径，不参与任何池行为决策。net48 / netstandard2.0 下 API 缺失，计数恒 0。
+    // Allocation tracking (off by default). Counts the per-thread allocation delta (bytes) and sample count on the synchronous borrow/return paths;
+    // diagnostic only, never affects pool behavior decisions. Under net48 / netstandard2.0 the API is unavailable, so the counters stay 0.
     private readonly bool _enableAllocationTracking;
     private long _acquireAllocatedBytes;
     private long _releaseAllocatedBytes;
     private long _acquireAllocationSamples;
     private long _releaseAllocationSamples;
 
+    /// <exception cref="ArgumentNullException">Thrown if policy, options, scalingStrategy, metrics, logger, or poolName is null.</exception>
+    /// <exception cref="InvalidOperationException">Thrown if the configured options are invalid.</exception>
     internal HayatePoolBasic(
         IHayateObjectPolicy<T> policy,
         HayatePoolOptions options,
@@ -162,12 +164,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             throw new InvalidOperationException($"Invalid pool '{_name}' configuration: " + _options);
         }
 
-        // 计算每个分片的初始最大空闲容量
+        // Compute the initial maximum idle capacity per shard
         var shardCount = _options.ShardCount;
-        var perShardMax = _options.MaxPoolSize / shardCount;   // FIX: 之前直接赋值 MaxPoolSize，分片容量从未被均分
+        var perShardMax = _options.MaxPoolSize / shardCount;   // FIX: previously MaxPoolSize was assigned directly, so shard capacity was never evenly divided
         var remainderMax = _options.MaxPoolSize % shardCount;
 
-        // 功能开关只读字段（用于JIT死代码消除）
+        // Read-only feature-switch fields (enables JIT dead-code elimination)
         _enableValidation = _options.EnableValidation;
         _enableAutoScaling = _options.EnableAutoScaling;
         _enableGenerationOptimization = _options.EnableGenerationOptimization;
@@ -175,19 +177,19 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _enableEviction = _options.EnableEviction;
         _enableMetrics = _options.EnableMetrics;
 
-        // M12：容量告警默认（WarnAtRatio=0 且 CriticalAtRatio=0）完全禁用——
-        // 构造期固化为只读标志，禁用时借/还路径仅多一次可预测分支（JIT 消除友好）。
+        // Capacity alarm is disabled by default (WarnAtRatio = 0 and CriticalAtRatio = 0) —
+        // frozen as a read-only flag at construction; when disabled the borrow/return path only adds one predictable branch (JIT-friendly).
         _capacityAlarmEnabled = _options.WarnAtRatio > 0 || _options.CriticalAtRatio > 0;
 
-        // PR-D L1：取证配置随构造快照（采样分母经 IsValid/ApplyFeatureSwitches 已钳制 ≥1，此处再兜底）
+        // Forensics config is snapshotted at construction (the sample denominator is already clamped to >= 1 by IsValid/ApplyFeatureSwitches; this is a final guard).
         _leakTraceCaptureMode = _options.LeakTraceCaptureMode;
         _leakTraceSampleRate = Math.Max(1, _options.LeakTraceSampleRate);
 
-        // M18：affinity 配置随构造快照（ApplyFeatureSwitches 已保证 Custom 模式必有委托）
+        // Affinity config is snapshotted at construction (ApplyFeatureSwitches guarantees a delegate exists for Custom mode).
         _affinityMode = _options.ShardAffinityMode;
         _customShardAffinity = _options.CustomShardAffinity;
 
-        // 初始化分片
+        // Initialize shards
         _shards = new Shard[shardCount];
         for (var i = 0; i < shardCount; i++)
         {
@@ -201,7 +203,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         {
             var completion = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
             _warmupCompletion = completion;
-            // M17：预热转后台，构造立即返回；完成（含失败）后置位就绪信号。
+            // Pre-warm moves to the background and the constructor returns immediately; the ready signal is set once done (including on failure).
             _ = Task.Run(() =>
             {
                 try
@@ -232,11 +234,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     {
         try
         {
-            // 计算每个分片的最大容量
+            // Compute the maximum capacity per shard
             var perShardMax = _options.MaxPoolSize / _shards.Length;
             var remainderMax = _options.MaxPoolSize % _shards.Length;
 
-            // 计算每个分片的预热数量（不超过分片容量）
+            // Compute the pre-warm count per shard (not exceeding shard capacity)
             int perShard = _options.MinPoolSize / _shards.Length;
             int remainder = _options.MinPoolSize % _shards.Length;
             int totalPreWarmed = 0;
@@ -245,15 +247,15 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             {
                 var shard = _shards[i];
                 int shardMax = perShardMax + (i < remainderMax ? 1 : 0);
-                int count = perShard + (i < remainder ? 1 : 0); // 处理余数
+                int count = perShard + (i < remainder ? 1 : 0); // handle the remainder
 
-                // 确保预热数量不超过分片容量
+                // Ensure the pre-warm count does not exceed shard capacity
                 count = Math.Min(count, shardMax);
 
                 for (var j = 0; j < count; j++)
                 {
-                    // T09：登记并入目标分片。分片拒绝（容量已 clamp，理论不可达）时兜底销毁，
-                    // 防止产生「已登记但不在任何空闲链表」的孤儿项。
+                    // Register into the target shard. If the shard rejects (capacity is clamped, theoretically unreachable), destroy as fallback,
+                    // to avoid orphaned entries that are registered but in no free list.
                     var w = CreateWrappedObject(shard);
                     if (!shard.Add(w)) Destroy(w);
                     totalPreWarmed++;
@@ -289,9 +291,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     }
 
     /// <summary>
-    /// M17：预热就绪门。默认配置（<see cref="HayatePoolOptions.WaitForWarmup"/> = false）下
-    /// <c>_waitForWarmup</c> 为常量 false，热路径仅多一次可预测分支（JIT 可消除）；
-    /// 开启时阻塞至预热结束——信号在成功与失败路径均会置位，不会永久挂起。
+    /// Pre-warm readiness gate. Under the default configuration (<see cref="HayatePoolOptions.WaitForWarmup"/> = false)
+    /// <c>_waitForWarmup</c> is the constant false, so the hot path only adds one predictable branch (JIT-eliminable);
+    /// when enabled it blocks until pre-warm completes — the signal is set on both success and failure paths, so it never hangs permanently.
     /// </summary>
     private void WaitForWarmupIfNeeded()
     {
@@ -300,9 +302,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     }
 
     /// <summary>
-    /// M3：读取当前线程累计分配字节数。net48 / netstandard2.0 缺少
-    /// <c>GC.GetAllocatedBytesForCurrentThread()</c>，这些目标框架下返回 0
-    /// （分配追踪静默不可用，不影响任何池行为）。
+    /// Reads the current thread's cumulative allocated bytes. net48 / netstandard2.0 lack
+    /// <c>GC.GetAllocatedBytesForCurrentThread()</c>; under those target frameworks it returns 0
+    /// (allocation tracking is silently unavailable and does not affect any pool behavior).
     /// </summary>
     private static long GetAllocatedBytesForCurrentThread()
     {
@@ -317,17 +319,34 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     #region Core methods
 
+    /// <summary>Synchronously acquires a pooled object using the default timeout.</summary>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown if the configured default timeout is negative.</exception>
+    /// <exception cref="InvalidOperationException">Thrown by the Abort policy when no object is available.</exception>
+    /// <exception cref="TimeoutException">Thrown by the BlockTimeout policy when acquisition exceeds the timeout.</exception>
+    /// <example><code>
+    /// var obj = pool.Acquire();
+    /// try { /* use obj */ }
+    /// finally { pool.Release(obj); }
+    /// </code></example>
     public T Acquire()
     {
         return Acquire(_options.DefaultAcquireTimeout);
     }
 
     /// <summary>
-    /// 同步获取池化对象（带超时）。M3 分配追踪开启时，额外统计本次借出路径的线程分配增量。
+    /// Synchronously acquires a pooled object (with timeout). When allocation tracking is enabled, also counts the thread allocation delta on this borrow path.
     /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown if <paramref name="timeout"/> is negative.</exception>
+    /// <exception cref="InvalidOperationException">Thrown by the Abort policy when no object is available.</exception>
+    /// <exception cref="TimeoutException">Thrown by the BlockTimeout policy when acquisition exceeds <paramref name="timeout"/>.</exception>
+    /// <example><code>
+    /// var obj = pool.Acquire(TimeSpan.FromSeconds(5));
+    /// try { /* use obj */ }
+    /// finally { pool.Release(obj); }
+    /// </code></example>
     public T Acquire(TimeSpan timeout)
     {
-        // M3：分配追踪（默认关闭 → 常量分支，JIT 可消除；开启时不影响池行为）
+        // Allocation tracking (off by default → constant branch, JIT-eliminable; when on, does not affect pool behavior)
         if (!_enableAllocationTracking) return AcquireCore(timeout);
 
         var allocatedBefore = GetAllocatedBytesForCurrentThread();
@@ -342,17 +361,17 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         if (timeout < TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be non-negative");
 
-        // M17：预热未完成时先等就绪（默认关闭 → 常量分支，零开销）
+        // Wait for pre-warm readiness if not yet done (off by default → constant branch, zero overhead)
         WaitForWarmupIfNeeded();
 
         var sw = ValueStopwatch.StartNew();
 
-        // M18：affinity 起始分片每次 Acquire 仅求值一次（None 恒 0，零额外开销）。
+        // The affinity start shard is evaluated only once per Acquire (None is always 0, zero extra overhead).
         var affinityStart = _affinityMode == HayateShardAffinityMode.None ? 0 : SelectStartShardIndex();
 
         while (true)
         {
-            // M18：从亲和分片起环形扫描（等价 foreach 顺序扫描当 start=0）。
+            // Ring scan starting from the affinity shard (equivalent to a sequential foreach scan when start = 0).
             for (var offset = 0; offset < _shards.Length; offset++)
             {
                 var hop = affinityStart + offset;
@@ -360,17 +379,17 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                 if (shard.TryTake(out var w))
                 {
-                    // T06：借出成功即消费一个唤醒信号（若有），保持信号数与池内空闲对象对齐，
-                    // 避免等待者被陈旧信号逐个伪唤醒空转。Wait(0) 无信号时立即返回 false。
+                    // On a successful borrow, consume one wake-up signal (if any) to keep the signal count aligned with the pool's idle objects;
+                    // preventing waiters from being spuriously woken one by one by stale signals into a busy spin. Wait(0) returns false immediately when no signal.
                     _blockGate.Wait(0);
 
-                    #region 分代验证逻辑
+                    #region Generational validation logic
 
-                    // 仅开启分代 + 验证时执行
+                    // Only runs when both generational optimization and validation are enabled
                     //bool shouldValidate = _options.EnableValidation && _options.ValidateOnBorrow;
                     bool shouldValidate = _enableValidation && _options.ValidateOnBorrow;
 
-                    // 分代，老年代跳过部分验证
+                    // Generational: the old generation skips some validations
                     //if (_options.EnableGenerationOptimization && shouldValidate && w.Generation == 1)
                     if (_enableGenerationOptimization && shouldValidate && w.Generation == 1)
                     {
@@ -388,17 +407,17 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                     #endregion
 
-                    #region 记录源分片索引（Release 时按此 round-trip，避免 ProcessorId 落到 max=0 分片）
+                    #region Record source shard index (Release round-trips by this; avoids Thread.GetCurrentProcessorId() % ShardCount hitting the shard with max = 0)
 
-                    // 关键：Acquire 命中即记录来源 shard。同一对象 Release 时回到原 shard，
-                    // 杜绝 Thread.GetCurrentProcessorId() % ShardCount 命中 max=0 分片导致对象静默 dispose。
+                    // Key: record the source shard as soon as Acquire hits. The same object returns to its original shard on Release,
+                    // preventing Thread.GetCurrentProcessorId() % ShardCount from hitting the shard with max = 0 and silently disposing the object.
                     w.ShardIndex = shard.Index;
 
                     #endregion
 
-                    #region 对象验证，仅仅开启验证时执行，并且分代优化可能会跳过部分验证
+                    #region Object validation (only when validation is enabled; generational optimization may skip some)
 
-                    // 有效性检查
+                    // Validity check
                     if (shouldValidate && !_policy.Validate(w.Value))
                     {
                         _logger.LogWarning("[Shard {Index}] Object failed validation on borrow. Disposing. Type: {Type}", shard.Index, typeof(T).Name);
@@ -408,13 +427,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                     #endregion
 
-                    #region 核心对象处理
+                    #region Core object handling
 
-                    // 激活对象
+                    // Activate the object
                     _policy.OnAcquire(w.Value);
 
-                    // P2-新-1：借出状态不再单独置位——Shard.TryTake 认领时已把 Location
-                    // 迁移为 Borrowed，IsBorrowed 是其计算属性（单一事实源）。
+                    // The borrowed state is no longer set separately — Shard.TryTake already moves Location
+                    // to Borrowed on claim, and IsBorrowed is its computed property (single source of truth).
 
                     //if (_options.EnableEviction || _options.EnableLeakDetection || _options.EnableGenerationOptimization)
                     if (_enableEviction || _enableLeakDetection || _enableGenerationOptimization)
@@ -425,12 +444,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     //if (_options.EnableLeakDetection)
                     if (_enableLeakDetection)
                     {
-                        // PR-D L1：取证与检测解耦。泄漏扫描（阈值判定 + LeakCount）只依赖 LastBorrowedAt，
-                        // 零取证开销；调用栈按 LeakTraceCaptureMode 独立控制——
-                        // Off（默认）不抓栈（2.0 及之前每次借出抓全栈，37.5μs / 28.7KB 量级）；
-                        // Sampled 每 N 次借出抓 1 次（第 1 次必抓）；EveryAcquire 维持旧行为，显式 opt-in。
-                        // M16（2.5）：采集载体改 HayateLeaseContext（AsyncLocal 异步流 + 包装侧快照引用），
-                        // 租约 ID 单调递增，并发借还各自持有独立上下文实例，不再相互覆盖。
+                        // Forensics and detection are decoupled. Leak scanning (threshold check + LeakCount) depends only on LastBorrowedAt,
+                        // so forensics add zero overhead; the call stack is controlled independently by LeakTraceCaptureMode —
+                        // Off (default) captures no stack (before 2.0 every borrow captured the full stack, ~37.5us / ~28.7KB);
+                        // Sampled captures 1 of every N borrows (the first is always captured); EveryAcquire keeps the old behavior and is an explicit opt-in.
+                        // The collection carrier is now HayateLeaseContext (AsyncLocal async flow + wrapper-side snapshot reference),
+                        // with a monotonically increasing lease ID; concurrent borrows and returns each hold an independent context instance, so they no longer overwrite each other.
                         if (_leakTraceCaptureMode == HayateLeakTraceCaptureMode.EveryAcquire)
                         {
                             CaptureLeaseContext(w);
@@ -442,17 +461,17 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         }
                     }
 
-                    // M4：借出时间戳无条件记录。原条件门控（eviction/leakDetection/generation）
-                    // 会使「全关」配置下 LastBorrowedAt 恒为 0，M4 泄漏回查（LeakSuspectedCount）
-                    // 结构性失效；单次 QPC（Stopwatch.GetTimestamp）无分配、无时区换算，
-                    // 成本远低于 PR-D A1 移除的 DateTime.UtcNow，可接受。
+                    // The borrow timestamp is recorded unconditionally. The old conditional gating (eviction/leakDetection/generation)
+                    // left LastBorrowedAt at 0 when everything was off, structurally breaking the leak recheck (LeakSuspectedCount);
+                    // a single QPC (Stopwatch.GetTimestamp) has no allocation and no time-zone conversion,
+                    // and its cost is far below the DateTime.UtcNow removed by the scale-timestamp change, so it is acceptable.
                     w.LastBorrowedAt = Stopwatch.GetTimestamp();
 
-                    // M20：累计借出次数。借出瞬间包装对象由本线程独占（TryTake 已摘链认领，
-                    // 驱逐/校验无法认领 Borrowed 对象），普通自增即可，无需 Interlocked。
+                    // Cumulative borrow count. At the moment of borrow the wrapper is exclusively owned by this thread (TryTake already unlinked and claimed it,
+                    // and eviction/validation cannot claim a Borrowed object), so a plain increment suffices — no Interlocked needed.
                     w.LeaseCount++;
 
-                    // 分代升级，仅开启分代优化时执行
+                    // Generational promotion, only when generational optimization is enabled
                     //if (_options.EnableGenerationOptimization &&
                     if (_enableGenerationOptimization &&
                         (Stopwatch.GetTimestamp() - w.CreatedAt) * 1000.0 / Stopwatch.Frequency > _options.GenerationThresholdMs)
@@ -462,20 +481,20 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                     Interlocked.Increment(ref _totalAcquired);
 
-                    // M12：容量告警埋点（禁用时内部立即返回）
+                    // Capacity-alarm probe (returns immediately internally when disabled)
                     CheckCapacityAlarm();
 
                     #endregion
 
-                    #region 指标统计，仅开启指标时执行
+                    #region Metrics statistics (only when metrics are enabled)
 
                     //if (_options.EnableMetrics)
                     if (_enableMetrics)
                     {
-                        // 记录等待时间统计
+                        // Record wait-time statistics
                         var waitTime = (long)sw.Elapsed.TotalMilliseconds;
                         UpdateWaitTimeStats(waitTime);
-                        // L3：纳入 _enableMetrics 门控（借出路径漏网点）
+                        // Covered by the _enableMetrics gate (borrow-path leak-trace point)
                         if (_enableMetrics)
                         {
                             _metrics.RecordObjectAcquired(_name, w.Value, waitTime);
@@ -494,78 +513,78 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 }
             }
 
-            // 超时处理
+            // Timeout handling
             var elapsed = sw.Elapsed;
 
             switch (_options.RejectPolicy)
             {
                 case HayatePoolRejectPolicy.Abort:
                     {
-                        // 无空闲对象时直接抛异常，不等待
+                        // Throw immediately when no idle object is available; do not wait
                         if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
                         if (_enableAutoScaling) ForceScaleUpOneStep();
-                        throw new InvalidOperationException($"HayatePool [{_name}] 无可用对象，Abort策略拒绝请求");
+                        throw new InvalidOperationException($"HayatePool [{_name}] has no available object; the request was rejected by the Abort reject policy.");
                     }
 
                 case HayatePoolRejectPolicy.Block:
                     {
-                        // PR-D L5：冷池自举——池完全空时按需创建首个对象，确定性消除首借挂起
+                        // Cold boot: when the pool is completely empty, create the first object on demand, deterministically eliminating the first-borrow hang
                         var coldBoot = TryColdBootAcquire((long)sw.Elapsed.TotalMilliseconds);
                         if (coldBoot is not null) return coldBoot;
 
-                        // T06：无限等待直到获取到对象。挂起等待归还信号（切片封顶重检间隔），
-                        // 信号到达立即醒来重试 TryTake；取代原 SpinOnce 忙等（CPU 100%）。
-                        // Block 策略不设超时，timeout 参数不参与判定（与原行为一致）。
+                        // Wait indefinitely until an object is obtained. Suspend waiting for the return signal (slice caps the re-check interval),
+                        // waking immediately on signal to retry TryTake; replaces the original SpinOnce busy-wait (100% CPU).
+                        // The Block policy has no timeout; the timeout argument is not used (consistent with the original behavior).
                         _blockGate.Wait(BlockWaitSliceMs);
                         continue;
                     }
 
                 case HayatePoolRejectPolicy.BlockTimeout:
                     {
-                        // PR-D L5：冷池自举——池完全空时按需创建首个对象，确定性消除首借超时
+                        // Cold boot: when the pool is completely empty, create the first object on demand, deterministically eliminating the first-borrow timeout
                         var coldBoot = TryColdBootAcquire((long)elapsed.TotalMilliseconds);
                         if (coldBoot is not null) return coldBoot;
 
-                        // 等待超时后抛异常
+                        // Throw after the wait times out
                         if (elapsed >= timeout)
                         {
                             if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
                             if (_enableAutoScaling) ForceScaleUpOneStep();
-                            throw new TimeoutException($"HayatePool [{_name}] 获取对象超时，超时时间：{timeout.TotalSeconds}s");
+                            throw new TimeoutException($"HayatePool [{_name}] timed out acquiring an object after {timeout.TotalSeconds}s.");
                         }
 
-                        // T06：挂起等待归还信号，切片内无信号则醒来重检超时与分片
+                        // Wait for a return signal; if none arrives within the slice, wake and re-check the timeout and the shard.
                         _blockGate.Wait(BlockWaitSliceMs);
                         continue;
                     }
 
                 case HayatePoolRejectPolicy.CreateNew:
                     {
-                        // 超时后创建新对象
+                        // Create a new object after the timeout
                         if (elapsed >= timeout)
                         {
                             if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
-                            // L3：纳入 _enableMetrics 门控（超时创建路径漏网点）
+                            // Covered by the _enableMetrics gate (timeout-create path leak-trace point)
                             if (_enableMetrics)
                             {
                                 _metrics.RecordObjectMiss(_name);
                             }
 
-                            // T15 修复：创建「已登记」的池内对象（登记即 Borrowed，不进空闲
-                            // 链表——避免其他等待者 TryTake 认领导致双重借出），Release 时
-                            // 按 ShardIndex 正常回池复用。旧实现返回未登记的裸对象，Release
-                            // 反查失败被当作外来对象销毁——每次借还都新建+销毁，池化完全失效。
+                            // Fix: create a "registered" in-pool object (registered means Borrowed, not placed in the idle
+                            // list — preventing other waiters from claiming it via TryTake and causing a double borrow); on Release
+                            // it returns to the pool normally by ShardIndex for reuse. The old implementation returned an unregistered bare object, and Release
+                            // failed the reverse lookup and destroyed it as a foreign object — every borrow/return created and destroyed a new object, fully defeating pooling.
                             var shard = _shards[(int)(Interlocked.Increment(ref _createCursor) - 1) % _shards.Length];
-                            var w = CreateWrappedObject(shard);   // 内部已完成 TryTrack 登记
+                            var w = CreateWrappedObject(shard);   // TryTrack registration is already done internally
                             w.Location = HayateObjectLocation.Borrowed;
-                            // M4：借出时间戳无条件记录（同 Acquire 主路径，保障泄漏回查可用）
+                            // The borrow timestamp is recorded unconditionally (same as the Acquire main path, keeping leak recheck usable)
                             w.LastBorrowedAt = Stopwatch.GetTimestamp();
-                            // M20：累计借出次数（新建即借出，包装对象此刻由本线程独占）
+                            // Cumulative borrow count (newly created means already borrowed; the wrapper is exclusively owned by this thread now)
                             w.LeaseCount++;
                             _policy.OnAcquire(w.Value);
                             Interlocked.Increment(ref _totalAcquired);
 
-                            // M12：容量告警埋点（禁用时内部立即返回）
+                            // Capacity-alarm probe (returns immediately internally when disabled)
                             CheckCapacityAlarm();
 
                             var waitTime = (long)sw.Elapsed.TotalMilliseconds;
@@ -578,30 +597,37 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                             return w.Value;
                         }
 
-                        // T06：挂起等待归还信号，切片内无信号则醒来重检超时与分片
+                        // Wait for a return signal; if none arrives within the slice, wake and re-check the timeout and the shard.
                         _blockGate.Wait(BlockWaitSliceMs);
                         continue;
                     }
 
                 default:
                     {
-                        throw new ArgumentOutOfRangeException(nameof(_options.RejectPolicy), "未知的拒绝策略");
+                        throw new ArgumentOutOfRangeException(nameof(_options.RejectPolicy), "Unknown reject policy.");
                     }
             }
         }
     }
 
+    /// <summary>Asynchronously acquires a pooled object, honouring the supplied cancellation token.</summary>
+    /// <exception cref="TaskCanceledException">Thrown if <paramref name="cancellationToken"/> is cancelled while waiting.</exception>
+    /// <example><code>
+    /// var obj = await pool.AcquireAsync(cancellationToken);
+    /// try { /* use obj */ }
+    /// finally { pool.Release(obj); }
+    /// </code></example>
     public async Task<T> AcquireAsync(CancellationToken cancellationToken = default)
     {
-        // M17：预热未完成时先等就绪（默认关闭 → 常量分支，零开销）
+        // Wait for pre-warm readiness if not yet done (off by default → constant branch, zero overhead)
         if (_waitForWarmup) await _warmupCompletion.Task.ConfigureAwait(false);
 
-        // M18：affinity 起始分片每次 AcquireAsync 仅求值一次（None 恒 0，零额外开销）。
+        // The affinity start shard is evaluated only once per AcquireAsync (None is always 0, zero extra overhead).
         var affinityStart = _affinityMode == HayateShardAffinityMode.None ? 0 : SelectStartShardIndex();
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            // M18：从亲和分片起环形扫描（等价 foreach 顺序扫描当 start=0）。
+            // Ring scan starting from the affinity shard (equivalent to a sequential foreach scan when start = 0).
             for (var offset = 0; offset < _shards.Length; offset++)
             {
                 var hop = affinityStart + offset;
@@ -610,8 +636,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 //if (shard.TryTake(out var w, TimeSpan.Zero))
                 if (shard.TryTake(out var w))
                 {
-                    // T07：借出成功即消费一个唤醒信号（若有），与同步路径保持一致，
-                    // 防止陈旧信号积累导致异步等待者伪唤醒空转。
+                    // On a successful borrow, consume one wake-up signal (if any), consistent with the synchronous path,
+                    // preventing stale signals from accumulating and causing asynchronous waiters to spin spuriously.
                     _blockGate.Wait(0);
 
                     if (_options.ValidateOnBorrow && !_policy.Validate(w.Value))
@@ -622,35 +648,35 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                     _policy.OnAcquire(w.Value);
 
-                    // P2-新-1：TryTake 认领已置 Location=Borrowed，IsBorrowed 为其计算属性。
+                    // TryTake already sets Location = Borrowed on claim, and IsBorrowed is its computed property.
 
-                    // D3：记录源分片索引，Release round-trip 用
+                    // D3: record the source shard index for Release round-trip
                     w.ShardIndex = shard.Index;
 
-                    // M4：借出时间戳无条件记录（同步路径一致，保障泄漏回查可用）
+                    // The borrow timestamp is recorded unconditionally (consistent with the synchronous path, keeping leak recheck usable)
                     w.LastBorrowedAt = Stopwatch.GetTimestamp();
 
-                    // M20：累计借出次数（TryTake 已摘链认领，包装对象此刻由本线程独占）
+                    // Cumulative borrow count (TryTake already unlinked and claimed, so the wrapper is exclusively owned by this thread now)
                     w.LeaseCount++;
 
                     Interlocked.Increment(ref _totalAcquired);
 
-                    // M12：容量告警埋点（禁用时内部立即返回）
+                    // Capacity-alarm probe (returns immediately internally when disabled)
                     CheckCapacityAlarm();
 
                     return w.Value;
                 }
             }
 
-            // T07：取代原 Task.Delay(1ms) 轮询（异步路径空转、空载 CPU 开销）。
-            // 挂起等待归还信号或取消——信号由 Release 成功回池时发出（与同步 Acquire
-            // 共用 _blockGate，单一信号源），计数持久化语义保证无丢失唤醒。
-            // 设计说明：执行计划原草图为本方法引入 Channel<T> 推送对象，但对象回池后
-            // 所有权仍属分片链表，channel 再持引用会造成双重所有权；所需语义与 T06
-            // 信号门同构，故直接复用 SemaphoreSlim（WaitAsync 异步原生），零新增状态。
+            // Replaces the original Task.Delay(1ms) polling (idle spin and idle CPU overhead on the async path).
+            // Suspend waiting for the return signal or cancellation — the signal is emitted by Release on a successful return (shared with the synchronous Acquire
+            // via the shared _blockGate, a single signal source); the persistent counter semantics guarantee no lost wake-ups.
+            // Design note: the original sketch introduced a Channel<T> to push objects here, but after an object returns to the pool
+            // its ownership stays in the shard list, so a channel holding another reference would create dual ownership; the required semantics are the same as the signal gate
+            // signal gate, so we directly reuse SemaphoreSlim (WaitAsync is natively async) with zero additional state.
 
-            // PR-D L5：冷池自举——池完全空时按需创建首个对象。异步路径原本无限等
-            // 归还信号，Min=0 冷池首借将永久挂起直到取消，自举是唯一的确定性出口。
+            // Cold boot: when the pool is completely empty, create the first object on demand. The async path originally waited indefinitely
+            // for the return signal, so a Min=0 empty pool's first borrow would hang forever until cancellation; cold boot is the only deterministic exit.
             var coldBoot = TryColdBootAcquire(0);
             if (coldBoot is not null) return coldBoot;
 
@@ -661,12 +687,20 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     }
 
     /// <summary>
-    /// PR-E A3（=M5 统一 CT 传递）：异步获取池化对象，带超时边界。
-    /// 实现方式：链接 CTS 组合「外部取消 + 超时」两路取消源转调无超时版本，
-    /// 零新增池状态；超时语义与同步 <see cref="Acquire(TimeSpan)"/> 对齐——
-    /// 超时抛 <see cref="TimeoutException"/>（含 missed 计数与强制扩容一步），
-    /// 外部取消传播 <see cref="TaskCanceledException"/>，二者可通过取消源区分。
+    /// Asynchronously acquires a pooled object with a timeout boundary.
+    /// Implementation: link a CTS combining the "external cancellation + timeout" two cancellation sources and delegate to the no-timeout overload,
+    /// with zero added pool state; the timeout semantics align with the synchronous <see cref="Acquire(TimeSpan)"/> —
+    /// a timeout throws <see cref="TimeoutException"/> (including the missed count and a forced scale-up step),
+    /// and an external cancellation propagates <see cref="TaskCanceledException"/>; the two can be distinguished by the cancellation source.
     /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown if <paramref name="timeout"/> is negative.</exception>
+    /// <exception cref="TimeoutException">Thrown when acquisition exceeds <paramref name="timeout"/>.</exception>
+    /// <exception cref="TaskCanceledException">Thrown if <paramref name="cancellationToken"/> is cancelled and the cancellation is not the timeout.</exception>
+    /// <example><code>
+    /// var obj = await pool.AcquireAsync(TimeSpan.FromSeconds(5), cancellationToken);
+    /// try { /* use obj */ }
+    /// finally { pool.Release(obj); }
+    /// </code></example>
     public async Task<T> AcquireAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
     {
         if (timeout == Timeout.InfiniteTimeSpan)
@@ -682,19 +716,22 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            // 仅超时触发（外部 CT 未取消）→ 与同步 Acquire(timeout) 的 BlockTimeout 分支对齐
+            // Only a timeout triggers this (external CT not cancelled) → aligns with the BlockTimeout branch of the synchronous Acquire(timeout)
             if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
             if (_enableAutoScaling) ForceScaleUpOneStep();
-            throw new TimeoutException($"HayatePool [{_name}] 获取对象超时（异步），超时时间：{timeout.TotalSeconds}s");
+            throw new TimeoutException($"HayatePool [{_name}] timed out acquiring an object asynchronously after {timeout.TotalSeconds}s.");
         }
     }
 
     /// <summary>
-    /// 归还对象到池。M3 分配追踪开启时，额外统计本次归还路径的线程分配增量。
+    /// Returns an object to the pool. When allocation tracking is enabled, also counts the thread allocation delta on this return path.
     /// </summary>
+    /// <example><code>
+    /// pool.Release(obj);
+    /// </code></example>
     public void Release(T item)
     {
-        // M3：分配追踪（默认关闭 → 常量分支，JIT 可消除；开启时不影响池行为）
+        // Allocation tracking (off by default → constant branch, JIT-eliminable; when on, does not affect pool behavior)
         if (!_enableAllocationTracking)
         {
             ReleaseCore(item);
@@ -715,9 +752,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             return;
         }
 
-        // 查找对应的包装对象，验证是否属于池中对象。
-        // T09：登记表按分片拆分后，按 T 反查需逐分片探测（只读无锁；分片数为个位数，
-        // 代价可忽略）。同一对象只会登记在创建分片，任一分片命中即认定属于本池。
+        // Find the corresponding wrapper object and verify it belongs to the pool.
+        // After the registry is split by shard, reverse lookup by T requires probing each shard (read-only and lock-free; the shard count is single-digit,
+        // so the cost is negligible). The same object is only registered in its creation shard; a hit in any shard confirms it belongs to this pool.
         HayateObject<T> w = null;
         foreach (var shard in _shards)
         {
@@ -730,7 +767,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
             Destroy(item);
 
-            // L3：纳入 _enableMetrics 门控（拒绝路径原本不受门控，是启用 HayateDiagnostics 后的漏网分配点）
+            // Covered by the _enableMetrics gate (the reject path was originally ungated — a missed allocation point after enabling HayateDiagnostics)
             if (_enableMetrics)
             {
                 _metrics.RecordObjectReleased(_name, item, false);
@@ -739,7 +776,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             return;
         }
 
-        #region 归还验证，仅开启验证时执行
+        #region Return validation (only when validation is enabled)
 
         //if (_options.EnableValidation && _options.ValidateOnReturn && !_policy.Validate(item))
         if (_enableValidation && _options.ValidateOnReturn && !_policy.Validate(item))
@@ -748,7 +785,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
             Destroy(w);
 
-            // L3：纳入 _enableMetrics 门控（验证拒绝路径漏网点）
+            // Covered by the _enableMetrics gate (validation-reject path leak-trace point)
             if (_enableMetrics)
             {
                 _metrics.RecordObjectReleased(_name, item, false);
@@ -761,21 +798,21 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         try
         {
-            #region 核心归还处理
+            #region Core return handling
 
-            // 纯化对象
+            // Passivate the object
             _policy.OnPassivate(item);
 
-            // P2-新-1：归还状态不再单独清位——下方 shard.Add 成功即把 Location 迁回
-            // InPool（IsBorrowed 随之为 false）；Add 被拒则走 Destroy（Location=Destroyed）。
+            // The returned state is no longer cleared separately — a successful shard.Add below moves Location back
+            // to InPool (IsBorrowed becomes false); if Add is rejected, Destroy runs (Location = Destroyed).
 
-            // 归还时间戳无条件记录（M15/M4 同款 2.5 不变量）：原条件门控
-            // （eviction/metrics）会使「全关」配置下 LastReleasedAt 停留在创建时刻，
-            // Evict(Idle) 的空闲判定结构性失效；单次 QPC 成本与借出侧一致，可接受。
+            // The return timestamp is recorded unconditionally (the same 2.5 invariant): the old conditional gating
+            // (eviction/metrics) left LastReleasedAt at the creation time when everything was off,
+            // structurally breaking Evict(Idle)'s idle judgment; a single QPC costs the same as on the borrow side and is acceptable.
             w.LastReleasedAt = Stopwatch.GetTimestamp();
             w.LeaseTimeMs = (long)((w.LastReleasedAt - w.LastBorrowedAt) * 1000.0 / Stopwatch.Frequency);
 
-            // 重置对象；策略层可通过返回 false 拒绝回池（例如对象已损坏或不可复用）
+            // Reset the object; the policy can reject the return by returning false (e.g., the object is corrupted or not reusable)
             if (!_policy.OnRelease(item))
             {
                 _logger.LogWarning(
@@ -784,14 +821,14 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                 Destroy(w);
 
-                // L3：纳入 _enableMetrics 门控（策略拒绝路径漏网点）
+                // Covered by the _enableMetrics gate (policy-reject path leak-trace point)
                 if (_enableMetrics)
                 {
                     _metrics.RecordObjectReleased(_name, item, false);
                 }
 
-                // 维持最小空闲水位：策略层拒绝后池被掏空，主动补充。
-                // 仅在开启了自动扩缩容且 MinPoolSize > 0 时触发，避免无意义的开销。
+                // Maintain the minimum idle watermark: after the policy rejects, the pool may be drained, so proactively replenish.
+                // Only triggers when auto-scaling is enabled and MinPoolSize > 0, to avoid meaningless overhead.
                 if (_enableAutoScaling && _options.MinPoolSize > 0 &&
                     TrackedObjectCount < _options.MinPoolSize)
                 {
@@ -803,11 +840,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
             #endregion
 
-            #region 指标统计（仅开启指标时执行）
+            #region Metrics statistics (only when metrics are enabled)
 
             if (_enableMetrics)
             {
-                // 记录租赁时间统计
+                // Record lease-time statistics
                 UpdateLeaseTimeStats(w.LeaseTimeMs);
                 Interlocked.Increment(ref _totalReleased);
                 _metrics.RecordObjectReleased(_name, item, true);
@@ -815,31 +852,31 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
             #endregion
 
-            #region 归还到分片
+            #region Return to shard
 
-            // 关键修复（D3）：按 Acquire 时记录的 ShardIndex round-trip，
-            // 严禁改回 Thread.GetCurrentProcessorId() % _shards.Length——
-            // 后者在 MaxPoolSize < ShardCount 时会让 2/3 分片因 max=0 静默 dispose 对象。
+            // Critical fix (D3): round-trip by the ShardIndex recorded at Acquire,
+            // never revert to Thread.GetCurrentProcessorId() % _shards.Length —
+            // the latter silently disposes objects in 2/3 of shards (those with max = 0) when MaxPoolSize < ShardCount.
             var shardIndex = (uint)w.ShardIndex < (uint)_shards.Length ? w.ShardIndex : 0;
             var shard = _shards[shardIndex];
             if (!shard.Add(w))
             {
-                // 分片拒绝接收，两种可能：
-                // 1) 分片已满（overflow）——P0-新-1 后 Add 不再自行处置该对象，
-                //    由本路径的 Destroy(w) 统一走完整销毁（触发 OnDestroy），避免钩子漏调；
-                // 2) 对象已被驱逐 / 空闲校验流程认领 —— 对端线程正在销毁它。
-                // 无论哪种，对象都已不可复用，这里统一销毁并把它从全局索引中摘除；
-                // Destroy 自带幂等保护，不会二次 Dispose。
+                // The shard refused to accept; two possibilities:
+                // 1) The shard is full (overflow) — after Add no longer disposes the object itself,
+                //    so this path's Destroy(w) performs the full destruction (triggering OnDestroy), avoiding missed hooks;
+                // 2) The object was already claimed by eviction / idle validation — the other thread is destroying it.
+                // Either way, the object is no longer reusable; destroy it here uniformly and remove it from the global index;
+                // Destroy is idempotent and will not double-Dispose.
                 _logger.LogWarning("Object rejected by shard on release. Removing from pool. Type: {Type}, shard: {ShardIndex}",
                     typeof(T).Name, shardIndex);
 
                 Destroy(w);
                 UntrackObject(w);
 
-                // P1-新-1 修复：分片拒绝销毁了一个对象，池总量可能跌破 MinPoolSize
-                // （尤其驱逐线程先认领走一个 InPool 对象、随后本归还对象又被 overflow 的场景）。
-                // 与 OnRelease=false 路径一致，仅在开启自动扩缩容且确实低于水位时补一次，
-                // 避免延迟敏感业务在驱逐/归还交错下遭遇冷启动。
+                // Fix: the shard rejected and destroyed an object, so the pool total may drop below MinPoolSize
+                // (especially when the eviction thread first claims an InPool object, then this returned object is overflowed).
+                // Consistent with the OnRelease=false path, replenish once only when auto-scaling is enabled and the pool is genuinely below the watermark,
+                // to avoid latency-sensitive work hitting a cold start under eviction/return interleaving.
                 if (_enableAutoScaling && _options.MinPoolSize > 0 &&
                     TrackedObjectCount < _options.MinPoolSize)
                 {
@@ -851,22 +888,22 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
             #endregion
 
-            // M16：租约结束——清空当前异步流的租约上下文（Current 归 null；
-            // AsyncLocal 写值有执行上下文复制成本，仅取证开启方付费）。
+            // Lease ends — clear the current async flow's lease context (Current becomes null;
+            // AsyncLocal writes incur an execution-context copy cost, paid only when forensics is enabled).
             if (_enableLeakDetection && _leakTraceCaptureMode != HayateLeakTraceCaptureMode.Off)
             {
                 HayateLeaseContext.DetachFromFlow();
             }
 
-            // T06：对象已成功回池，唤醒一个等待中的 Acquire（Block/BlockTimeout/CreateNew）。
-            // 无等待者时计数累积，由借出路径 Wait(0) 消费，不会泄漏。
+            // The object returned to the pool successfully; wake one waiting Acquire (Block/BlockTimeout/CreateNew).
+            // When there is no waiter, the counter accumulates and is consumed by the borrow path's Wait(0), so it never leaks.
             try { _blockGate.Release(); }
             catch (SemaphoreFullException)
             {
-                // int.MaxValue 计数上限保护，正常负载下不可达；吞掉以保证 Release 路径不中断。
+                // int.MaxValue counter cap protection; unreachable under normal load; swallowed to keep the Release path uninterrupted.
             }
 
-            // M12：容量告警埋点——归还使借出水位的回落在此处被感知（状态翻转时复位/再触发）。
+            // Capacity-alarm probe — the borrow-water-level drop on return is sensed here (reset/retripped on state transition).
             CheckCapacityAlarm();
 
             _logger.LogDebug("Object returned to pool. Type: {Type} LeaseTime: {LeaseTime:F2}ms, shard: {ShardIndex}", typeof(T).Name, w.LeaseTimeMs, shardIndex);
@@ -884,23 +921,27 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     }
 
     /// <summary>
-    /// M15：按分类依据主动驱逐空闲对象（Touched/Idle/Expired，语义见 <see cref="HayateEvictReason"/>）。
-    /// 实现要点：
-    /// ① 仅作用于空闲对象——借出中的对象不在分片链表内（TryTake 已物理摘出），
-    ///    <see cref="Shard.GetAll"/> 快照天然不含；即便时序竞态下链表项刚被借出，
-    ///    <see cref="Shard.Remove"/> 的原子认领也会失败并跳过，绝不销毁使用中的对象；
-    /// ② 销毁复用与后台驱逐完全相同的 <see cref="Destroy"/> 幂等 CAS——与后台驱逐 /
-    ///    空闲校验 / 归还拒绝并发命中同一对象时只有一方真正销毁，不产生二次 Dispose；
-    /// ③ 默认后台驱逐行为不变，本 API 是叠加的主动运维出口（驱逐计数计入各自的
-    ///    Destroy 路径，不额外记账）。
+    /// Proactively evicts idle objects by category (Touched/Idle/Expired; see <see cref="HayateEvictReason"/> for semantics).
+    /// Implementation notes:
+    /// ① Only affects idle objects — borrowed objects are not in the shard list (TryTake already physically removed them),
+    ///    so a <see cref="Shard.GetAll"/> snapshot naturally excludes them; even if a list item was just borrowed under a race,
+    ///    <see cref="Shard.Remove"/>'s atomic claim will fail and skip it, never destroying an in-use object;
+    /// ② Destruction reuses the exact same idempotent CAS as background eviction — when concurrent with background eviction /
+    ///    idle validation / return rejection hitting the same object, only one side truly destroys it, with no double Dispose;
+    /// ③ The default background-eviction behavior is unchanged; this API is an additive proactive ops entry point (eviction counts go to their respective
+    ///    Destroy paths, with no extra accounting).
     /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown if <paramref name="reason"/> is not Touched, Idle, or Expired.</exception>
+    /// <example><code>
+    /// int n = pool.Evict(HayateEvictReason.Idle);
+    /// </code></example>
     public int Evict(HayateEvictReason reason)
     {
         if (reason != HayateEvictReason.Touched &&
             reason != HayateEvictReason.Idle &&
             reason != HayateEvictReason.Expired)
         {
-            throw new ArgumentOutOfRangeException(nameof(reason), "未知的驱逐依据");
+            throw new ArgumentOutOfRangeException(nameof(reason), "Unknown eviction reason.");
         }
 
         var now = Stopwatch.GetTimestamp();
@@ -908,29 +949,29 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         foreach (var shard in _shards)
         {
-            // GetAll 返回锁内快照（空闲链表数组），遍历期间不在锁内，认领走 Remove CAS
+            // GetAll returns an in-lock snapshot (idle list array); iteration is lock-free, and claims go through Remove's CAS
             foreach (var w in shard.GetAll())
             {
                 var match = false;
                 if (reason == HayateEvictReason.Touched)
                 {
-                    // 「用过即清」：曾借出过（prewarm 未用对象 LeaseCount=0，保留）
+                    // "Clear on use": has been borrowed before (prewarm-unused objects with LeaseCount = 0 are kept)
                     match = w.LeaseCount > 0;
                 }
                 else if (reason == HayateEvictReason.Idle)
                 {
-                    // 与后台驱逐 idle-too-long 同口径（PR-D A1：Stopwatch ticks → 秒）
+                    // Same criterion as background idle-too-long eviction (Stopwatch ticks → seconds)
                     match = (now - w.LastReleasedAt) / (double)Stopwatch.Frequency > _options.MaxIdleTime.TotalSeconds;
                 }
                 else // Expired
                 {
-                    // 与后台驱逐 expired 同口径
+                    // Same criterion as background expired eviction
                     match = (now - w.CreatedAt) / (double)Stopwatch.Frequency > _options.MaxLifeTime.TotalSeconds;
                 }
 
                 if (!match) continue;
 
-                // 认领成功的调用方才有权销毁（对象若此刻已被借出，Remove 返回 false）
+                // Only the caller that successfully claims may destroy (if the object is currently borrowed, Remove returns false)
                 if (shard.Remove(w))
                 {
                     Destroy(w);
@@ -952,7 +993,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     #endregion
 
-    #region 辅助方法
+    #region Helper methods
 
     private HayateObject<T> CreateWrappedObject(Shard targetShard)
     {
@@ -962,9 +1003,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             {
                 var o = _policy.Create();
 
-                // T09：登记并入目标分片（同步写入 ShardIndex 作为归属）。
-                // 对象 round-trip 永远回到该分片，登记项与对象生命周期同步，
-                // TrackedCount 之和即为池的真实存活对象数。
+                // Register into the target shard (ShardIndex is written synchronously as the owner).
+                // The object round-trips back to this shard forever; the registry entry and object lifetime stay in sync,
+                // so the sum of TrackedCount is the pool's true live object count.
                 var w = new HayateObject<T>(o) { ShardIndex = targetShard.Index, OwnerPoolName = _name };
                 if (targetShard.TryTrack(o, w))
                 {
@@ -972,8 +1013,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     return w;
                 }
 
-                // 同一键已存在（策略层重复创建同一实例的病态情形）：销毁新实例后重试，
-                // 绝不入池——否则 Release 反查会命中旧登记项，新旧包装对象互相污染。
+                // The same key already exists (a pathological case where the policy creates the same instance twice): destroy the new instance and retry,
+                // never add it to the pool — otherwise Release's reverse lookup would hit the old entry and the old/new wrappers would corrupt each other.
                 _logger.LogWarning("Duplicate pooled object instance detected. Retrying. Type: {Type}", typeof(T).Name);
                 _policy.OnDestroy(o);
                 if (o is IDisposable d) d.Dispose();
@@ -1002,11 +1043,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             if (currentTotal >= _options.MaxPoolSize) return;
             if ((Stopwatch.GetTimestamp() - _lastScaleUpTime) / (double)Stopwatch.Frequency < _options.ScaleUpCooldownSeconds) return;
 
-            // 每次超时 +5 个，防止雪崩
+            // Add 5 per timeout to prevent an avalanche
             int add = Math.Min(_options.ScaleUpStep, _options.MaxPoolSize - currentTotal);
             if (add <= 0) return;
 
-            // 更新分片容量，避免对象被丢弃
+            // Update shard capacity so objects are not discarded
             UpdateShardMaxSizes();
 
             var added = 0;
@@ -1014,7 +1055,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             for (var i = 0; i < add; i++)
             {
                 var shard = _shards[i % _shards.Length];
-                // T09：登记并入目标分片；并发下 Add 仍可能被他线程先填满而拒绝，兜底销毁防孤儿登记。
+                // Register into the target shard; under concurrency Add may still be filled first by another thread and rejected, so destroy as fallback to prevent orphaned registry entries.
                 var w = CreateWrappedObject(shard);
                 if (!shard.Add(w)) Destroy(w);
                 added++;
@@ -1036,13 +1077,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     }
 
     /// <summary>
-    /// PR-D L5：冷池自举。池完全空（无空闲且无借出）且容量上限 &gt; 0 时，
-    /// 同步创建首个对象直接借出（原子防重，并发首借仅创建一个），
-    /// 消除 Min=0 冷池「等超时者补货」的不确定性（T12 ColdStart 实测 2/5 与 5/5 超时两种时序）。
-    /// 仅由 Block / BlockTimeout 策略与异步等待路径调用——CreateNew 保持「等满超时后创建」语义（L6），
-    /// Abort 保持直接拒绝语义。
+    /// Cold boot. When the pool is completely empty (no idle and no borrowed) and the capacity limit &gt; 0,
+    /// synchronously create the first object and borrow it directly (atomic de-duplication; concurrent first borrows create only one),
+    /// eliminating the uncertainty of a Min=0 empty pool "waiting for a timeout to replenish" (empirically two failure timings).
+    /// Called only by the Block / BlockTimeout policies and the async wait path — CreateNew keeps the "create after the full timeout" semantics,
+    /// while Abort keeps the direct-reject semantics.
     /// </summary>
-    /// <returns>自举借出的对象；返回 <c>null</c> 表示本调用未认领自举（池非空 / 达上限 / 他线程正在创建），调用方应继续正常等待。</returns>
+    /// <returns>Object borrowed via cold boot; returns <c>null</c> when this call did not claim the boot (pool non-empty / at capacity / another thread is creating), and the caller should continue normal waiting.</returns>
     private T TryColdBootAcquire(long waitTimeMs)
     {
         if (_options.MaxPoolSize <= 0) return null;
@@ -1051,20 +1092,20 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         try
         {
-            // 双检：CAS 期间可能有并发归还 / 扩容使池非空——此时回落正常等待路径即可。
+            // Double-check: during the CAS, a concurrent return / scale-up may make the pool non-empty — just fall back to the normal wait path then.
             if (TrackedObjectCount != 0) return null;
 
             var shard = _shards[(int)(Interlocked.Increment(ref _createCursor) - 1) % _shards.Length];
-            var w = CreateWrappedObject(shard);   // 内部已完成 TryTrack 登记（含 _totalCreated 计数）
+            var w = CreateWrappedObject(shard);   // TryTrack registration is already done internally (includes the _totalCreated counter)
             w.Location = HayateObjectLocation.Borrowed;
-            // M4：借出时间戳无条件记录（同 Acquire 主路径，保障泄漏回查可用）
+            // The borrow timestamp is recorded unconditionally (same as the Acquire main path, keeping leak recheck usable)
             w.LastBorrowedAt = Stopwatch.GetTimestamp();
-            // M20：累计借出次数（自举即借出，包装对象此刻由本线程独占）
+            // Cumulative borrow count (cold boot means borrowed; the wrapper is exclusively owned by this thread now)
             w.LeaseCount++;
             _policy.OnAcquire(w.Value);
             Interlocked.Increment(ref _totalAcquired);
 
-            // M12：容量告警埋点（禁用时内部立即返回）
+            // Capacity-alarm probe (returns immediately internally when disabled)
             CheckCapacityAlarm();
 
             if (_enableMetrics)
@@ -1078,8 +1119,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         }
         finally
         {
-            // 创建成功或失败都必须复位，池再次清空后仍可自举；
-            // CreateWrappedObject 抛异常时异常向调用方传播（与 CreateNew 路径行为一致）。
+            // Whether creation succeeds or fails, the flag must be reset, so the pool can cold-boot again after being emptied;
+            // when CreateWrappedObject throws, the exception propagates to the caller (consistent with the CreateNew path behavior).
             Interlocked.Exchange(ref _coldBootClaimed, 0);
         }
     }
@@ -1090,7 +1131,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         var perShardMax = _options.MaxPoolSize / shardCount;
         var remainderMax = _options.MaxPoolSize % shardCount;
 
-        // FIX: 之前循环 bound 用了 perShardMax，会在 MaxPoolSize > ShardCount 时越界 _shards[i]
+        // FIX: previously the loop bound used perShardMax, which would overflow _shards[i] when MaxPoolSize > ShardCount
         for (var i = 0; i < shardCount; i++)
         {
             var newMax = perShardMax + ((i < remainderMax ? 1 : 0));
@@ -1102,8 +1143,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     {
         if (w == null) return;
 
-        // 幂等保护：驱逐、空闲校验、归还拒绝三条路径可能并发命中同一个包装对象，
-        // 只有第一个通过 CAS 的调用方真正执行销毁，其余直接返回，避免二次 Dispose。
+        // Idempotent protection: eviction, idle validation, and return rejection may concurrently hit the same wrapper,
+        // and only the first caller to pass the CAS truly destroys it; the rest return immediately, avoiding a double Dispose.
         if (Interlocked.Exchange(ref w.Destroyed, 1) == 1) return;
 
         try
@@ -1112,8 +1153,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             if (w.Value is IDisposable d) d.Dispose();
             UntrackObject(w);
             w.Location = HayateObjectLocation.Destroyed;
-            // M16：销毁时清空租约上下文引用，栈帧随上下文可被 GC（AsyncLocal 流侧
-            // 由各调用方 Release 时自行 Detach，此处不动他流上下文——AsyncLocal 语义如此）。
+            // On destruction, clear the lease context reference so the stack frames can be GC'd with the context (on the AsyncLocal flow side
+            // each caller Detaches on its own Release; this code does not touch other flows' contexts — such is the AsyncLocal semantics.
             w.LeaseContext = null;
             _logger.LogDebug("Wrapped object destroyed. Type: {Type}", typeof(T).Name);
         }
@@ -1142,7 +1183,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     private void UpdateWaitTimeStats(long waitTimeMs)
     {
-        // L2：无锁更新（原实现持全局 _statsLock，为并发借还的争用点）
+        // Lock-free update (the original held a global _statsLock, a contention point for concurrent borrow/return)
         Interlocked.Add(ref _waitTimeSum, waitTimeMs);
         Interlocked.Increment(ref _waitTimeCount);
         InterlockedMax(ref _waitTimeMaxMs, waitTimeMs);
@@ -1151,7 +1192,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     private void UpdateLeaseTimeStats(long leaseTimeMs)
     {
-        // L2：无锁更新（同上）
+        // Lock-free update (same as above)
         Interlocked.Add(ref _leaseTimeSum, leaseTimeMs);
         Interlocked.Increment(ref _leaseTimeCount);
         InterlockedMax(ref _leaseTimeMaxMs, leaseTimeMs);
@@ -1159,10 +1200,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     }
 
     /// <summary>
-    /// M18：计算本次借出的起始分片索引。
-    /// None 恒返 0（调用方以 <c>_affinityMode != None</c> 前置短路，保证默认路径零开销）；
-    /// Thread 按托管线程 ID 黄金比例散列稳定映射（同线程恒优先命中同一分片，且与分片数无公约数耦合）；
-    /// Custom 走用户委托，null/越界/异常一律回落 0（借出路径健壮性优先，绝不因策略缺失中断借出）。
+    /// Computes the starting shard index for this borrow.
+    /// None always returns 0 (the caller short-circuits with <c>_affinityMode != None</c> up front, guaranteeing zero overhead on the default path);
+    /// Thread maps stably by managed thread ID via a golden-ratio hash (the same thread always prefers the same shard, with no coupling to the shard count via a common divisor);
+    /// Custom uses the user delegate; null/out-of-range/exception all fall back to 0 (borrow-path robustness first — the borrow is never interrupted by a missing policy).
     /// </summary>
     private int SelectStartShardIndex()
     {
@@ -1190,10 +1231,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     }
 
     /// <summary>
-    /// M16：借出路径租约上下文采集。创建不可变租约（租约 ID + 帧数组 + 借出时刻），
-    /// 同时写入包装对象（快照取证用）与当前异步流（AsyncLocal，调用方可经
-    /// <see cref="HayateLeaseContext.Current"/> 读取；并发借还各自隔离，不相互覆盖）。
-    /// 帧采集 fNeedFileInfo:false——不解析源文件/行号，避免 PDB I/O。
+    /// Borrow-path lease-context capture. Creates an immutable lease (lease ID + frame array + borrow timestamp),
+    /// written both to the wrapper (for snapshot forensics) and to the current async flow (AsyncLocal, which callers can read via
+    /// <see cref="HayateLeaseContext.Current"/>; concurrent borrows and returns are isolated and do not overwrite each other).
+    /// Frames are captured with fNeedFileInfo: false — source file/line is not resolved, avoiding PDB I/O.
     /// </summary>
     private void CaptureLeaseContext(HayateObject<T> w)
     {
@@ -1204,9 +1245,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     }
 
     /// <summary>
-    /// M10/M16：将租约上下文格式化为单行文本（供快照 LeakTraces 输出）。
-    /// 帧之间以 " <- " 连接（调用方向：最外层帧在前），帧格式
-    /// <c>Type.Method+0x偏移</c>；无上下文/无帧时回退占位文本。
+    /// Formats the lease context into a single-line text (for snapshot LeakTraces output).
+    /// Frames are joined by "&lt;-" (call direction: outermost frame first); the frame format is
+    /// <c>Type.Method+0xoffset</c>; falls back to placeholder text when there is no context or no frames.
     /// </summary>
     private static string FormatLeaseTrace(HayateLeaseContext ctx)
     {
@@ -1234,7 +1275,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     }
 
     /// <summary>
-    /// L2：无锁 Max 归并（CAS 环）。并发下最终收敛到真实最大值。
+    /// Lock-free Max merge (CAS loop). Concurrent calls eventually converge to the true maximum.
     /// </summary>
     private static void InterlockedMax(ref long location, long value)
     {
@@ -1248,7 +1289,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     }
 
     /// <summary>
-    /// L2：无锁 Min 归并（CAS 环）。并发下最终收敛到真实最小值。
+    /// Lock-free Min merge (CAS loop). Concurrent calls eventually converge to the true minimum.
     /// </summary>
     private static void InterlockedMin(ref long location, long value)
     {
@@ -1262,11 +1303,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     }
 
     /// <summary>
-    /// M12：容量告警检查。使用率口径 = 借出数 / MaxPoolSize（借出数由
-    /// 「真实存活总数 - 空闲数」派生，与 TakeSnapshot 同口径）。
-    /// 状态翻转去抖：只有经 CAS 成功翻转状态的线程触发一次回调；
-    /// 回落低水位静默复位（不触发回调），重新越线可再次触发。
-    /// 禁用（WarnAtRatio=0 且 CriticalAtRatio=0）时由调用方的只读标志短路，零开销。
+    /// Capacity-alarm check. Utilization = borrowed count / MaxPoolSize (the borrowed count is derived
+    /// from "total live count - idle count", the same basis as TakeSnapshot).
+    /// A debounced flip: only the thread that successfully flips the state via CAS fires the callback once;
+    /// falling back to the low-water mark silently resets (no callback), and re-crossing the line can fire again.
+    /// when disabled (WarnAtRatio = 0 and CriticalAtRatio = 0) the caller's read-only flag short-circuits it at zero cost.
     /// </summary>
     private void CheckCapacityAlarm()
     {
@@ -1289,10 +1330,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         var current = Volatile.Read(ref _capacityAlarmLevel);
         if (current == desired) return;
 
-        // 并发翻转：CAS 赢家负责触发回调，输家直接放弃（水位事件允许最终一致）。
+        // Concurrent flip: the CAS winner triggers the callback; the loser gives up (water-level events allow eventual consistency).
         if (Interlocked.CompareExchange(ref _capacityAlarmLevel, desired, current) != current) return;
 
-        // 回落到 Normal：静默复位，仅整备状态机，不打扰用户。
+        // Falling back to Normal: silently reset, only re-arming the state machine, without disturbing the user.
         if (desired == 0) return;
 
         try
@@ -1315,7 +1356,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         }
         catch (Exception ex)
         {
-            // 用户回调异常不得影响借还主流程
+            // A user callback exception must not affect the borrow/return main flow
             _logger.LogError(ex, "Capacity alarm callback failed for pool [{PoolName}]", _name);
         }
     }
@@ -1336,29 +1377,29 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
             foreach (var shard in _shards)
             {
-                // 分批检查（PR-D A2：复用采样缓冲，避免每次对整条空闲链表 ToArray 的长尾分配）
+                // Batched check (reuses the sampling buffer to avoid the long-tail allocation of ToArray on the entire idle list each time)
                 int evictedCount = 0;
                 int sampleCount = shard.SnapshotHead(evictionSample, evictionSample.Length);
 
                 for (int samplerIndex = 0; samplerIndex < sampleCount; samplerIndex++)
                 {
                     var w = evictionSample[samplerIndex];
-                    // 跳过正在使用的对象
+                    // Skip objects currently in use
                     if (w.IsBorrowed) continue;
 
-                    // 判断是否需要驱逐（PR-D A1：Stopwatch ticks → 秒换算）
+                    // Decide whether to evict (Stopwatch ticks → seconds conversion)
                     var isExpired = (now - w.CreatedAt) / (double)Stopwatch.Frequency > _options.MaxLifeTime.TotalSeconds;
                     var isIdleTooLong = (now - w.LastReleasedAt) / (double)Stopwatch.Frequency > _options.MaxIdleTime.TotalSeconds;
                     var isSoftIdle = (now - w.LastReleasedAt) / (double)Stopwatch.Frequency > _options.SoftMinEvictableIdleTime.TotalSeconds;
 
-                    // 软最小空闲逻辑
-                    // 只有当空闲数超过最小池大小时才驱逐软空闲对象
+                    // Soft-minimum-idle logic
+                    // Only evict soft-idle objects when the idle count exceeds the minimum pool size
                     var shouldEvictSoft = isSoftIdle && shard.Count > _options.MinPoolSize / _shards.Length;
 
                     if (isExpired || isIdleTooLong || shouldEvictSoft)
                     {
-                        // 只有认领成功的调用方才有权销毁：若对象此刻已被借出（Remove 返回 false），
-                        // 绝不能销毁它，否则会破坏正在使用它的业务线程。
+                        // Only the caller that successfully claims may destroy: if the object is currently borrowed (Remove returns false),
+                        // it must never be destroyed, or it would corrupt the business thread using it.
                         if (shard.Remove(w))
                         {
                             Destroy(w);
@@ -1393,27 +1434,27 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
             var targetSize = _scalingStrategy.CalculateNewSize(currentTotal, totalIdle, _options);
 #if NET48 || NETSTANDARD2_0
-            // .NET Framework 4.8 / netstandard2.0 不支持 Math.Clamp
-            //（netcoreapp2.0+ / netstandard2.1 才引入），用 Max/Min 组合等价实现；
-            // net6+ 等高版本走 #else 分支的原生 Math.Clamp。
+            // .NET Framework 4.8 / netstandard2.0 does not support Math.Clamp
+            // (introduced only in netcoreapp2.0+ / netstandard2.1), so emulate it with a Max/Min combination;
+            // higher versions such as net6+ take the native Math.Clamp in the #else branch.
             targetSize = Math.Max(_options.MinPoolSize, Math.Min(_options.MaxPoolSize, targetSize));
 #else
             targetSize = Math.Clamp(targetSize, _options.MinPoolSize, _options.MaxPoolSize);
 #endif
 
-            // 扩容冷却时间 3 秒，缩容冷却时间 15 秒，防止频繁抖动
+            // Scale-up cooldown is 3 seconds and scale-down cooldown is 15 seconds, to prevent frequent thrashing
             var canScaleUp = (Stopwatch.GetTimestamp() - _lastScaleUpTime) / (double)Stopwatch.Frequency >= _options.ScaleUpCooldownSeconds;
             var canScaleDown = (Stopwatch.GetTimestamp() - _lastScaleDownTime) / (double)Stopwatch.Frequency >= _options.ScaleDownCooldownSeconds;
 
             if (targetSize > currentTotal && canScaleUp)
             {
-                // 扩容
+                // Scale up
                 UpdateShardMaxSizes();
                 var add = targetSize - currentTotal;
                 for (var i = 0; i < add; i++)
                 {
                     var shard = _shards[i % _shards.Length];
-                    // T09：登记并入目标分片；Add 被拒时兜底销毁防孤儿登记。
+                    // Register into the target shard; if Add is rejected, destroy as fallback to prevent orphaned registry entries.
                     var w = CreateWrappedObject(shard);
                     if (!shard.Add(w)) Destroy(w);
                 }
@@ -1425,15 +1466,15 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     _metrics.RecordPoolScaled(_name, "UP", currentTotal, targetSize);
                 }
             }
-            // S1（2.4 行为变更）：移除缩容互斥门控。原 `totalIdle < currentTotal * 0.4f`
-            // 要求占用率 >0.6 才放行，而策略层（ThresholdScalingStrategy）要求占用率
-            // <ScaleDownThreshold(默认0.2) 才给出缩小目标——两者永远无法同时成立，
-            // 导致默认配置下缩容分支为死代码（autoScaling 只扩不缩）。
-            // 现缩容判定完全信任策略层：targetSize < currentTotal && 冷却期已过即放行；
-            // 抖动由 canScaleDown 冷却 + ScaleDownStep 步长双重防线约束。
+            // Removed the scale-down mutual-exclusion gate. The original `totalIdle < currentTotal * 0.4f`
+            // required utilization > 0.6 to allow it, while the strategy (ThresholdScalingStrategy) requires utilization
+            // < ScaleDownThreshold (default 0.2) to produce a shrink target — the two can never hold at once,
+            // making the scale-down branch dead code under the default config (autoScaling only ever grew).
+            // Now the scale-down decision fully trusts the strategy: if targetSize < currentTotal && the cooldown has elapsed, it is allowed;
+            // thrashing is constrained by the dual defense of the canScaleDown cooldown and the ScaleDownStep.
             else if (targetSize < currentTotal && canScaleDown)
             {
-                // 缩容
+                // Scale down
                 var remove = currentTotal - targetSize;
                 int removed = 0;
 
@@ -1493,7 +1534,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 {
                     if (!w.IsBorrowed && !_policy.Validate(w.Value))
                     {
-                        // 认领失败说明对象已被借出或已被其他线程认领，此时不得销毁
+                        // A failed claim means the object was already borrowed or claimed by another thread; it must not be destroyed then
                         if (shard.Remove(w))
                         {
                             Destroy(w);
@@ -1519,12 +1560,16 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     #region Statistics and Snapshot
 
+    /// <example><code>
+    /// var stats = pool.GetStats();
+    /// Console.WriteLine(stats.CurrentSize);
+    /// </code></example>
     public HayatePoolStats GetStats()
     {
-        // L2：不再持全局 _statsLock——统计字段逐个原子读取（最终一致快照）；
-        // 分片计数读取语义与原实现一致（原实现锁内读取同样不构成分片级一致性）。
+        // No longer holds a global _statsLock — statistics fields are read atomically one by one (an eventually-consistent snapshot);
+        // the shard-count read semantics are the same as the original (whose in-lock read also did not constitute shard-level consistency).
         int totalIdle = _shards.Sum(s => s.Count);
-        int totalObjects = TrackedObjectCount; // 真实总对象数（空闲+借出）
+        int totalObjects = TrackedObjectCount; // True total object count (idle + borrowed)
 
         long waitSum = Volatile.Read(ref _waitTimeSum);
         long waitCount = Volatile.Read(ref _waitTimeCount);
@@ -1563,17 +1608,21 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         };
     }
 
+    /// <example><code>
+    /// var snap = pool.TakeSnapshot();
+    /// foreach (var d in snap.ObjectDetails) { /* inspect */ }
+    /// </code></example>
     public HayatePoolSnapshot TakeSnapshot()
     {
         var leakTraces = new List<string>();
-        // M20：逐对象生命周期明细（快照为诊断路径，O(n) 汇总可接受）
+        // Per-object lifecycle detail (the snapshot is a diagnostic path, so O(n) aggregation is acceptable)
         var details = new List<HayatePoolObjectDetail>();
-        // 快照 Timestamp 保留墙钟时间（对外语义不变）；泄漏判定改用 Stopwatch ticks（PR-D A1）
+        // The snapshot Timestamp keeps wall-clock time (external semantics unchanged); leak detection now uses Stopwatch ticks
         var wallClock = DateTimeOffset.UtcNow;
         var now = Stopwatch.GetTimestamp();
 
-        // M10：泄漏取证扫描与 M4 回查告警共用一次登记表遍历（两分支判定条件与 2.4/2.5
-        // 既有语义逐一保持一致），同时顺带产出 M20 的逐对象明细，避免三遍 O(n) 扫描。
+        // The leak forensics scan and the recheck alert share one registry traversal (both branches' conditions stay consistent with 2.4/2.5
+        // semantics point by point), while also producing the per-object detail, avoiding three separate O(n) scans.
         foreach (var shard in _shards)
         {
             foreach (var w in shard.TrackedValues)
@@ -1591,27 +1640,27 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                 if (_enableLeakDetection)
                 {
-                    // T13/穿插修复 + T09：泄漏扫描必须遍历分片登记表（全部存活包装对象）。
-                    // 原实现遍历 shard.GetAll()（仅池内空闲对象），而 TryTake 会把借出对象
-                    // 物理摘出分片链表——借出对象从未被扫描，泄漏检测结构上恒不触发。
-                    // 检查泄露（PR-D A1：Stopwatch ticks → 秒换算）
+                    // The leak scan must traverse the shard registry (all live wrappers).
+                    // The original implementation traversed shard.GetAll() (only in-pool idle objects), while TryTake physically removes borrowed objects
+                    // from the shard list — borrowed objects were never scanned, so leak detection was structurally never triggered.
+                    // Check for leaks (Stopwatch ticks → seconds conversion)
                     if (w.IsBorrowed &&
                         (now - w.LastBorrowedAt) / (double)Stopwatch.Frequency > _options.LeakDetectionThreshold.TotalSeconds)
                     {
-                        // M16（2.5）：LeakTraces 仍为文本形态，由池侧按租约上下文格式化
-                        //（含租约 ID 前缀；2.4 及之前为 Environment.StackTrace 全文原样输出）
+                        // LeakTraces remain text-form, formatted by the pool side from the lease context
+                        // (with a lease-ID prefix; before 2.4 it was the full Environment.StackTrace output verbatim)
                         leakTraces.Add(FormatLeaseTrace(w.LeaseContext));
                         Interlocked.Increment(ref _leakDetectedCount);
                     }
                 }
                 else
                 {
-                    // M4（2.5）：泄漏检测关闭时的回查告警通路。按同一 LeakDetectionThreshold
-                    // 统计「借出超阈值未归还」的疑似泄漏次数（LeakSuspectedCount），与
-                    // LeakDetectedCount 并列——只计数、不取证（无 AcquireStackFrames 采集）、
-                    // 不触发任何回收行为，L1 取证三模式语义完全不变。
-                    // LastBorrowedAt 自 2.5 起在借出路径无条件记录，因此「全功能关闭」配置下
-                    // 回查依然可用（2.4 及之前该时间戳受功能开关门控，存在恒 0 的可能）。
+                    // The recheck-alert path used when leak detection is off. Using the same LeakDetectionThreshold
+                    // it counts suspected leaks ("borrowed beyond the threshold and not returned") into LeakSuspectedCount, alongside
+                    // LeakDetectedCount — counting only, no forensics (no AcquireStackFrames capture),
+                    // and triggering no reclamation; the forensics modes' semantics are unchanged.
+                    // Because LastBorrowedAt has been recorded unconditionally on the borrow path since 2.5, the "all features off" config
+                    // still supports the recheck (before 2.4 that timestamp was gated by feature switches and could stay 0).
                     if (w.IsBorrowed && w.LastBorrowedAt != 0 &&
                         (now - w.LastBorrowedAt) / (double)Stopwatch.Frequency > _options.LeakDetectionThreshold.TotalSeconds)
                     {
@@ -1623,12 +1672,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         var pooledCount = _shards.Sum(s => s.Count);
 
-        // 借出数由「真实存活包装对象总数 - 池内空闲数」派生（与 GetStats 的
-        // totalObjects - totalIdle 口径一致），而不是依赖 Shard.BorrowedCount。
-        // 原因：TryTake 先把对象物理摘出分片链表、再置 Borrowed，借出的对象根本不在
-        // 分片链表中，因此 Shard.BorrowedCount（统计链表内 IsBorrowed）结构上恒为 0。
-        // 分片登记表始终持有所有存活包装对象（空闲 + 借出），直到 Destroy 才移除；
-        // 驱逐「已认领未销毁」的极短瞬态会被计入，但被 Destroy 的快速执行所限，可忽略。
+        // The borrowed count is derived from "total live wrapper count - in-pool idle count" (consistent with GetStats'
+        // totalObjects - totalIdle basis), rather than relying on Shard.BorrowedCount.
+        // Reason: TryTake first physically removes the object from the shard list, then sets Borrowed, so borrowed objects are not in
+        // the shard list at all; therefore Shard.BorrowedCount (counting IsBorrowed within the list) is structurally always 0.
+        // The shard registry always holds all live wrappers (idle + borrowed) until Destroy removes them;
+        // the extremely short transient of an eviction "claimed but not yet destroyed" is counted, but it is bounded by Destroy's fast execution and negligible.
         var borrowedCount = TrackedObjectCount - pooledCount;
         if (borrowedCount < 0) borrowedCount = 0;
 
@@ -1654,6 +1703,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     #region ReloadConfig
 
+    /// <exception cref="ArgumentNullException">Thrown if <paramref name="configure"/> is null.</exception>
+    /// <example><code>
+    /// pool.ReloadConfig(o =&gt; o.MaxPoolSize = 64);
+    /// </code></example>
     public void ReloadConfig(Action<HayatePoolOptions> configure)
     {
         if (configure is null) throw new ArgumentNullException(nameof(configure));
@@ -1661,7 +1714,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         lock (_options)
         {
             configure(_options);
-            _options.ApplyFeatureSwitches(); // 强制修正配置
+            _options.ApplyFeatureSwitches(); // Force-correct the configuration
             _logger.LogInformation("Pool configuration reloaded. Type: {Type} NewConfig: {@Config}", typeof(T).Name, _options);
         }
     }
@@ -1675,7 +1728,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         foreach (var shard in _shards)
         {
             shard.Clear();
-            // T09：登记表随分片清空（含借出中对象的登记项，与原池级 map.Clear 语义一致）。
+            // The registry is cleared with the shard (including entries of borrowed objects, consistent with the original pool-level map.Clear semantics).
             shard.ClearTracked();
         }
         _logger.LogInformation("Clearing object pool. Type: {Type}", typeof(T).Name);
@@ -1693,7 +1746,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _scalingTimer?.Dispose();
         _validationTimer?.Dispose();
 
-        // T06：释放归还信号门（前提与定时器一致：Dispose 时无未完成的 Acquire 等待者）
+        // Release the return-signal gate (same precondition as the timers: no in-flight Acquire waiters at Dispose time)
         _blockGate.Dispose();
 
         _logger.LogInformation("Object pool disposed. Type: {Type}", typeof(T).Name);

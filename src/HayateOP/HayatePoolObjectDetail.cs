@@ -1,30 +1,30 @@
 namespace DotNetCore.HayateOP;
 
 /// <summary>
-/// M20（2.5）：快照中的逐对象生命周期明细。
-/// 由 <see cref="HayatePoolSnapshot.ObjectDetails"/> 携带，一次快照覆盖全部存活包装对象
-/// （空闲 + 借出）。字段为快照瞬间取值，不构成任何一致性保证（诊断用途）。
+/// Per-object lifecycle detail within a snapshot (2.5).
+/// Carried by <see cref="HayatePoolSnapshot.ObjectDetails"/>; one snapshot covers every live wrapper object
+/// (idle plus borrowed). Fields are captured at the snapshot instant and carry no consistency guarantee (diagnostic use only).
 /// </summary>
 public sealed class HayatePoolObjectDetail
 {
-    /// <summary>对象归属分片索引。</summary>
+    /// <summary>The index of the shard that owns this object.</summary>
     public int ShardIndex { get; set; }
 
-    /// <summary>快照瞬间是否处于借出状态。</summary>
+    /// <summary>Whether the object is borrowed at the snapshot instant.</summary>
     public bool IsBorrowed { get; set; }
 
-    /// <summary>累计借出次数。</summary>
+    /// <summary>The cumulative number of times this object has been borrowed.</summary>
     public int LeaseCount { get; set; }
 
-    /// <summary>创建时刻的挂钟时间戳（<see cref="DateTimeOffset.UtcNow.Ticks"/> 口径）。</summary>
+    /// <summary>The wall-clock timestamp at creation time (same basis as <c>DateTimeOffset.UtcNow.Ticks</c>).</summary>
     public long CreatedAtTick { get; set; }
 
-    /// <summary>最近一次租约时长（毫秒；未归还时为最近一次记录值或 0）。</summary>
+    /// <summary>The duration of the most recent lease, in milliseconds (the last recorded value, or 0 if not yet returned).</summary>
     public long LeaseTimeMs { get; set; }
 
-    /// <summary>分代标记（0 年轻代 / 1 老年代，仅分代优化开启时升级）。</summary>
+    /// <summary>The generation marker (0 = young generation, 1 = old generation; promoted only when generational optimization is enabled).</summary>
     public int Generation { get; set; }
 
-    /// <summary>所属池的逻辑名。</summary>
+    /// <summary>The logical name of the owning pool.</summary>
     public string OwnerPoolName { get; set; }
 }

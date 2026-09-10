@@ -34,9 +34,11 @@ public class HayateObject<T> where T : class
     public T Value { get; set; }
 
     /// <summary>
-    /// PR-D A1（2.3 行为变更）：时间戳由 <c>DateTime</c> 改为 <see cref="Stopwatch.GetTimestamp"/> 值，
-    /// 消除热路径（创建/借出/归还/驱逐判定）上 <see cref="DateTime.UtcNow"/> 的 5–10× 系统调用开销。
-    /// 时长换算：<c>(end - start) / Stopwatch.Frequency</c>（秒）或 <c>(end - start) * 1000.0 / Stopwatch.Frequency</c>（毫秒）。
+    /// Timestamp sourced from <see cref="Stopwatch.GetTimestamp"/> instead of <c>DateTime</c>,
+    /// eliminating the 5–10× syscall overhead of <see cref="DateTime.UtcNow"/> on hot paths
+    /// (creation / borrow / return / eviction checks).
+    /// To convert to a duration: <c>(end - start) / Stopwatch.Frequency</c> (seconds) or
+    /// <c>(end - start) * 1000.0 / Stopwatch.Frequency</c> (milliseconds).
     /// </summary>
     public long CreatedAt { get; set; }
 
@@ -47,79 +49,92 @@ public class HayateObject<T> where T : class
     public long LastReleasedAt { get; set; }
 
     /// <summary>
-    /// M20（2.5）：创建时刻的挂钟时间戳（<see cref="DateTimeOffset.UtcNow.Ticks"/>）。
-    /// 与 <see cref="CreatedAt"/>（Stopwatch ticks，用于时长测量）互补——
-    /// 本字段面向快照/日志输出的人类可读口径，不参与任何时长判定。
+    /// Wall-clock timestamp captured at creation time (<c>DateTimeOffset.UtcNow.Ticks</c>).
+    /// It complements <see cref="CreatedAt"/> (Stopwatch ticks, used for duration measurement); this
+    /// field is for human-readable snapshot / log output and never participates in any duration calculation.
     /// </summary>
     public long CreatedAtTick { get; set; }
 
     /// <summary>
-    /// M20（2.5）：累计借出次数。借出路径单调递增（借出瞬间包装对象由本线程独占，
-    /// 驱逐/校验无法认领借出中对象，故普通自增即可，无需 Interlocked）。
+    /// Total number of times this object has been leased (borrowed). Monotonically increasing on the
+    /// borrow path (the wrapper is exclusively owned by the borrowing thread at that instant, so eviction /
+    /// validation cannot claim a borrowed object -- a plain increment suffices, no Interlocked needed).
     /// </summary>
     public int LeaseCount { get; internal set; }
 
     /// <summary>
-    /// M20（2.5）：所属池的逻辑名（创建时由池写入，生命周期内不变）。
-    /// 供跨池诊断 / 快照输出定位对象归属。
+    /// The logical name of the owning pool (written by the pool at creation, immutable for the object's
+    /// lifetime). Used by cross-pool diagnostics / snapshot output to locate object ownership.
     /// </summary>
     public string OwnerPoolName { get; set; }
 
     /// <summary>
-    /// M16（2.5，breaking）：借出租约上下文（租约 ID + 借出帧数组 + 借出时刻）。
-    /// 采集载体为 <see cref="HayateLeaseContext"/> 的 AsyncLocal 异步流 + 本属性（包装侧快照引用）；
-    /// 并发借还各自持有独立上下文实例，不再相互覆盖。取证模式与采集频率仍由
-    /// <see cref="HayateLeakTraceCaptureMode"/> 控制（L1 三模式语义不变）。
-    /// 2.5 批次二 M10 曾短暂引入 <c>AcquireStackFrames: StackFrame[]</c>，本属性为其最终形态；
-    /// 2.4 及之前的 <c>AcquireTrace: string</c> 已移除，文本形态经 <c>TakeSnapshot().LeakTraces</c> 获取。
+    /// Borrow lease context (lease id + borrow-call stack frames + borrow timestamp).
+    /// Captured via the AsyncLocal async flow of <see cref="HayateLeaseContext"/> plus this property
+    /// (wrapper-side snapshot reference). Concurrent borrow/return each hold independent context instances
+    /// and no longer overwrite each other. The capture mode and sampling frequency are still controlled by
+    /// <see cref="HayateLeakTraceCaptureMode"/>.
+    /// An earlier revision briefly introduced <c>AcquireStackFrames: StackFrame[]</c>; this property is its
+    /// final form. The pre-2.5 <c>AcquireTrace: string</c> has been removed; obtain the text form via
+    /// <c>TakeSnapshot().LeakTraces</c>.
     /// </summary>
     public HayateLeaseContext LeaseContext { get; internal set; }
 
     /// <summary>
-    /// P2-新-1：借出状态改为 <see cref="Location"/> 的计算属性，消除双源不一致窗口。
-    /// 原独立 bool 字段与 Location（Borrowed 状态）由两条路径分别维护，
-    /// 弱内存模型下存在 stale 读风险；Location 为 volatile 且全部迁移在 Shard 自旋锁内完成，
-    /// 以它为唯一事实源。Removing（驱逐认领）/Destroyed 均不属于 Borrowed，语义与原字段一致。
+    /// Whether the object is currently borrowed, derived as a computed property of <see cref="Location"/>
+    /// to eliminate the dual-source inconsistency window. The original separate bool field and Location
+    /// (Borrowed state) were maintained by two paths, risking stale reads under the weak memory model;
+    /// Location is volatile and all transitions happen inside the Shard spin lock, so it is the single
+    /// source of truth. Removing (eviction claim) / Destroyed are not Borrowed, consistent with the
+    /// original field's semantics.
     /// </summary>
     public bool IsBorrowed => Location == HayateObjectLocation.Borrowed;
-    public int Generation { get; set; } // 0 年轻代 1 老年代
+    public int Generation { get; set; } // 0 = young generation, 1 = old generation
 
-    public int ValidationSkipCount { get; set; } // 老年代跳过验证计数
+    public int ValidationSkipCount { get; set; } // validation-skip count accumulated in the old generation
 
     public long LeaseTimeMs { get; set; }
 
     /// <summary>
-    /// 对象被借出时所属的分片索引。
-    /// 由 <see cref="HayatePoolBasic{T}"/> 在 Acquire 命中时记录，Release 时按此 round-trip，
-    /// 避免使用 <c>Thread.GetCurrentProcessorId() % ShardCount</c> 落到 max=0 的分片而静默 dispose 对象。
-    /// 默认值 0 是 PreWarm 单对象的合法归宿。
+    /// The shard index the object belonged to when borrowed.
+    /// Recorded by <see cref="HayatePoolBasic{T}"/> when Acquire hits, and used by Release to round-trip
+    /// back to the same shard, avoiding the bug where <c>Thread.GetCurrentProcessorId() % ShardCount</c>
+    /// could land on the max=0 shard and silently dispose the object.
+    /// The default value 0 is the legitimate home for a single PreWarm object.
     /// </summary>
     public int ShardIndex { get; set; }
 
     /// <summary>
-    /// 对象当前所处位置，驱动分片端的原子认领协议。
-    /// 所有状态迁移都在 Shard 的自旋锁内完成，因此这里只需要 volatile 保证跨锁可见性。
+    /// The object's current location, driving the shard-side atomic claim protocol.
+    /// All state transitions happen inside the Shard spin lock, so here only <c>volatile</c> is needed
+    /// to guarantee cross-lock visibility.
     /// </summary>
     internal volatile HayateObjectLocation Location;
 
     /// <summary>
-    /// 对象在所属分片空闲链表中的节点引用；为 null 表示不在任何分片链表内。
-    /// 仅允许在 Shard 自旋锁内读写，用于把 Remove 从 O(n) 重建队列降级为 O(1) 摘除。
+    /// The node reference of the object within its shard's free list; <c>null</c> means it is not in any
+    /// shard list. May only be read/written inside the Shard spin lock; it downgrades Remove from an O(n)
+    /// queue rebuild to an O(1) unlink.
     /// </summary>
     internal LinkedListNode<HayateObject<T>> Node;
 
     /// <summary>
-    /// 销毁幂等标记（0 = 未销毁，1 = 已销毁）。
-    /// 驱逐、空闲校验、归还拒绝三条路径可能并发命中同一个对象，用 CAS 保证只销毁一次。
+    /// Destruction idempotency flag (0 = not destroyed, 1 = destroyed). Eviction, idle validation, and
+    /// return-rejection may concurrently hit the same object, so a CAS guarantees it is destroyed only once.
     /// </summary>
     internal int Destroyed;
 
+    /// <summary>
+    /// Initializes a new wrapper around the supplied pooled value.
+    /// </summary>
+    /// <param name="value">The pooled object to wrap; must not be <c>null</c>.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="value"/> is <c>null</c>.</exception>
     public HayateObject(T value)
     {
         Value = value ?? throw new ArgumentNullException(nameof(value));
         CreatedAt = Stopwatch.GetTimestamp();
         LastReleasedAt = CreatedAt;
-        // M20：挂钟创建时间（快照输出口径，不参与时长判定）
+        // Wall-clock creation time (snapshot output only; not used for duration calculation).
         CreatedAtTick = DateTimeOffset.UtcNow.Ticks;
     }
 }

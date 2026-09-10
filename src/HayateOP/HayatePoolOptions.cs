@@ -4,181 +4,194 @@ using DotNetCore.HayateOP.Common;
 namespace DotNetCore.HayateOP;
 
 /// <summary>
-/// Hayate 对象池运行参数。
+/// Runtime options for the Hayate object pool.
 /// </summary>
 /// <remarks>
-/// 该配置用于平衡吞吐、延迟与资源占用。时间类配置优先使用 <see cref="TimeSpan"/>；
-/// 带 <c>Ms</c> 后缀的配置单位为毫秒。
+/// These options balance throughput, latency, and resource usage. Time-based options prefer
+/// <see cref="TimeSpan"/>; options whose name ends with <c>Ms</c> are expressed in milliseconds.
 /// </remarks>
 public class HayatePoolOptions
 {
     /// <summary>
-    /// 池预热的最小对象数。<br />
-    /// 默认值：<see cref="HayateConstant.DEFAULT_MIN_POOL_SIZE"/>（5）。
+    /// Minimum number of objects prewarmed in the pool.<br />
+    /// Default value: <see cref="HayateConstant.DEFAULT_MIN_POOL_SIZE"/> (5).
     /// </summary>
     /// <remarks>
-    /// 用途：启动阶段预创建对象，降低冷启动抖动。<br />
-    /// 特例：设置为 0 时不预热。<br />
-    /// 边界：建议大于等于 0，且不大于 <see cref="MaxPoolSize"/>。<br />
-    /// 推荐值区间：0~64。
+    /// Purpose: pre-create objects at startup to reduce cold-start jitter.<br />
+    /// Special case: setting it to 0 disables prewarming.<br />
+    /// Boundary: should be &gt;= 0 and not greater than <see cref="MaxPoolSize"/>.<br />
+    /// Recommended range: 0~64.
     /// </remarks>
     public int MinPoolSize { get; set; } = HayateConstant.DEFAULT_MIN_POOL_SIZE;
 
     /// <summary>
-    /// 池允许维护的最大对象数。<br />
-    /// 默认值：<see cref="HayateConstant.DEFAULT_MAX_POOL_SIZE"/>（50）。
+    /// Maximum number of objects the pool is allowed to maintain.<br />
+    /// Default value: <see cref="HayateConstant.DEFAULT_MAX_POOL_SIZE"/> (50).
     /// </summary>
     /// <remarks>
-    /// 用途：限制内存与下游资源上限。<br />
-    /// 特例：上限过小会放大等待与超时。<br />
-    /// 边界：建议大于等于 1，且不小于 <see cref="MinPoolSize"/>。<br />
-    /// 推荐值区间：32~2048。
+    /// Purpose: caps memory and downstream resource usage.<br />
+    /// Special case: too small a cap amplifies waiting and timeouts.<br />
+    /// Boundary: should be &gt;= 1 and not less than <see cref="MinPoolSize"/>.<br />
+    /// Recommended range: 32~2048.
     /// </remarks>
     public int MaxPoolSize { get; set; } = HayateConstant.DEFAULT_MAX_POOL_SIZE;
 
-    #region 超时
+    #region Timeouts
 
     /// <summary>
-    /// 默认借用超时时间。<br />
-    /// 默认值：<c>TimeSpan.FromSeconds(5)</c>。
+    /// Default borrow timeout.<br />
+    /// Default value: <c>TimeSpan.FromSeconds(5)</c>.
     /// </summary>
     /// <remarks>
-    /// 用途：作为无参 <c>Acquire</c> 的等待上限。<br />
-    /// 特例：在阻塞策略下，超时后会进入拒绝策略分支。<br />
-    /// 边界：建议大于 <see cref="TimeSpan.Zero"/>。<br />
-    /// 推荐值区间：1~30 秒。
+    /// Purpose: serves as the wait upper bound for the parameterless <c>Acquire</c>.<br />
+    /// Special case: under the blocking policy, a timeout triggers the reject-policy branch.<br />
+    /// Boundary: should be greater than <see cref="TimeSpan.Zero"/>.<br />
+    /// Recommended range: 1~30 seconds.
     /// </remarks>
     public TimeSpan DefaultAcquireTimeout { get; set; } = TimeSpan.FromSeconds(HayateConstant.DEFAULT_ACQUIRE_TIMEOUT_SECONDS);
 
     #endregion
 
-    #region 拒绝策略
+    #region Reject policy
 
     /// <summary>
-    /// 借用失败时的拒绝策略。<br />
-    /// 默认值：<see cref="HayatePoolRejectPolicy.BlockTimeout"/>。
+    /// Reject policy applied when a borrow fails.<br />
+    /// Default value: <see cref="HayatePoolRejectPolicy.BlockTimeout"/>.
     /// </summary>
     /// <remarks>
-    /// 用途：定义等待超时后的处理动作。<br />
-    /// 特例：当前实现对 <c>Abort</c> 与 <c>CreateNew</c> 有显式分支，其他值会抛出 <see cref="InvalidOperationException"/>。<br />
-    /// 边界：必须是有效枚举值。<br />
-    /// 推荐值区间：通用场景使用 <c>BlockTimeout</c>，降级兜底可选 <c>CreateNew</c>。
+    /// Purpose: defines the action taken after the wait times out.<br />
+    /// Special case: the current implementation has explicit branches for <c>Abort</c> and
+    /// <c>CreateNew</c>; other values throw <see cref="InvalidOperationException"/>.<br />
+    /// Boundary: must be a valid enum value.<br />
+    /// Recommended range: use <c>BlockTimeout</c> for general scenarios; <c>CreateNew</c> is an
+    /// option for graceful-degradation fallbacks.
     /// </remarks>
     public HayatePoolRejectPolicy RejectPolicy { get; set; } = HayatePoolRejectPolicy.BlockTimeout;
 
     #endregion
 
-    #region 创建重试
+    #region Creation retry
 
     /*
      * Creation retry
      */
 
     /// <summary>
-    /// 创建失败后的最大重试次数。<br />
-    /// 默认值：<see cref="HayateConstant.DEFAULT_CREATION_RETRY_COUNT"/>（3）。
+    /// Maximum number of retries after a creation failure.<br />
+    /// Default value: <see cref="HayateConstant.DEFAULT_CREATION_RETRY_COUNT"/> (3).
     /// </summary>
     /// <remarks>
-    /// 用途：提高瞬时失败时的创建成功率。<br />
-    /// 特例：设置为 0 将直接失败不重试。<br />
-    /// 边界：建议大于等于 0。<br />
-    /// 推荐值区间：1~5。
+    /// Purpose: improves creation success rate under transient failures.<br />
+    /// Special case: setting it to 0 fails immediately without retrying.<br />
+    /// Boundary: should be &gt;= 0.<br />
+    /// Recommended range: 1~5.
     /// </remarks>
     public int CreationRetryCount { get; set; } = HayateConstant.DEFAULT_CREATION_RETRY_COUNT;
 
     /// <summary>
-    /// 创建重试间隔。<br />
-    /// 默认值：<c>TimeSpan.FromMilliseconds(100)</c>（当前使用 <see cref="HayateConstant.DEFAULT_CREATION_RETRY_DELAY_MILLISECONDS"/>）。
+    /// Delay between creation retries.<br />
+    /// Default value: <c>TimeSpan.FromMilliseconds(100)</c> (currently uses
+    /// <see cref="HayateConstant.DEFAULT_CREATION_RETRY_DELAY_MILLISECONDS"/>).
     /// </summary>
     /// <remarks>
-    /// 用途：控制连续重试之间的退避时间。<br />
-    /// 特例：当前默认值较大（30s），与“创建重试延迟”常见预期不一致。<br />
-    /// 边界：建议大于等于 <see cref="TimeSpan.Zero"/>。<br />
-    /// 推荐值区间：50~1000ms。
+    /// Purpose: controls the backoff between consecutive retries.<br />
+    /// Special case: the current default is relatively large (30s), which differs from the common
+    /// expectation for a "creation retry delay".<br />
+    /// Boundary: should be &gt;= <see cref="TimeSpan.Zero"/>.<br />
+    /// Recommended range: 50~1000ms.
     /// </remarks>
     public TimeSpan CreationRetryDelay { get; set; } = TimeSpan.FromMilliseconds(HayateConstant.DEFAULT_CREATION_RETRY_DELAY_MILLISECONDS);
 
     #endregion
 
-    #region 分片策略
+    #region Sharding strategy
 
     /// <summary>
-    /// 启用分片功能（关闭后强制单分片，所有分片相关配置失效）
+    /// Enables sharding. When disabled, the pool is forced into a single shard and all
+    /// shard-related configuration is ignored.
     /// </summary>
     public bool EnableSharding { get; set; } = true;
 
     /// <summary>
-    /// 分片数量。默认值：<see cref="HayateConstant.DEFAULT_SHARD_COUNT"/>（4）。
+    /// Number of shards. Default value: <see cref="HayateConstant.DEFAULT_SHARD_COUNT"/> (4).
     /// </summary>
     /// <remarks>
-    /// 用途：通过多分片降低并发争用。<br />
-    /// 特例：分片过多会提升管理成本并放大预热偏差。<br />
-    /// 边界：建议大于等于 1。<br />
-    /// 推荐值区间：2~16。
+    /// Purpose: reduce concurrent contention through multiple shards.<br />
+    /// Special case: too many shards raise management cost and amplify prewarm skew.<br />
+    /// Boundary: should be &gt;= 1.<br />
+    /// Recommended range: 2~16.
     /// </remarks>
     public int ShardCount { get; set; } = HayateConstant.DEFAULT_SHARD_COUNT;
 
     /// <summary>
-    /// M18（2.5）：借出路径的分片亲和模式。默认 <see cref="HayateShardAffinityMode.None"/>（顺序扫描，现状语义）。
+    /// Shard affinity mode for the borrow path. Defaults to
+    /// <see cref="HayateShardAffinityMode.None"/> (sequential scan, preserving the original
+    /// semantics).
     /// </summary>
     /// <remarks>
-    /// None：从 0 号分片开始顺序扫描（与 2.4 及之前一致，零额外开销）。<br />
-    /// Thread：按托管线程 ID 稳定映射起始分片（同线程始终优先命中同一分片，提升缓存/句柄局部性；
-    /// 起始分片忙时仍按环形继续扫描其余分片，不损失可用性）。<br />
-    /// Custom：使用 <see cref="CustomShardAffinity"/> 委托返回的起始分片索引；委托返回 null 或越界时回落 None。
-    /// 注意：Close 关闭分片（单分片）时本配置无实际效果。
+    /// None: starts scanning from shard 0 (identical to 2.4 and earlier, with zero extra
+    /// overhead).<br />
+    /// Thread: maps the starting shard stably by managed thread ID (the same thread always prefers
+    /// the same shard first, improving cache/handle locality; when the starting shard is busy it
+    /// continues scanning the remaining shards ring-wise, without losing availability).<br />
+    /// Custom: uses the starting shard index returned by the <see cref="CustomShardAffinity"/>
+    /// delegate; when the delegate returns null or an out-of-range value, it falls back to None.
+    /// Note: this setting has no effect when sharding is closed (single shard).
     /// </remarks>
     public HayateShardAffinityMode ShardAffinityMode { get; set; } = HayateShardAffinityMode.None;
 
     /// <summary>
-    /// M18：<see cref="HayateShardAffinityMode.Custom"/> 模式下的起始分片索引委托。
-    /// 返回值建议落在 [0, ShardCount)；返回越界值或 null 时本次借出回落顺序扫描。
-    /// 仅在 <see cref="ShardAffinityMode"/> = Custom 时被调用（每次借出至多一次）。
+    /// Starting-shard-index delegate for <see cref="HayateShardAffinityMode.Custom"/> mode.
+    /// The return value should fall in [0, ShardCount); an out-of-range or null return makes this
+    /// borrow fall back to a sequential scan. Only invoked when <see cref="ShardAffinityMode"/> is
+    /// Custom (at most once per borrow).
     /// </summary>
     public Func<int> CustomShardAffinity { get; set; }
 
     #endregion
 
-    #region 扩缩容策略
+    #region Scaling strategy
 
     /// <summary>
-    /// 启用自动扩缩容（关闭后池大小固定为MinPoolSize，所有扩缩容相关配置失效）
+    /// Enables automatic scaling. When disabled, the pool size is fixed to MinPoolSize and all
+    /// scaling-related configuration is ignored.
     /// </summary>
     public bool EnableAutoScaling { get; set; } = true;
 
     /// <summary>
-    /// 伸缩策略检查周期（毫秒）。<br />
-    /// 默认值：<see cref="HayateConstant.DEFAULT_SCALING_INTERVAL_MILLISECONDS"/>（5000ms）。
+    /// Scaling check interval (milliseconds).<br />
+    /// Default value: <see cref="HayateConstant.DEFAULT_SCALING_INTERVAL_MILLISECONDS"/> (5000ms).
     /// </summary>
     /// <remarks>
-    /// 用途：控制扩缩容决策频率。<br />
-    /// 特例：过小会导致频繁调整，过大则响应慢。<br />
-    /// 边界：建议大于 0。<br />
-    /// 推荐值区间：1000~10000ms。
+    /// Purpose: controls how often scaling decisions are made.<br />
+    /// Special case: too small causes frequent adjustments; too large makes the pool slow to
+    /// respond.<br />
+    /// Boundary: should be &gt; 0.<br />
+    /// Recommended range: 1000~10000ms.
     /// </remarks>
     public int ScalingIntervalMs { get; set; } = HayateConstant.DEFAULT_SCALING_INTERVAL_MILLISECONDS;
 
     /// <summary>
-    /// 扩容触发阈值（使用率）。<br />
-    /// 默认值：<see cref="HayateConstant.DEFAULT_SCALE_UP_THRESHOLD"/>（0.8）。
+    /// Scale-up trigger threshold (utilization).<br />
+    /// Default value: <see cref="HayateConstant.DEFAULT_SCALE_UP_THRESHOLD"/> (0.8).
     /// </summary>
     /// <remarks>
-    /// 用途：当使用率达到阈值时倾向扩容。<br />
-    /// 特例：与 <see cref="ScaleDownThreshold"/> 过近会造成抖动。<br />
-    /// 边界：建议在 0~1 之间，且大于缩容阈值。<br />
-    /// 推荐值区间：0.70~0.90。
+    /// Purpose: scale up when utilization reaches the threshold.<br />
+    /// Special case: too close to <see cref="ScaleDownThreshold"/> causes flapping.<br />
+    /// Boundary: should be between 0 and 1, and greater than the scale-down threshold.<br />
+    /// Recommended range: 0.70~0.90.
     /// </remarks>
     public double ScaleUpThreshold { get; set; } = HayateConstant.DEFAULT_SCALE_UP_THRESHOLD;
 
     /// <summary>
-    /// 缩容触发阈值（使用率）。<br />
-    /// 默认值：<see cref="HayateConstant.DEFAULT_SCALE_DOWN_THRESHOLD"/>（0.2）。
+    /// Scale-down trigger threshold (utilization).<br />
+    /// Default value: <see cref="HayateConstant.DEFAULT_SCALE_DOWN_THRESHOLD"/> (0.2).
     /// </summary>
     /// <remarks>
-    /// 用途：当使用率长期低于阈值时倾向缩容。<br />
-    /// 特例：过高会导致对象频繁销毁重建。<br />
-    /// 边界：建议在 0~1 之间，且小于扩容阈值。<br />
-    /// 推荐值区间：0.10~0.40。
+    /// Purpose: scale down when utilization stays below the threshold for a long time.<br />
+    /// Special case: too high causes objects to be destroyed and recreated too often.<br />
+    /// Boundary: should be between 0 and 1, and less than the scale-up threshold.<br />
+    /// Recommended range: 0.10~0.40.
     /// </remarks>
     public double ScaleDownThreshold { get; set; } = HayateConstant.DEFAULT_SCALE_DOWN_THRESHOLD;
     public int ScaleUpCooldownSeconds { get; set; } = HayateConstant.DEFAULT_SCALE_UP_COOLDOWN_SECONDS;
@@ -188,360 +201,433 @@ public class HayatePoolOptions
     public int ScaleUpStep { get; set; } = HayateConstant.DEFAULT_SCALE_UP_STEP;
 
     /// <summary>
-    /// 缩容步长（每次缩容减少的对象数）。<br />
-    /// 默认值：<see cref="HayateConstant.DEFAULT_SCALE_DOWN_STEP"/>（5）。
+    /// Scale-down step (number of objects removed per scale-down).<br />
+    /// Default value: <see cref="HayateConstant.DEFAULT_SCALE_DOWN_STEP"/> (5).
     /// </summary>
     /// <remarks>
-    /// 用途：与 <see cref="ScaleUpStep"/> 解耦，便于业务侧"扩容激进、缩容保守"调优。<br />
-    /// 边界：必须 ≥ 1；若超过当前可用对象数，结果会被钳制为 <see cref="MinPoolSize"/>。
+    /// Purpose: decoupled from <see cref="ScaleUpStep"/> so callers can tune "aggressive scale-up,
+    /// conservative scale-down".<br />
+    /// Boundary: must be &gt;= 1; if it exceeds the current available object count, the result is
+    /// clamped to <see cref="MinPoolSize"/>.
     /// </remarks>
     public int ScaleDownStep { get; set; } = HayateConstant.DEFAULT_SCALE_DOWN_STEP;
 
     #endregion
 
-    #region 对象验证
+    #region Validation
 
     /// <summary>
-    /// 启用对象验证（关闭后所有借出/归还/空闲验证逻辑失效）
+    /// Enables object validation. When disabled, all borrow/return/idle validation logic is
+    /// ignored.
     /// </summary>
     public bool EnableValidation { get; set; } = true;
 
     /// <summary>
-    /// 借出前是否校验对象有效性。<br />
-    /// 默认值：<c>false</c>。
+    /// Whether to validate object validity before borrowing.<br />
+    /// Default value: <c>false</c>.
     /// </summary>
     /// <remarks>
-    /// 用途：在 <c>Acquire</c> 前剔除失效对象。<br />
-    /// 特例：启用后会增加借出路径延迟。<br />
-    /// 边界：布尔开关。<br />
-    /// 推荐值区间：对象易失效时开启；纯内存轻对象可关闭。
+    /// Purpose: filter out invalid objects before <c>Acquire</c>.<br />
+    /// Special case: enabling it adds latency to the borrow path.<br />
+    /// Boundary: boolean switch.<br />
+    /// Recommended range: enable when objects are prone to becoming invalid; disable for pure
+    /// in-memory lightweight objects.
     /// </remarks>
     public bool ValidateOnBorrow { get; set; }
 
     /// <summary>
-    /// 归还前是否校验对象有效性。<br />
-    /// 默认值：<c>false</c>。
+    /// Whether to validate object validity before returning.<br />
+    /// Default value: <c>false</c>.
     /// </summary>
     /// <remarks>
-    /// 用途：在归还阶段过滤异常对象。<br />
-    /// 特例：当前版本主流程未使用该开关，可视为预留配置。<br />
-    /// 边界：布尔开关。<br />
-    /// 推荐值区间：保持默认，待实现接入后再按业务开启。
+    /// Purpose: filter out abnormal objects at return time.<br />
+    /// Special case: the current main flow does not use this switch yet; treat it as a reserved
+    /// configuration.<br />
+    /// Boundary: boolean switch.<br />
+    /// Recommended range: keep the default until the implementation is wired in, then enable per
+    /// business needs.
     /// </remarks>
     public bool ValidateOnReturn { get; set; }
 
     /// <summary>
-    /// 是否对空闲对象进行周期校验（属性名沿用当前实现）。<br />
-    /// 默认值：<c>false</c>。
+    /// Whether to periodically validate idle objects (property name kept from the current
+    /// implementation).<br />
+    /// Default value: <c>false</c>.
     /// </summary>
     /// <remarks>
-    /// 用途：定期清理空闲队列中的无效对象。<br />
-    /// 特例：当前版本主流程未使用该开关，可视为预留配置。<br />
-    /// 边界：布尔开关。<br />
-    /// 推荐值区间：保持默认。
+    /// Purpose: periodically clean up invalid objects in the idle queue.<br />
+    /// Special case: the current main flow does not use this switch yet; treat it as a reserved
+    /// configuration.<br />
+    /// Boundary: boolean switch.<br />
+    /// Recommended range: keep the default.
     /// </remarks>
     public bool ValidateWhileIdle { get; set; }
 
     /// <summary>
-    /// 周期校验间隔（毫秒）。<br />
-    /// 默认值：<see cref="HayateConstant.DEFAULT_VALIDATE_INTERVAL_MILLISECONDS"/>（30000ms）。
+    /// Periodic validation interval (milliseconds).<br />
+    /// Default value: <see cref="HayateConstant.DEFAULT_VALIDATE_INTERVAL_MILLISECONDS"/> (30000ms).
     /// </summary>
     /// <remarks>
-    /// 用途：控制后台校验任务频率。<br />
-    /// 特例：即使相关开关未开启，间隔过小也会增加定时器唤醒频率。<br />
-    /// 边界：建议大于 0。<br />
-    /// 推荐值区间：10000~60000ms。
+    /// Purpose: controls the frequency of the background validation task.<br />
+    /// Special case: even when the relevant switches are off, too small an interval increases timer
+    /// wake-up frequency.<br />
+    /// Boundary: should be &gt; 0.<br />
+    /// Recommended range: 10000~60000ms.
     /// </remarks>
     public int ValidateIntervalMs { get; set; } = HayateConstant.DEFAULT_VALIDATE_INTERVAL_MILLISECONDS;
 
 
     #endregion
 
-    #region 驱逐策略
+    #region Eviction
 
     /// <summary>
-    /// 启用空闲对象驱逐（关闭后不执行驱逐逻辑，所有驱逐相关配置失效）
+    /// Enables idle-object eviction. When disabled, no eviction logic runs and all eviction-related
+    /// configuration is ignored.
     /// </summary>
     public bool EnableEviction { get; set; } = true;
 
     /// <summary>
-    /// 对象最大存活时长。<br />
-    /// 默认值：<c>TimeSpan.FromMinutes(10)</c>。
+    /// Maximum object lifetime.<br />
+    /// Default value: <c>TimeSpan.FromMinutes(10)</c>.
     /// </summary>
     /// <remarks>
-    /// 用途：限制对象生命周期，降低陈旧状态风险。<br />
-    /// 特例：外部连接类对象可设置更短。<br />
-    /// 边界：建议大于 <see cref="TimeSpan.Zero"/>。<br />
-    /// 推荐值区间：5~60 分钟。
+    /// Purpose: cap object lifetime to reduce stale-state risk.<br />
+    /// Special case: external-connection objects can use a shorter value.<br />
+    /// Boundary: should be greater than <see cref="TimeSpan.Zero"/>.<br />
+    /// Recommended range: 5~60 minutes.
     /// </remarks>
     public TimeSpan MaxLifeTime { get; set; } = TimeSpan.FromMinutes(HayateConstant.DEFAULT_MAX_LIFE_TIME_MINUTES);
 
     /// <summary>
-    /// 对象最大空闲时长。<br />
-    /// 默认值：<c>TimeSpan.FromMinutes(5)</c>。
+    /// Maximum object idle time.<br />
+    /// Default value: <c>TimeSpan.FromMinutes(5)</c>.
     /// </summary>
     /// <remarks>
-    /// 用途：清理长期未使用对象，回收资源。<br />
-    /// 特例：低频业务可适当放宽以减少重建。<br />
-    /// 边界：建议大于等于 <see cref="TimeSpan.Zero"/>。<br />
-    /// 推荐值区间：1~30 分钟。
+    /// Purpose: reclaim resources by evicting long-unused objects.<br />
+    /// Special case: low-frequency workloads can relax this to reduce recreation.<br />
+    /// Boundary: should be &gt;= <see cref="TimeSpan.Zero"/>.<br />
+    /// Recommended range: 1~30 minutes.
     /// </remarks>
     public TimeSpan MaxIdleTime { get; set; } = TimeSpan.FromMinutes(HayateConstant.DEFAULT_MAX_IDLE_TIME_MINUTES);
 
     /// <summary>
-    /// 软最小可驱逐空闲时长。<br />
-    /// 默认值：<c>TimeSpan.FromMinutes(2)</c>。
+    /// Soft minimum evictable idle time.<br />
+    /// Default value: <c>TimeSpan.FromMinutes(2)</c>.
     /// </summary>
     /// <remarks>
-    /// 用途：给空闲对象保留最短驻留时间，减少抖动。<br />
-    /// 特例：资源紧张时仍可能被驱逐。<br />
-    /// 边界：建议大于等于 <see cref="TimeSpan.Zero"/>，且不大于 <see cref="MaxIdleTime"/>。<br />
-    /// 推荐值区间：0.5~10 分钟。
+    /// Purpose: keep objects resident for a minimum idle duration to reduce flapping.<br />
+    /// Special case: may still be evicted under resource pressure.<br />
+    /// Boundary: should be &gt;= <see cref="TimeSpan.Zero"/> and not greater than
+    /// <see cref="MaxIdleTime"/>.<br />
+    /// Recommended range: 0.5~10 minutes.
     /// </remarks>
     public TimeSpan SoftMinEvictableIdleTime { get; set; } = TimeSpan.FromMinutes(HayateConstant.DEFAULT_MIN_EVICTION_IDLE_TIME_MINUTES);
 
     /// <summary>
-    /// 驱逐扫描周期（毫秒）。<br />
-    /// 默认值：<see cref="HayateConstant.DEFAULT_EVICTION_INTERVAL_MILLISECONDS"/>（30000ms）。
+    /// Eviction scan interval (milliseconds).<br />
+    /// Default value: <see cref="HayateConstant.DEFAULT_EVICTION_INTERVAL_MILLISECONDS"/> (30000ms).
     /// </summary>
     /// <remarks>
-    /// 用途：控制驱逐任务执行频率。<br />
-    /// 特例：扫描过于频繁会提高 CPU 与锁竞争。<br />
-    /// 边界：建议大于 0。<br />
-    /// 推荐值区间：10000~60000ms。
+    /// Purpose: controls how often the eviction task runs.<br />
+    /// Special case: scanning too frequently raises CPU and lock contention.<br />
+    /// Boundary: should be &gt; 0.<br />
+    /// Recommended range: 10000~60000ms.
     /// </remarks>
     public int EvictionIntervalMs { get; set; } = HayateConstant.DEFAULT_EVICTION_INTERVAL_MILLISECONDS;
 
     /// <summary>
-    /// 每次驱逐扫描的样本数。<br />
-    /// 默认值：<see cref="HayateConstant.DEFAULT_EVICTION_RUNS_PER_EVICTION"/>（10）。
+    /// Number of samples scanned per eviction run.<br />
+    /// Default value: <see cref="HayateConstant.DEFAULT_EVICTION_RUNS_PER_EVICTION"/> (10).
     /// </summary>
     /// <remarks>
-    /// 用途：控制单次驱逐开销与清理力度。<br />
-    /// 特例：值过小会延迟清理，值过大会影响峰值延迟。<br />
-    /// 边界：建议大于等于 1。<br />
-    /// 推荐值区间：5~128。
+    /// Purpose: controls the cost and cleanup strength of a single eviction.<br />
+    /// Special case: too small delays cleanup; too large affects peak latency.<br />
+    /// Boundary: should be &gt;= 1.<br />
+    /// Recommended range: 5~128.
     /// </remarks>
     public int NumTestsPerEvictionRun { get; set; } = HayateConstant.DEFAULT_EVICTION_RUNS_PER_EVICTION;
 
     #endregion
 
-    #region 分代策略
+    #region Generation
 
     /// <summary>
-    /// 启用分代优化（关闭后所有对象均为年轻代，不跳过验证）
+    /// Enables generational optimization. When disabled, all objects are treated as the young
+    /// generation and validation is never skipped.
     /// </summary>
     public bool EnableGenerationOptimization { get; set; } = true;
 
     /// <summary>
-    /// 对象晋升代际的阈值（毫秒）。<br />
-    /// 默认值：<see cref="HayateConstant.DEFAULT_GEN_THRESHOLD_MILLISECONDS"/>（30000ms）。
+    /// Threshold (milliseconds) for an object to be promoted to an older generation.<br />
+    /// Default value: <see cref="HayateConstant.DEFAULT_GEN_THRESHOLD_MILLISECONDS"/> (30000ms).
     /// </summary>
     /// <remarks>
-    /// 用途：标记长期存活对象，供策略层做分代管理。<br />
-    /// 特例：阈值过小会导致对象过早晋升。<br />
-    /// 边界：建议大于等于 0。<br />
-    /// 推荐值区间：5000~120000ms。
+    /// Purpose: mark long-lived objects so the policy layer can manage generations.<br />
+    /// Special case: too small a threshold promotes objects prematurely.<br />
+    /// Boundary: should be &gt;= 0.<br />
+    /// Recommended range: 5000~120000ms.
     /// </remarks>
     public int GenerationThresholdMs { get; set; } = HayateConstant.DEFAULT_GEN_THRESHOLD_MILLISECONDS;
 
     /// <summary>
-    /// 老年代数据验证的间隔次数配置项
+    /// Interval (in regular-validation passes) between full validations of the old generation.
     /// </summary>
     /// <value>
-    /// 默认值：3；
-    /// 推荐值区间：1 ~ 10；
-    /// 边界限制：最小值为1，最大值无硬性限制（建议不超过20）；
+    /// Default value: 3;
+    /// Recommended range: 1 ~ 10;
+    /// Boundary: minimum 1, no hard maximum (recommended not to exceed 20);
     /// </value>
     /// <remarks>
-    /// 【核心用途】：控制老年代数据的验证频率，属性值 N 表示每执行 N 次常规检查流程，才对老年代数据执行 1 次全量验证，
-    /// 用于平衡老年代数据验证的完整性与性能开销（老年代全量验证耗时较长，高频验证会降低整体处理效率）。
-    /// 
-    /// 【特例说明】：
-    /// 1. 当值为 1 时：每次常规检查流程都会触发老年代全量验证，适用于数据一致性要求极高、性能敏感度低的场景（如金融核心数据校验）；
-    /// 2. 当值 ≤ 0 时：框架会自动修正为默认值 3，不允许关闭老年代验证（若需完全关闭，需单独配置 OldGenerationValidationEnabled = false）；
-    /// 3. 当值 > 10 时：验证频率过低，可能导致老年代数据异常累积过久，增加问题排查难度，仅建议在纯性能优先、数据容错率高的场景临时使用。
-    /// 
-    /// 【推荐值区间说明】：
-    /// - 常规业务场景（平衡性能与验证完整性）：3 ~ 5；
-    /// - 高性能低一致性场景：6 ~ 10；
-    /// - 高一致性低性能场景：1 ~ 2；
+    /// Core purpose: controls the validation frequency of the old generation. A value of N means
+    /// that for every N regular validation passes, the old generation is fully validated once. This
+    /// balances the completeness of old-generation validation against performance cost (a full
+    /// old-generation validation is relatively expensive, so validating too often reduces overall
+    /// throughput).
+    ///
+    /// Special cases:
+    /// 1. When the value is 1: every regular validation pass triggers a full old-generation
+    ///    validation. Use this for scenarios with very high consistency requirements and low
+    ///    performance sensitivity (e.g. financial core-data checks).
+    /// 2. When the value is &lt;= 0: the framework automatically corrects it to the default of 3;
+    ///    the old-generation validation cannot be disabled this way (to disable it entirely, set
+    ///    OldGenerationValidationEnabled = false separately).
+    /// 3. When the value &gt; 10: the validation frequency is too low, which may let
+    ///    old-generation anomalies accumulate for too long and increase troubleshooting difficulty.
+    ///    Only use this temporarily in pure performance-first, high fault-tolerance scenarios.
+    ///
+    /// Recommended range:
+    /// - General business scenarios (balance performance and validation completeness): 3 ~ 5;
+    /// - High-performance, low-consistency scenarios: 6 ~ 10;
+    /// - High-consistency, low-performance scenarios: 1 ~ 2;
     /// </remarks>
     public int OldGenerationValidationInterval { get; set; } = HayateConstant.DEFAULT_OLD_GEN_VALIDATION_INTERVAL;
 
     #endregion
 
-    #region 泄露检测
+    #region Leak detection
 
     /// <summary>
-    /// 启用对象泄漏检测（关闭后不记录调用堆栈，不执行泄漏扫描）
+    /// Enables object leak detection. When disabled, call stacks are not recorded and no leak scan
+    /// runs.
     /// </summary>
     public bool EnableLeakDetection { get; set; } = true;
 
     /// <summary>
-    /// 泄漏检测阈值。<br />
-    /// 默认值：<c>TimeSpan.FromMinutes(30)</c>（由 <see cref="HayateConstant.DEFAULT_LEAK_DETECTION_THRESHOLD_SECONDS"/> 构造）。
+    /// Leak detection threshold.<br />
+    /// Default value: <c>TimeSpan.FromMinutes(30)</c> (constructed from
+    /// <see cref="HayateConstant.DEFAULT_LEAK_DETECTION_THRESHOLD_SECONDS"/>).
     /// </summary>
     /// <remarks>
-    /// 用途：定义借出对象多久未归还才视为疑似泄漏。<br />
-    /// 特例：常量名为“SECONDS”，但当前默认表达式按“分钟”构造。<br />
-    /// 边界：建议大于 <see cref="TimeSpan.Zero"/>。<br />
-    /// 推荐值区间：10 秒~10 分钟（请按实际耗时调整）。
+    /// Purpose: defines how long a borrowed object can stay out before it is treated as a suspected
+    /// leak.<br />
+    /// Special case: the constant is named "SECONDS" but the default expression is built in
+    /// minutes.<br />
+    /// Boundary: should be greater than <see cref="TimeSpan.Zero"/>.<br />
+    /// Recommended range: 10 seconds ~ 10 minutes (adjust to actual durations).
     /// </remarks>
     public TimeSpan LeakDetectionThreshold { get; set; } = TimeSpan.FromMinutes(HayateConstant.DEFAULT_LEAK_DETECTION_THRESHOLD_SECONDS);
 
     /// <summary>
-    /// 泄漏取证模式。<br />
-    /// 默认值：<see cref="HayateLeakTraceCaptureMode.Off"/>。<br />
+    /// Leak trace capture mode.<br />
+    /// Default value: <see cref="HayateLeakTraceCaptureMode.Off"/>.<br />
     /// </summary>
     /// <remarks>
-    /// 用途：控制借出热路径是否抓取调用栈（取证），与泄漏检测本身（阈值判定 + LeakCount）解耦。<br />
-    /// 行为变更（PR-D L1）：2.0 及之前默认每次借出抓取全栈（数十微秒 CPU / 10~40KB 分配/次）；
-    /// 2.1 起默认 <c>Off</c>，LeakTraces 中为占位文案；需要栈信息时显式选择
-    /// <see cref="HayateLeakTraceCaptureMode.Sampled"/> 或 <see cref="HayateLeakTraceCaptureMode.EveryAcquire"/>。<br />
-    /// 边界：仅在 <see cref="EnableLeakDetection"/> 为 <c>true</c> 时生效。
+    /// Purpose: controls whether the borrow hot path captures a call stack (for evidence),
+    /// decoupled from leak detection itself (threshold judgement + LeakCount).<br />
+    /// Behavior change: prior to 2.0, a full stack trace was captured on every borrow by default
+    /// (tens of microseconds of CPU / 10~40KB allocated per borrow); starting with 2.1 the default
+    /// is <c>Off</c> and LeakTraces holds a placeholder entry. To capture stacks, explicitly choose
+    /// <see cref="HayateLeakTraceCaptureMode.Sampled"/> or
+    /// <see cref="HayateLeakTraceCaptureMode.EveryAcquire"/>.<br />
+    /// Boundary: only takes effect when <see cref="EnableLeakDetection"/> is <c>true</c>.
     /// </remarks>
     public HayateLeakTraceCaptureMode LeakTraceCaptureMode { get; set; } = HayateLeakTraceCaptureMode.Off;
 
     /// <summary>
-    /// 泄漏取证采样分母（1/N）。<br />
-    /// 默认值：<c>1024</c>（由 <see cref="HayateConstant.DEFAULT_LEAK_TRACE_SAMPLE_RATE"/> 构造）。
+    /// Leak-trace sample denominator (1/N).<br />
+    /// Default value: <c>1024</c> (constructed from
+    /// <see cref="HayateConstant.DEFAULT_LEAK_TRACE_SAMPLE_RATE"/>).
     /// </summary>
     /// <remarks>
-    /// 用途：仅 <see cref="HayateLeakTraceCaptureMode.Sampled"/> 模式生效，每 N 次借出抓取 1 次调用栈（第 1 次必抓）；N=1 等价于每次抓取。<br />
-    /// 边界：≤ 0 时构建/运行期自动修正为默认值 1024（见 <see cref="ApplyFeatureSwitches"/>）。
+    /// Purpose: only effective in <see cref="HayateLeakTraceCaptureMode.Sampled"/> mode; captures a
+    /// stack once every N borrows (the first borrow always captures); N=1 is equivalent to
+    /// capturing every time.<br />
+    /// Boundary: when &lt;= 0, the build/runtime auto-corrects it to the default 1024 (see
+    /// <see cref="ApplyFeatureSwitches"/>).
     /// </remarks>
     public int LeakTraceSampleRate { get; set; } = HayateConstant.DEFAULT_LEAK_TRACE_SAMPLE_RATE;
 
     #endregion
 
-    #region 容量告警（M12）
+    #region Capacity alarm
 
     /// <summary>
-    /// 容量告警阈值（使用率，借出数 / MaxPoolSize）。<br />
-    /// 默认值：<c>0</c>（0 表示不启用容量告警，零热路径开销）。
+    /// Capacity warning threshold (utilization, borrowed count / MaxPoolSize).<br />
+    /// Default value: <c>0</c> (0 means capacity warnings are disabled, with zero hot-path
+    /// overhead).
     /// </summary>
     /// <remarks>
-    /// 用途：借出水位越过该比例时触发一次 <see cref="OnCapacityWarning"/> 回调。<br />
-    /// 特例：状态翻转去抖——越线只触发一次，回落到阈值下方静默复位后可再次触发。<br />
-    /// 边界：0（禁用）或 (0, 1]；大于 1 会被 <see cref="ApplyFeatureSwitches"/> 钳制为 1。
+    /// Purpose: when the borrow water level crosses this ratio, fires the
+    /// <see cref="OnCapacityWarning"/> callback once.<br />
+    /// Special case: edge-debounced — crossing the line fires only once; after falling back below
+    /// the threshold and resetting silently, it can fire again.<br />
+    /// Boundary: 0 (disabled) or (0, 1]; values &gt; 1 are clamped to 1 by
+    /// <see cref="ApplyFeatureSwitches"/>.
     /// </remarks>
     public double WarnAtRatio { get; set; }
 
     /// <summary>
-    /// 容量危急阈值（使用率，借出数 / MaxPoolSize）。<br />
-    /// 默认值：<c>0</c>（0 表示不启用危急告警）。
+    /// Capacity critical threshold (utilization, borrowed count / MaxPoolSize).<br />
+    /// Default value: <c>0</c> (0 means critical alarms are disabled).
     /// </summary>
     /// <remarks>
-    /// 用途：借出水位越过该比例时触发一次 <see cref="OnCapacityCritical"/> 回调。<br />
-    /// 特例：与 <see cref="WarnAtRatio"/> 同时启用时不得小于后者（规范化时自动抬升至 WarnAtRatio）；<br />
-    /// 从 Normal 直接越线到 Critical 时仅触发 Critical 回调，不补发 Warning。<br />
-    /// 边界：0（禁用）或 (0, 1]；大于 1 会被 <see cref="ApplyFeatureSwitches"/> 钳制为 1。
+    /// Purpose: when the borrow water level crosses this ratio, fires the
+    /// <see cref="OnCapacityCritical"/> callback once.<br />
+    /// Special case: when enabled together with <see cref="WarnAtRatio"/>, it must not be smaller
+    /// than it (normalized by auto-raising to WarnAtRatio); crossing directly from Normal to
+    /// Critical fires only the Critical callback, without a supplementary Warning.<br />
+    /// Boundary: 0 (disabled) or (0, 1]; values &gt; 1 are clamped to 1 by
+    /// <see cref="ApplyFeatureSwitches"/>.
     /// </remarks>
     public double CriticalAtRatio { get; set; }
 
     /// <summary>
-    /// 容量告警回调（使用率 ≥ <see cref="WarnAtRatio"/> 时状态翻转触发一次）。默认 <c>null</c>。
+    /// Capacity warning callback (fires once on a state flip when utilization &gt;=
+    /// <see cref="WarnAtRatio"/>). Default <c>null</c>.
     /// </summary>
     /// <remarks>
-    /// 回调在借/还路径内联执行，应保持轻量（毫秒级返回）；回调内抛出的异常会被池捕获并记录日志，不影响借还主流程。
+    /// The callback runs inline on the borrow/return path and should stay lightweight (return
+    /// within milliseconds); exceptions thrown inside it are caught and logged by the pool and do
+    /// not affect the borrow/return main flow.
     /// </remarks>
     public Action<HayatePoolCapacityAlarmEventArgs> OnCapacityWarning { get; set; }
 
     /// <summary>
-    /// 容量危急回调（使用率 ≥ <see cref="CriticalAtRatio"/> 时状态翻转触发一次）。默认 <c>null</c>。
+    /// Capacity critical callback (fires once on a state flip when utilization &gt;=
+    /// <see cref="CriticalAtRatio"/>). Default <c>null</c>.
     /// </summary>
     /// <remarks>
-    /// 回调在借/还路径内联执行，应保持轻量（毫秒级返回）；回调内抛出的异常会被池捕获并记录日志，不影响借还主流程。
+    /// The callback runs inline on the borrow/return path and should stay lightweight (return
+    /// within milliseconds); exceptions thrown inside it are caught and logged by the pool and do
+    /// not affect the borrow/return main flow.
     /// </remarks>
     public Action<HayatePoolCapacityAlarmEventArgs> OnCapacityCritical { get; set; }
 
     #endregion
 
-    #region 统计指标
+    #region Metrics
 
     /// <summary>
-    /// 是否启用指标采集。<br />
-    /// 默认值：<c>false</c>。
+    /// Whether to enable metrics collection.<br />
+    /// Default value: <c>false</c>.
     /// </summary>
     /// <remarks>
-    /// 用途：输出池运行指标用于观测。<br />
-    /// 特例：高频路径下开启会增加少量开销。<br />
-    /// 边界：布尔开关。<br />
-    /// 推荐值区间：测试/生产建议开启，极限性能压测可关闭。
+    /// Purpose: emit pool runtime metrics for observability.<br />
+    /// Special case: enabling it on high-frequency paths adds a small overhead.<br />
+    /// Boundary: boolean switch.<br />
+    /// Recommended range: enable in test/production; disable under extreme-performance benchmarks.
     /// </remarks>
     public bool EnableMetrics { get; set; } = false;
 
     /// <summary>
-    /// 是否启用分配追踪（M3）。<br />
-    /// 默认值：<c>false</c>。
+    /// Whether to enable allocation tracking.<br />
+    /// Default value: <c>false</c>.
     /// </summary>
     /// <remarks>
-    /// 用途：统计借出 / 归还路径的线程分配增量（字节），用于定位热路径上的隐藏分配，
-    /// 与基准测试的 <c>B/Op</c> 口径互为印证。<br />
-    /// 特例：每次借还额外调用一次分配查询 API（近似零分配），仍有少量开销；
-    /// <c>net48</c> / <c>netstandard2.0</c> 目标框架缺少该 API，追踪在这些框架下静默不可用（计数恒 0）。<br />
-    /// 边界：布尔开关。<br />
-    /// 推荐值区间：诊断 / 调优期开启，生产热路径建议关闭。
+    /// Purpose: count the per-thread allocation delta (in bytes) on the borrow/return path, to
+    /// locate hidden allocations on the hot path; corroborates the benchmark's <c>B/Op</c> metric.<br />
+    /// Special case: each borrow/return makes one extra allocation-query API call (near zero
+    /// allocation) and still has a small overhead; the <c>net48</c> / <c>netstandard2.0</c> target
+    /// frameworks lack this API, so tracking is silently unavailable there (count stays 0).<br />
+    /// Boundary: boolean switch.<br />
+    /// Recommended range: enable during diagnosis/tuning; disable on production hot paths.
     /// </remarks>
     public bool EnableAllocationTracking { get; set; } = false;
 
     #endregion
 
-    #region 预热就绪（M17）
+    #region Warmup readiness
 
     /// <summary>
-    /// 是否让预热在后台进行、并令借出操作等待预热完成。<br />
-    /// 默认值：<c>false</c>（与 2.4 及之前一致——构造期同步预热，借出不做额外等待）。
+    /// Whether to run warmup in the background and have borrow operations wait for warmup to
+    /// finish.<br />
+    /// Default value: <c>false</c> (consistent with 2.4 and earlier — synchronous warmup at
+    /// construction, with no extra wait on borrow).
     /// </summary>
     /// <remarks>
-    /// 用途：<c>true</c> 时构造立即返回，<see cref="MinPoolSize"/> 的预热在后台线程完成；
-    /// 预热完成前所有 <c>Acquire</c> / <c>AcquireAsync</c> 阻塞在就绪信号上，保证调用方
-    /// 拿到对象时池已就绪（避免冷启动期大量创建开销落在首个业务请求上）。<br />
-    /// 特例：与 L5 冷池自举互斥——等待期内不会触发「池空同步创建」自举，自举让位于就绪信号；
-    /// 预热若失败，信号仍会置位（不永久阻塞），失败原因记录到日志。<br />
-    /// 边界：布尔开关。<br />
-    /// 推荐值区间：启动期可容忍少量延迟、且希望首请求零创建开销的服务建议开启。
+    /// Purpose: when <c>true</c>, construction returns immediately and the <see cref="MinPoolSize"/>
+    /// warmup completes on a background thread; before warmup finishes, all <c>Acquire</c> /
+    /// <c>AcquireAsync</c> block on the readiness signal, so callers always get a ready pool
+    /// (avoiding large creation cost landing on the first business request during cold start).<br />
+    /// Special case: mutually exclusive with cold-pool bootstrap — during the wait, the "synchronous
+    /// create on empty pool" bootstrap is not triggered; bootstrap yields to the readiness signal;
+    /// if warmup fails, the signal is still set (no permanent block) and the failure reason is
+    /// logged.<br />
+    /// Boundary: boolean switch.<br />
+    /// Recommended range: enable for services that can tolerate a small startup delay yet want zero
+    /// creation cost on the first request.
     /// </remarks>
     public bool WaitForWarmup { get; set; } = false;
 
     #endregion
 
+    /// <summary>
+    /// Creates a new <see cref="HayatePoolOptions"/> and copies all current settings into it.
+    /// </summary>
+    /// <returns>A new options instance with the same settings as this one.</returns>
+    /// <example>
+    /// <code>
+    /// var copy = options.CopyTo();
+    /// </code>
+    /// </example>
     public HayatePoolOptions CopyTo()
     {
         var options = new HayatePoolOptions();
         return CopyTo(options);
     }
 
+    /// <summary>
+    /// Copies all current settings into the supplied <paramref name="options"/> instance.
+    /// </summary>
+    /// <param name="options">The target options instance to copy values into.</param>
+    /// <returns>The same <paramref name="options"/> instance, updated with the current settings.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is <c>null</c>.</exception>
+    /// <example>
+    /// <code>
+    /// var target = new HayatePoolOptions();
+    /// options.CopyTo(target);
+    /// </code>
+    /// </example>
     public HayatePoolOptions CopyTo(HayatePoolOptions options)
     {
-        // 空值校验，保证方法健壮性
+        // Null guard to keep the method robust
         if (options == null)
         {
-            throw new ArgumentNullException(nameof(options), "目标配置实例不能为 null");
+            throw new ArgumentNullException(nameof(options), "Target options instance cannot be null");
         }
 
-        // 基础池大小配置
+        // Basic pool size
         options.MinPoolSize = this.MinPoolSize;
         options.MaxPoolSize = this.MaxPoolSize;
 
-        // 超时配置
+        // Timeout
         options.DefaultAcquireTimeout = this.DefaultAcquireTimeout;
 
-        // 拒绝策略
+        // Reject policy
         options.RejectPolicy = this.RejectPolicy;
 
-        // 创建重试配置
+        // Creation retry
         options.CreationRetryCount = this.CreationRetryCount;
         options.CreationRetryDelay = this.CreationRetryDelay;
 
-        // 分片策略
+        // Sharding
         options.EnableSharding = this.EnableSharding;
         options.ShardCount = this.ShardCount;
         options.ShardAffinityMode = this.ShardAffinityMode;
         options.CustomShardAffinity = this.CustomShardAffinity;
 
-        // 扩缩容策略
+        // Scaling
         options.EnableAutoScaling = this.EnableAutoScaling;
         options.ScalingIntervalMs = this.ScalingIntervalMs;
         options.ScaleUpThreshold = this.ScaleUpThreshold;
@@ -551,14 +637,14 @@ public class HayatePoolOptions
         options.ScaleUpStep = this.ScaleUpStep;
         options.ScaleDownStep = this.ScaleDownStep;
 
-        // 对象验证配置
+        // Validation
         options.EnableValidation = this.EnableValidation;
         options.ValidateOnBorrow = this.ValidateOnBorrow;
         options.ValidateOnReturn = this.ValidateOnReturn;
         options.ValidateWhileIdle = this.ValidateWhileIdle;
         options.ValidateIntervalMs = this.ValidateIntervalMs;
 
-        // 驱逐策略
+        // Eviction
         options.EnableEviction = this.EnableEviction;
         options.MaxLifeTime = this.MaxLifeTime;
         options.MaxIdleTime = this.MaxIdleTime;
@@ -566,30 +652,30 @@ public class HayatePoolOptions
         options.EvictionIntervalMs = this.EvictionIntervalMs;
         options.NumTestsPerEvictionRun = this.NumTestsPerEvictionRun;
 
-        // 分代策略
+        // Generation
         options.EnableGenerationOptimization = this.EnableGenerationOptimization;
         options.GenerationThresholdMs = this.GenerationThresholdMs;
         options.OldGenerationValidationInterval = this.OldGenerationValidationInterval;
 
-        // 泄露检测
+        // Leak detection
         options.EnableLeakDetection = this.EnableLeakDetection;
         options.LeakDetectionThreshold = this.LeakDetectionThreshold;
         options.LeakTraceCaptureMode = this.LeakTraceCaptureMode;
         options.LeakTraceSampleRate = this.LeakTraceSampleRate;
 
-        // 容量告警（M12）
+        // Capacity alarm
         options.WarnAtRatio = this.WarnAtRatio;
         options.CriticalAtRatio = this.CriticalAtRatio;
         options.OnCapacityWarning = this.OnCapacityWarning;
         options.OnCapacityCritical = this.OnCapacityCritical;
 
-        // 统计指标
+        // Metrics
         options.EnableMetrics = this.EnableMetrics;
 
-        // 分配追踪（M3）
+        // Allocation tracking
         options.EnableAllocationTracking = this.EnableAllocationTracking;
 
-        // 预热就绪（M17）
+        // Warmup readiness
         options.WaitForWarmup = this.WaitForWarmup;
 
         return options;
@@ -609,25 +695,43 @@ public class HayatePoolOptions
     //    return options;
     //}
 
+    /// <summary>
+    /// Normalizes dependent options so the configuration is internally consistent and passes
+    /// <see cref="IsValid"/>.
+    /// </summary>
+    /// <remarks>
+    /// Disabling a feature (sharding, auto-scaling, validation) forces its related settings into a
+    /// safe state; sample rates and alarm thresholds are clamped and ordering constraints are
+    /// enforced. Call this before building or validating the pool.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// options.ApplyFeatureSwitches();
+    /// if (options.IsValid()) { /* build the pool */ }
+    /// </code>
+    /// </example>
     public void ApplyFeatureSwitches()
     {
-        // 关闭分片：弹性单分片
+        // Sharding disabled: elastic single shard
         if (!EnableSharding)
         {
             ShardCount = 1;
         }
 
-        // 关闭自动扩缩容（PR-D L9，2.1 行为变更）：
-        // 旧语义强制 MaxPoolSize = MinPoolSize —— Min=0 时容量塌缩为 0，
-        // 一切归还都被分片 max=0 静默拒绝（T11「极简池 Min 必须抬到 250」怪象同源）。
-        // 新语义：仅关闭自动扩缩（扩容回调/超时强扩均受 EnableAutoScaling 门控，不会突破 Max），
-        // MaxPoolSize 保留用户显式值作为硬上限；仅在 Max < Min 时保序抬升，避免 IsValid 校验失败。
+        // Auto-scaling disabled (behavior changed in 2.1):
+        // Old semantics forced MaxPoolSize = MinPoolSize, collapsing capacity to 0 when Min=0,
+        // and silently rejecting all returns because each shard's max was 0 (same root cause as the
+        // historical "minimal pool Min had to be raised to 250" oddity).
+        // New semantics: only auto-scaling is disabled (scale-up callbacks and timeout-driven forced
+        // scale-up are both gated by EnableAutoScaling and cannot exceed Max), MaxPoolSize keeps the
+        // user's explicit value as a hard cap; it is only raised to preserve ordering when Max < Min,
+        // avoiding an IsValid validation failure.
         if (!EnableAutoScaling && MaxPoolSize < MinPoolSize)
         {
             MaxPoolSize = MinPoolSize;
         }
 
-        // 关闭验证：强制所有验证开关关闭
+        // Validation disabled: force all validation toggles off
         if (!EnableValidation)
         {
             ValidateOnBorrow = false;
@@ -635,14 +739,16 @@ public class HayatePoolOptions
             ValidateWhileIdle = false;
         }
 
-        // 泄漏取证采样分母防御：≤0 自动修正为默认值（仅 Sampled 模式使用，必须 ≥1）
+        // Leak-trace sample-rate guard: values <= 0 are auto-corrected to the default (only used in
+        // Sampled mode, must be >= 1)
         if (LeakTraceSampleRate < 1)
         {
             LeakTraceSampleRate = HayateConstant.DEFAULT_LEAK_TRACE_SAMPLE_RATE;
         }
 
-        // M18：affinity 规范化——Custom 模式未提供委托时回落 None（借出路径健壮性优先，
-        // 不在 IsValid 层拒绝，避免纯策略缺失导致整个池构建失败）；未知枚举值同样回落 None。
+        // Affinity normalization: when Custom mode is selected without a delegate, fall back to None
+        // (borrow-path robustness takes priority; we do not reject at the IsValid layer, so a missing
+        // strategy cannot fail the entire pool build). Unknown enum values also fall back to None.
         if (ShardAffinityMode == HayateShardAffinityMode.Custom && CustomShardAffinity is null)
         {
             ShardAffinityMode = HayateShardAffinityMode.None;
@@ -654,8 +760,9 @@ public class HayatePoolOptions
             ShardAffinityMode = HayateShardAffinityMode.None;
         }
 
-        // 容量告警阈值规范化（M12）：负值视为禁用（0），大于 1 钳制为 1；
-        // 两阈值同时启用时 Critical 不得低于 Warn（低于则抬升至 Warn，保证状态机单调）。
+        // Capacity alarm threshold normalization: negative values are treated as disabled (0), and
+        // values greater than 1 are clamped to 1; when both thresholds are enabled, Critical must
+        // not be below Warn (raise it to Warn to keep the state machine monotonic).
         if (WarnAtRatio < 0) WarnAtRatio = 0;
         else if (WarnAtRatio > 1) WarnAtRatio = 1;
 
@@ -668,18 +775,32 @@ public class HayatePoolOptions
         }
     }
 
+    /// <summary>
+    /// Validates that the current option values form a legal, buildable configuration.
+    /// </summary>
+    /// <returns><c>true</c> if the configuration is valid; otherwise <c>false</c>.</returns>
+    /// <remarks>
+    /// Internally calls <see cref="ApplyFeatureSwitches"/> first, then checks pool-size bounds,
+    /// scaling thresholds, time spans and feature-specific constraints.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// if (!options.IsValid())
+    ///     throw new InvalidOperationException("Invalid pool options");
+    /// </code>
+    /// </example>
     public bool IsValid()
     {
         ApplyFeatureSwitches();
 
-        // 基础配置校验
+        // Basic configuration checks
         if (MinPoolSize < 0 || MaxPoolSize < MinPoolSize) return false;
         if (DefaultAcquireTimeout <= TimeSpan.Zero) return false;
         if (ShardCount < 1 || ShardCount > 32) return false;
         if (CreationRetryCount < 0) return false;
         if (DefaultAcquireTimeout <= TimeSpan.Zero) return false;
 
-        // 开启扩缩容时的校验
+        // Checks when auto-scaling is enabled
         if (EnableAutoScaling)
         {
             if (ScaleUpThreshold <= ScaleDownThreshold) return false;
@@ -689,7 +810,7 @@ public class HayatePoolOptions
             if (ScaleDownStep < 1) return false;
         }
 
-        // 时间验证
+        // Time-based validation
         if (EnableEviction)
         {
             if (MaxLifeTime <= TimeSpan.Zero) return false;

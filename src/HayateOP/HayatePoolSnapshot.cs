@@ -1,42 +1,42 @@
 ﻿using System;
-using System.Collections.Generic;
-
-namespace DotNetCore.HayateOP;
-
+using System.Collections.Generic;
+namespace DotNetCore.HayateOP;
 public class HayatePoolSnapshot
 {
+    /// <summary>The UTC timestamp at which this snapshot was taken.</summary>
     public DateTimeOffset Timestamp { get; set; }
+    /// <summary>The total number of objects currently held by the pool (idle plus borrowed).</summary>
     public int PooledCount { get; set; }
+    /// <summary>The number of objects currently borrowed out.</summary>
     public int BorrowedCount { get; set; }
+    /// <summary>The cumulative number of objects the pool has ever created.</summary>
     public long TotalCreated { get; set; }
+    /// <summary>The cumulative number of acquires that could not be satisfied.</summary>
     public long TotalMissed { get; set; }
+    /// <summary>The cumulative number of successful acquires.</summary>
     public long TotalAcquired { get; set; }
-    public long LeakCount { get; set; }
-
+    /// <summary>The cumulative leak count reported by leak detection.</summary>
+    public long LeakCount { get; set; }
     /// <summary>
-    /// 疑似泄漏次数（M4，泄漏检测关闭时的回查告警计数）。
+    /// The suspected-leak count (a retrospective alert counter used when leak detection is disabled).
     /// </summary>
-    public long LeakSuspectedCount { get; set; }
-
-    public IReadOnlyList<string> LeakTraces { get; set; } = [];
-
+    public long LeakSuspectedCount { get; set; }
+    /// <summary>The captured leak traces (stack frames or placeholders), if leak tracing is enabled.</summary>
+    public IReadOnlyList<string> LeakTraces { get; set; } = [];
     /// <summary>
-    /// 是否启用分配追踪（M3）。
+    /// Whether allocation tracking is enabled.
     /// </summary>
-    public bool AllocationTrackingEnabled { get; set; }
-
+    public bool AllocationTrackingEnabled { get; set; }
     /// <summary>
-    /// 借出路径累计分配字节数（M3，仅同步 <c>Acquire</c>）。
+    /// Cumulative bytes allocated on the borrow path (synchronous <c>Acquire</c> only).
     /// </summary>
-    public long AcquireAllocatedBytes { get; set; }
-
+    public long AcquireAllocatedBytes { get; set; }
     /// <summary>
-    /// 归还路径累计分配字节数（M3，仅同步 <c>Release</c>）。
+    /// Cumulative bytes allocated on the return path (synchronous <c>Release</c> only).
     /// </summary>
-    public long ReleaseAllocatedBytes { get; set; }
-
+    public long ReleaseAllocatedBytes { get; set; }
     /// <summary>
-    /// M20（2.5）：逐对象生命周期明细（覆盖全部存活包装对象：空闲 + 借出）。
+    /// Per-object lifecycle details (covering every live wrapper object: idle plus borrowed).
     /// </summary>
     public IReadOnlyList<HayatePoolObjectDetail> ObjectDetails { get; set; } = [];
 }

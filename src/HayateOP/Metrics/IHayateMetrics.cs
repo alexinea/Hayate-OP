@@ -1,38 +1,38 @@
 ﻿namespace DotNetCore.HayateOP.Metrics;
 
 /// <summary>
-/// 对象池诊断指标接口
+/// Diagnostic metrics interface for object pools.
 /// </summary>
 public interface IHayateMetrics
 {
     /// <summary>
-    /// 记录对象从池中取出的操作
+    /// Records the operation of taking an object from the pool.
     /// </summary>
-    /// <param name="poolName">对象池名称</param>
-    /// <param name="item">对象</param>
-    /// <param name="elapsedMilliseconds">耗时（毫秒）</param>
+    /// <param name="poolName">The object pool name.</param>
+    /// <param name="item">The object taken from the pool.</param>
+    /// <param name="elapsedMilliseconds">The elapsed time of the operation, in milliseconds.</param>
     void RecordObjectAcquired(string poolName, object item, double elapsedMilliseconds);
 
     /// <summary>
-    /// 记录对象归还到池中的操作
+    /// Records the operation of returning an object to the pool.
     /// </summary>
-    /// <param name="poolName"></param>
-    /// <param name="item"></param>
-    /// <param name="isValid"></param>
+    /// <param name="poolName">The object pool name.</param>
+    /// <param name="item">The object returned to the pool.</param>
+    /// <param name="isValid"><c>true</c> if the returned object passed validation; otherwise <c>false</c>.</param>
     void RecordObjectReleased(string poolName, object item, bool isValid);
 
     /// <summary>
-    /// 记录对象池创建新对象的操作
+    /// Records a pool miss (a new object had to be created).
     /// </summary>
-    /// <param name="poolName"></param>
+    /// <param name="poolName">The object pool name.</param>
     void RecordObjectMiss(string poolName);
 
     /// <summary>
-    /// 记录对象池扩缩容的操作
+    /// Records a pool scale-up or scale-down operation.
     /// </summary>
-    /// <param name="poolName"></param>
-    /// <param name="action"></param>
-    /// <param name="oldSize"></param>
-    /// <param name="newSize"></param>
+    /// <param name="poolName">The object pool name.</param>
+    /// <param name="action">The scaling action performed (e.g. "scale-up" / "scale-down").</param>
+    /// <param name="oldSize">The pool size before scaling.</param>
+    /// <param name="newSize">The pool size after scaling.</param>
     void RecordPoolScaled(string poolName, string action, int oldSize, int newSize);
 }

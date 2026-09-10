@@ -1,44 +1,52 @@
 ﻿namespace DotNetCore.HayateOP;
 
 /// <summary>
-/// 池容量告警级别（M12）。
+/// Pool capacity alarm level.
 /// </summary>
 /// <remarks>
-/// 语义：按「借出对象数 / MaxPoolSize」的使用率与 <c>WarnAtRatio</c> / <c>CriticalAtRatio</c>
-/// 比较得出；仅在状态翻转时触发一次回调（回落静默复位、重新整备）。
+/// Semantics: derived from the usage ratio (borrowed objects / MaxPoolSize) compared against <c>WarnAtRatio</c> / <c>CriticalAtRatio</c>;
+/// a callback fires only once on a state transition (it silently resets and re-arms when the ratio falls back).
 /// </remarks>
 public enum HayatePoolCapacityAlarmLevel
 {
-    /// <summary>正常水位（低于告警阈值）。</summary>
+    /// <summary>Normal water level (below the warning threshold).</summary>
     Normal = 0,
 
-    /// <summary>警告水位（使用率 ≥ WarnAtRatio 且低于 CriticalAtRatio）。</summary>
+    /// <summary>Warning water level (usage ratio &gt;= WarnAtRatio and below CriticalAtRatio).</summary>
     Warning = 1,
 
-    /// <summary>危急水位（使用率 ≥ CriticalAtRatio）。</summary>
+    /// <summary>Critical water level (usage ratio &gt;= CriticalAtRatio).</summary>
     Critical = 2
 }
 
 /// <summary>
-/// 池容量告警事件参数（M12）。
+/// Pool capacity alarm event arguments.
 /// </summary>
 public sealed class HayatePoolCapacityAlarmEventArgs
 {
-    /// <summary>触发告警的池名称。</summary>
+    /// <summary>The name of the pool that raised the alarm.</summary>
     public string PoolName { get; }
 
-    /// <summary>告警级别（Warning / Critical；Normal 不触发回调）。</summary>
+    /// <summary>The alarm level (Warning / Critical; Normal does not raise a callback).</summary>
     public HayatePoolCapacityAlarmLevel Level { get; }
 
-    /// <summary>触发时刻的使用率（借出数 / MaxPoolSize，0~1）。</summary>
+    /// <summary>The usage ratio at trigger time (borrowed count / MaxPoolSize, 0~1).</summary>
     public double UsageRatio { get; }
 
-    /// <summary>触发时刻的借出对象数。</summary>
+    /// <summary>The number of borrowed objects at trigger time.</summary>
     public int BorrowedCount { get; }
 
-    /// <summary>池容量上限（MaxPoolSize）。</summary>
+    /// <summary>The pool capacity upper bound (MaxPoolSize).</summary>
     public int MaxPoolSize { get; }
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="HayatePoolCapacityAlarmEventArgs"/> class.
+    /// </summary>
+    /// <param name="poolName">The name of the pool that raised the alarm.</param>
+    /// <param name="level">The alarm level (Warning or Critical; Normal never raises a callback).</param>
+    /// <param name="usageRatio">The usage ratio at trigger time (borrowed count / MaxPoolSize, 0~1).</param>
+    /// <param name="borrowedCount">The number of borrowed objects at trigger time.</param>
+    /// <param name="maxPoolSize">The pool capacity upper bound (MaxPoolSize).</param>
     public HayatePoolCapacityAlarmEventArgs(
         string poolName,
         HayatePoolCapacityAlarmLevel level,
@@ -53,6 +61,10 @@ public sealed class HayatePoolCapacityAlarmEventArgs
         MaxPoolSize = maxPoolSize;
     }
 
+    /// <summary>
+    /// Returns a human-readable description of the capacity alarm, including the level and usage ratio.
+    /// </summary>
+    /// <returns>A formatted alarm string.</returns>
     public override string ToString()
     {
         return $"[{PoolName}] CapacityAlarm {Level}: usage {UsageRatio:P1} ({BorrowedCount}/{MaxPoolSize})";

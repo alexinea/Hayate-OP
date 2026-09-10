@@ -6,37 +6,76 @@ namespace DotNetCore.HayateOP;
 
 public interface IHayateObjectPool : IDisposable
 {
+    /// <summary>Returns a point-in-time snapshot of pool statistics (counts, timings, allocation tracking).</summary>
     HayatePoolStats GetStats();
+    /// <summary>Returns a snapshot of every pooled object and its current state.</summary>
     HayatePoolSnapshot TakeSnapshot();
+    /// <summary>Reloads pool configuration by applying the supplied mutator to the live options.</summary>
+    /// <param name="configure">A callback that mutates the current <see cref="HayatePoolOptions"/>.</param>
     void ReloadConfig(Action<HayatePoolOptions> configure);
+    /// <summary>Destroys every object currently held by the pool.</summary>
     void Clear();
+    /// <summary>Returns the live configuration options for this pool.</summary>
+    /// <returns>The pool's <see cref="HayatePoolOptions"/>.</returns>
     HayatePoolOptions GetOptions();
 }
 
 /// <summary>
-/// 对象池通用接口
+/// The generic object-pool contract for acquiring and releasing instances of <typeparamref name="T"/>.
 /// </summary>
-/// <typeparam name="T"></typeparam>
+/// <typeparam name="T">The pooled object type.</typeparam>
 public interface IHayateObjectPool<T> : IHayateObjectPool where T : class
 {
+    /// <summary>Acquires an object from the pool, blocking until one becomes available.</summary>
+    /// <returns>A pooled object of type <typeparamref name="T"/>.</returns>
     T Acquire();
+    /// <summary>Acquires an object from the pool, blocking up to the given timeout.</summary>
+    /// <param name="timeout">The maximum wait time.</param>
+    /// <returns>A pooled object of type <typeparamref name="T"/>.</returns>
+    /// <exception cref="TimeoutException">The timeout elapsed before an object became available.</exception>
     T Acquire(TimeSpan timeout);
     Task<T> AcquireAsync(CancellationToken cancellationToken = default);
     /// <summary>
-    /// 异步获取池化对象，带超时边界（与同步 <see cref="Acquire(TimeSpan)"/> 语义对齐）：
-    /// 超时抛 <see cref="TimeoutException"/>；外部取消传播 <see cref="TaskCanceledException"/>。
+    /// Asynchronously acquires an object from the pool with a timeout boundary (aligned with the
+    /// synchronous <see cref="Acquire(TimeSpan)"/> semantics): a timeout throws
+    /// <see cref="TimeoutException"/>, while external cancellation propagates a
+    /// <see cref="TaskCanceledException"/>.
     /// </summary>
-    /// <param name="timeout">等待上限。</param>
-    /// <param name="cancellationToken">外部取消令牌，可随时中断等待。</param>
+    /// <param name="timeout">The maximum wait time.</param>
+    /// <param name="cancellationToken">An external cancellation token that can interrupt the wait at any time.</param>
+    /// <example>
+    /// <code>
+    /// var obj = await pool.AcquireAsync(TimeSpan.FromSeconds(3), cancellationToken);
+    /// try { /* use obj */ }
+    /// finally { pool.Release(obj); }
+    /// </code>
+    /// </example>
     Task<T> AcquireAsync(TimeSpan timeout, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns an object to the pool so it can be reused.
+    /// </summary>
+    /// <param name="item">The object previously obtained from <c>Acquire</c>; must not be <c>null</c>.</param>
+    /// <example>
+    /// <code>
+    /// pool.Release(obj);
+    /// </code>
+    /// </example>
     void Release(T item);
 
     /// <summary>
-    /// M15（2.5）：按分类依据主动驱逐空闲对象，返回实际驱逐数量。
-    /// 仅作用于<b>空闲</b>对象（借出中的对象一律不碰）；驱逐复用与后台驱逐相同的
-    /// 分片原子认领 + 销毁幂等 CAS，可与其他驱逐/借还路径并发调用。
-    /// 默认后台驱逐（<c>EvictionCallback</c>）行为不变——本 API 是叠加的主动运维出口。
+    /// Proactively evicts idle objects by category and returns the number actually evicted.
+    /// Only affects <b>idle</b> objects (borrowed objects are never touched). Eviction reuses the same
+    /// shard atomic-claim + idempotent destroy CAS as background eviction, so it can run concurrently
+    /// with other eviction / borrow-return paths.
+    /// The default background eviction (<c>EvictionCallback</c>) is unchanged — this API is an
+    /// additional, on-demand operational outlet.
     /// </summary>
-    /// <param name="reason">驱逐依据（Touched=用过即清 / Idle=超 MaxIdleTime / Expired=超 MaxLifeTime）。</param>
+    /// <param name="reason">The eviction basis (Touched = evict if used, Idle = exceeds MaxIdleTime, Expired = exceeds MaxLifeTime).</param>
+    /// <example>
+    /// <code>
+    /// int evicted = pool.Evict(HayateEvictReason.Idle);
+    /// </code>
+    /// </example>
     int Evict(HayateEvictReason reason);
 }
