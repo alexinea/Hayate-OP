@@ -15,12 +15,12 @@ public class RejectPolicyTests
             .WithEnableAutoScaling(false)
             .Build();
 
-        // 耗尽池
+        // Exhaust the pool
         var obj1 = pool.Acquire();
 
-        // Act & Assert：无空闲对象时立即抛异常，不等待
+        // Act & Assert: throw immediately when no idle object is available, without waiting
         var exception = Assert.Throws<InvalidOperationException>(() => pool.Acquire());
-        Assert.Contains("无可用对象", exception.Message);
+        Assert.Contains("no available object", exception.Message);
     }
 
     [Fact]
@@ -36,7 +36,7 @@ public class RejectPolicyTests
         var obj1 = pool.Acquire();
         TestObject obj2 = null;
 
-        // Act：100ms后归还对象
+        // Act: return the object after 100ms
         _ = Task.Run(async () =>
         {
             await Task.Delay(100);
@@ -71,13 +71,13 @@ public class RejectPolicyTests
         var exception = Assert.Throws<TimeoutException>(() => pool.Acquire());
         sw.Stop();
 
-        Assert.Contains("超时", exception.Message);
-        // P2/R5 围栏：原断言 80≤elapsed≤200ms 的上界在宿主负载高/线程池饥饿时会偶发超窗误报。
-        // 改为只校验"确实等到超时（不早于配置的 100ms 太多）且没有永久挂起"：
-        //   下界 80ms ≈ 100ms 超时 - 计时/调度容差；
-        //   上界放宽到 10s，仅用于拦截"该超时却死锁不返回"的挂死回归（配合外层看门狗）。
-        Assert.True(sw.ElapsedMilliseconds >= 80, $"应在约 100ms 超时后抛错，实际 {sw.ElapsedMilliseconds}ms");
-        Assert.True(sw.ElapsedMilliseconds < 10_000, $"疑似超时路径挂死：{sw.ElapsedMilliseconds}ms 未返回");
+        Assert.Contains("timed out", exception.Message);
+        // Guard: the original upper bound of the 80<=elapsed<=200ms assertion would occasionally report a false overrun under high host load / thread-pool starvation.
+        // Now we only verify that it truly waited for the timeout (not much earlier than the configured 100ms) and did not hang forever:
+        //   lower bound 80ms ~= 100ms timeout - timing/scheduling tolerance;
+        //   upper bound relaxed to 10s, only used to catch the "should have timed out but deadlocked without returning" hang regression (paired with an outer watchdog).
+        Assert.True(sw.ElapsedMilliseconds >= 80, $"Should have thrown after the ~100ms timeout, actually {sw.ElapsedMilliseconds}ms");
+        Assert.True(sw.ElapsedMilliseconds < 10_000, $"Suspected hang in the timeout path: no return after {sw.ElapsedMilliseconds}ms");
     }
 
     [Fact]
@@ -105,8 +105,8 @@ public class RejectPolicyTests
         Assert.NotSame(obj1, obj2);
         Assert.True(sw.ElapsedMilliseconds >= 80);
         Assert.Equal(1, pool.GetStats().TotalMissed);
-        // T15 修复后语义：CreateNew 创建的是「已登记」的池内对象（借出状态），
-        // CurrentSize +1；旧实现返回未登记裸对象，Release 时被当作外来对象销毁。
+        // Post-fix semantics: CreateNew creates a "registered" in-pool object (borrowed state),
+        // CurrentSize +1; the old implementation returned an unregistered bare object that was destroyed as a foreign object on Release.
         Assert.Equal(initialCount + 1, pool.GetStats().CurrentSize);
     }
 
@@ -127,8 +127,8 @@ public class RejectPolicyTests
         var obj2 = pool.Acquire();
         pool.Release(obj2);
 
-        // Assert：T15 修复后语义——CreateNew 对象 Release 正常回池（不再被当作
-        // 外来对象销毁），可被后续 Acquire 复用。
+        // Assert: post-fix semantics -- a CreateNew object returns to the pool normally on Release (no longer treated as
+        // a foreign object and destroyed), and can be reused by a subsequent Acquire.
         Assert.Equal(1, pool.GetStats().PooledCount);
         var obj3 = pool.Acquire();
         Assert.Same(obj2, obj3);

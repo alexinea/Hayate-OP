@@ -1,17 +1,17 @@
-// 测试套件级"围栏"（P0/R2, R3）—— 与 tests/HayateOP.Tests/AssemblyInfo.cs 语义一致。
-// 本程序集以对象池并发/线程压测为主，多个类都会驱动 ThreadPool、GC、SpinLock、
-// 后台驱逐/校验回调与扩缩容冷却。默认跨类并行会让重并发类与轻量确定性用例互相竞争 CPU，
-// 既造成偶发超时/时序 flaky，也在宿主机器上叠加 CPU 空转。
+// Test-suite-level "fence" -- semantically consistent with tests/HayateOP.Tests/AssemblyInfo.cs.
+// This assembly is dominated by object-pool concurrency / thread stress testing; many classes drive the ThreadPool, GC, SpinLock,
+// background eviction / validation callbacks and scaling cooldowns. By default, cross-class parallelism makes the heavy-concurrency classes and the lightweight deterministic cases compete for CPU,
+// causing occasional timeouts / timing flakiness and also piling on idle CPU spins on the host machine.
 //
-// 因此在此**程序集级关闭测试并行化**：所有 collection 串行执行，作为最强的确定性围栏。
-// 其代价是整套基本串行；换取的是：任一用例不与它类并发争抢，CPU 占用收敛、结果可复现。
-// 若日后需要吞吐，可在并发类稳定后再改为按 collection 粒度精细并行，而把轻量类留在并行组。
+// Therefore, test parallelization is disabled at the **assembly level**: all collections run serially, serving as the strongest deterministic fence.
+// Its cost is that the whole suite is essentially serial; in exchange, no case contends with other classes, CPU usage converges and results are reproducible.
+// If throughput is needed later, once the concurrency classes are stable we can switch to fine-grained collection-level parallelism and keep the lightweight classes in the parallel group.
 //
-// 世代说明（LEGACY）：本文件属于 tests/legacy/HayateOP.Tests.Legacy（legacy 世代，
-// xunit v2 + VSTest，net6/net7）。程序集级关闭并行沿用 v2 的 CollectionBehavior。
-// net8/net9/net10(xunit v3 + MTP) 的版本见 tests/HayateOP.Tests/AssemblyInfo.cs，
-// 那里改用 Xunit.v3.Parallelization(Mode = ParallelMode.None)。两代各自独立，无需条件编译。
+// Generation note (LEGACY): this file belongs to tests/legacy/HayateOP.Tests.Legacy (the legacy generation,
+// xunit v2 + VSTest, net6/net7). Assembly-level parallelism disabling uses v2's CollectionBehavior.
+// For the net8/net9/net10 (xunit v3 + MTP) version see tests/HayateOP.Tests/AssemblyInfo.cs,
+// which switches to Xunit.v3.Parallelization(Mode = ParallelMode.None). The two generations are independent; no conditional compilation is needed.
 using Xunit;
 
-// v2：程序集级关闭跨 collection 并行
+// v2: disable cross-collection parallelism at the assembly level
 [assembly: CollectionBehavior(DisableTestParallelization = true)]

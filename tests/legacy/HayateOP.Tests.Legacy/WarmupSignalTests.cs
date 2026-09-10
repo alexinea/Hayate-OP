@@ -3,17 +3,17 @@ using DotNetCore.HayateOP.Policies;
 namespace DotNetCore.HayateOP.Tests;
 
 /// <summary>
-/// M17：预热就绪信号（WaitForWarmup）。
+/// Warm-up ready signal (WaitForWarmup).
 /// <para>
-/// 语义：<c>true</c> 时预热转后台执行，构造立即返回；借出（同步/异步）在预热完成前阻塞，
-/// 预热失败时信号同样置位（不出现永久阻塞）。默认 <c>false</c> 与 2.4 行为完全一致。
+/// Semantics: when <c>true</c>, warm-up moves to the background and construction returns immediately; borrows (sync/async) block until warm-up completes,
+/// and the signal is also set on warm-up failure (no permanent blocking). The default <c>false</c> matches the 2.4 behavior exactly.
 /// </para>
 /// </summary>
 public class WarmupSignalTests
 {
     private class GateObject { }
 
-    /// <summary>创建过程被外部 gate 阻塞的策略——用于确定性地证明「预热未完成 → 借出阻塞」。</summary>
+    /// <summary>Policy whose creation is blocked by an external gate -- used to deterministically prove "warm-up incomplete -> borrow blocks".</summary>
     private sealed class GatedPolicy : IHayateObjectPolicy<GateObject>
     {
         private readonly ManualResetEventSlim _gate;
@@ -35,10 +35,10 @@ public class WarmupSignalTests
         public void OnDestroy(GateObject item) { }
     }
 
-    /// <summary>创建必失败的策略——用于验证预热失败路径不会把借出永久挂住。</summary>
+    /// <summary>Policy whose creation always fails -- used to verify the warm-up failure path does not hang borrows forever.</summary>
     private sealed class ThrowingPolicy : IHayateObjectPolicy<GateObject>
     {
-        public GateObject Create() => throw new InvalidOperationException("create failed (M17 test)");
+        public GateObject Create() => throw new InvalidOperationException("create failed (warm-up failure path)");
         public bool OnRelease(GateObject item) => true;
         public bool Validate(GateObject item) => true;
         public void OnAcquire(GateObject item) { }
@@ -65,7 +65,7 @@ public class WarmupSignalTests
     [Fact]
     public void WaitForWarmup_False_ShouldKeepSynchronousPrewarm()
     {
-        // 零破坏：默认不等待 → 构造返回时预热已完成（同步预热）
+        // Zero breakage: by default it does not wait -> warm-up is already complete when construction returns (synchronous warm-up)
         using var pool = BaseBuilder("m17-default").Build();
 
         Assert.Equal(4, pool.GetStats().CurrentSize);
@@ -84,17 +84,17 @@ public class WarmupSignalTests
             .WithWaitForWarmup(true)
             .Build();
 
-        // 构造已返回而预热被 gate 阻塞 → 尚无对象创建（后台预热确实与构造解耦）
+        // Construction has returned but warm-up is gated -> no objects created yet (background warm-up is truly decoupled from construction)
         Assert.Equal(0, policy.CreatedCount);
 
         var acquire = Task.Run(() => pool.Acquire());
 
-        // 预热未完成期间借出必须阻塞（就绪门生效；L5 冷池自举让位）
-        Assert.False(acquire.Wait(TimeSpan.FromMilliseconds(500)), "预热未完成时 Acquire 不应返回");
+        // During warm-up the borrow must block (the ready gate takes effect; the cold-pool bootstrap yields)
+        Assert.False(acquire.Wait(TimeSpan.FromMilliseconds(500)), "Acquire must not return before warm-up completes");
 
-        // 放行预热 → 就绪信号置位 → 借出放行
+        // release the warm-up gate -> ready signal is set -> borrow is released
         gate.Set();
-        Assert.True(acquire.Wait(TimeSpan.FromSeconds(15)), "预热完成后 Acquire 应放行");
+        Assert.True(acquire.Wait(TimeSpan.FromSeconds(15)), "Acquire should be released after warm-up completes");
         Assert.Equal(4, policy.CreatedCount);
     }
 
@@ -111,12 +111,12 @@ public class WarmupSignalTests
 
         var pending = pool.AcquireAsync();
         await Task.Delay(300);
-        Assert.False(pending.IsCompleted, "预热未完成时 AcquireAsync 不应完成");
+        Assert.False(pending.IsCompleted, "AcquireAsync must not complete before warm-up completes");
 
         gate.Set();
 #if NET48
-        // net48 无 Task<T>.WaitAsync(TimeSpan)（.NET 6 引入），用 WhenAny + Delay 等价实现超时等待；
-        // net6.0/net7.0 等高版本走 #else 分支的原生 WaitAsync。
+        // net48 lacks Task<T>.WaitAsync(TimeSpan) (introduced in .NET 6); use WhenAny + Delay as an equivalent timeout wait;
+        // net6.0/net7.0 and other higher versions use the native WaitAsync in the #else branch.
         var completed = await Task.WhenAny(pending, Task.Delay(TimeSpan.FromSeconds(15)));
         Assert.Same(pending, completed);
         var item = await pending;
@@ -135,7 +135,7 @@ public class WarmupSignalTests
             .WithWaitForWarmup(true)
             .Build();
 
-        // 预热全程创建失败 → 就绪信号仍须置位，借出不得永久挂起（按拒绝语义快速失败）
+        // Creation fails throughout warm-up -> the ready signal must still be set and borrows must not hang forever (fail fast per the reject semantics)
         var outcome = Task.Run(() =>
         {
             try
@@ -149,6 +149,6 @@ public class WarmupSignalTests
             }
         });
 
-        Assert.True(outcome.Wait(TimeSpan.FromSeconds(15)), "预热失败后 Acquire 不得永久阻塞");
+        Assert.True(outcome.Wait(TimeSpan.FromSeconds(15)), "Acquire must not block forever after warm-up fails");
     }
 }

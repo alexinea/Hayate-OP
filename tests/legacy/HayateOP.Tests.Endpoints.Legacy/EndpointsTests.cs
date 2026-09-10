@@ -71,17 +71,17 @@ namespace HayateOP.Tests.Endpoints
 
             using var host = await hostBuilder.StartAsync();
 
-            // T05：池工厂是懒解析的——先解析一次以触发其把自身注册进 IHayateObjectPoolRegistry，
-            // 这样管理端点才能按逻辑池名 "TestObject" 找到它（替代 Type.GetType 反射寻址）。
+            // The pool factory is resolved lazily - resolve it once first to make it register itself with IHayateObjectPoolRegistry,
+            // so the management endpoints can find it by the logical pool name "TestObject" (replacing Type.GetType reflection-based addressing).
             var svc = host.Services.GetRequiredService<IHayateObjectPool<TestObject>>();
             Assert.NotNull(svc);
 
             var client = host.GetTestClient();
 
-            // Act：池名 = typeof(TestObject).Name = "TestObject"
+            // Act: pool name = typeof(TestObject).Name = "TestObject"
             var response = await client.GetAsync("/hayateop/TestObject/stats");
 
-            // Assert：注册表寻址应命中并返回 200 + stats 明细
+            // Assert: registry addressing should hit and return 200 + stats detail
             response.EnsureSuccessStatusCode();
             var content = await response.Content.ReadAsStringAsync();
             Assert.Contains("stats", content, StringComparison.OrdinalIgnoreCase);
@@ -114,10 +114,10 @@ namespace HayateOP.Tests.Endpoints
             using var host = await hostBuilder.StartAsync();
             var client = host.GetTestClient();
 
-            // Act：一个从未注册过的池名
+            // Act: a pool name that was never registered
             var response = await client.GetAsync("/hayateop/DoesNotExist");
 
-            // Assert：注册表未命中 → 404
+            // Assert: registry miss -> 404
             Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
         }
 

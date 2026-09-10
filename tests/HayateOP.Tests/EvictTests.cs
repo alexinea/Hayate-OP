@@ -6,9 +6,9 @@ using System.Threading.Tasks;
 namespace DotNetCore.HayateOP.Tests;
 
 /// <summary>
-/// M15（2.5）：分类驱逐 API——Evict(HayateEvictReason)。
-/// 验收：Touched/Idle/Expired 三类对象按分类驱逐计数正确；借出中对象不被驱逐；
-/// 与后台驱逐共用的幂等 CAS 保证并发安全；默认后台驱逐行为不变。
+/// Categorized eviction API -- Evict(HayateEvictReason).
+/// Acceptance: the three object categories Touched/Idle/Expired are evicted with correct per-category counts; borrowed objects are not evicted;
+/// the idempotent CAS shared with the background eviction guarantees thread safety; the default background eviction behavior is unchanged.
 /// </summary>
 public class EvictTests
 {
@@ -21,11 +21,11 @@ public class EvictTests
             .WithPoolName("m15-touched")
             .WithMinSize(2)
             .WithMaxSize(4)
-            .WithEnableEviction(false)      // 关后台驱逐，排除干扰
+            .WithEnableEviction(false)      // disable background eviction to remove interference
             .WithEnableAutoScaling(false)
             .Build();
 
-        // 借出再归还 → 该对象 LeaseCount=1（Touched）；另一对象保持未用（LeaseCount=0）
+        // Borrow then return -> that object has LeaseCount=1 (Touched); the other object stays unused (LeaseCount=0)
         var a = pool.Acquire();
         pool.Release(a);
 
@@ -33,7 +33,7 @@ public class EvictTests
         Assert.Equal(1, evicted);
         Assert.Equal(1, pool.GetStats().PooledCount);
 
-        // 再驱逐一次：剩余对象未被用过，应 0 驱逐
+        // Evict again: the remaining object was never used, so eviction should be 0
         Assert.Equal(0, pool.Evict(HayateEvictReason.Touched));
     }
 
@@ -49,17 +49,17 @@ public class EvictTests
             .WithMaxIdleTime(TimeSpan.FromMilliseconds(150))
             .Build();
 
-        // 借出一个并持有 300ms：另一对象空闲时长超阈值，借出对象不受影响
+        // Borrow one and hold it for 300ms: the other object's idle time exceeds the threshold, and the borrowed object is unaffected
         var a = pool.Acquire();
         Thread.Sleep(300);
 
         var evicted = pool.Evict(HayateEvictReason.Idle);
-        Assert.Equal(1, evicted); // 仅空闲超阈值的那个
-        // PooledCount 只统计分片内空闲对象（借出中的 a 不在链表）——唯一空闲项被驱逐后为 0
+        Assert.Equal(1, evicted); // only the one whose idle time exceeded the threshold
+        // PooledCount only counts idle objects within the shard (the borrowed 'a' is not in the linked list) -- after the only idle item is evicted it becomes 0
         Assert.Equal(0, pool.GetStats().PooledCount);
-        Assert.Equal(1, pool.TakeSnapshot().BorrowedCount); // 借出对象完好
+        Assert.Equal(1, pool.TakeSnapshot().BorrowedCount); // borrowed object intact
 
-        // 归还后其空闲时钟重置：立即驱逐应 0
+        // After return its idle clock resets: an immediate eviction should yield 0
         pool.Release(a);
         Assert.Equal(0, pool.Evict(HayateEvictReason.Idle));
         Assert.Equal(1, pool.GetStats().PooledCount);
@@ -77,7 +77,7 @@ public class EvictTests
             .WithMaxLifeTime(TimeSpan.FromMilliseconds(150))
             .Build();
 
-        Thread.Sleep(300); // 两个对象均超过 MaxLifeTime
+        Thread.Sleep(300); // both objects exceed MaxLifeTime
 
         var evicted = pool.Evict(HayateEvictReason.Expired);
         Assert.Equal(2, evicted);
@@ -95,12 +95,12 @@ public class EvictTests
             .WithEnableAutoScaling(false)
             .Build();
 
-        // 唯一对象处于借出中（LeaseCount=1）：Touched 不应驱逐借出对象
+        // The only object is borrowed (LeaseCount=1): Touched must not evict borrowed objects
         var a = pool.Acquire();
         Assert.Equal(0, pool.Evict(HayateEvictReason.Touched));
         Assert.Equal(1, pool.TakeSnapshot().BorrowedCount);
 
-        // 归还后再驱逐：可命中
+        // Evict again after return: can hit
         pool.Release(a);
         Assert.Equal(1, pool.Evict(HayateEvictReason.Touched));
         Assert.Equal(0, pool.GetStats().PooledCount);
@@ -117,7 +117,7 @@ public class EvictTests
             .WithEnableAutoScaling(false)
             .Build();
 
-        // 并发借还与分类驱逐交错：借还零异常、对象不丢不重（幂等 CAS 认领保证）
+        // Concurrent borrow/return interleaved with categorized eviction: borrow/return has zero exceptions, no lost or duplicated objects (guaranteed by idempotent CAS claim)
         var workers = Enumerable.Range(0, 4).Select(async _ =>
         {
             for (var i = 0; i < 100; i++)
@@ -141,7 +141,7 @@ public class EvictTests
         await Task.WhenAll(workers);
         await evictTask;
 
-        // 借还路径无异常即通过；统计口径自洽（PooledCount ≥ 0 已由 GetStats 保证）
+        // Passing means the borrow/return path threw no exception; the statistics are self-consistent (PooledCount >= 0 is already guaranteed by GetStats)
         Assert.True(pool.GetStats().PooledCount >= 0);
     }
 

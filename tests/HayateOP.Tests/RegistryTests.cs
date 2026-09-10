@@ -5,8 +5,8 @@ using System.Threading.Tasks;
 namespace DotNetCore.HayateOP.Tests;
 
 /// <summary>
-/// M11+（2.5）：注册表完整版——GetAll 枚举（含元数据）/ Remove 反注册 / Count。
-/// Register / TryGet 原语义回归一并提供。
+/// Registry complete version (2.5): GetAll enumeration (with metadata) / Remove unregistration / Count.
+/// Register / TryGet original-semantics regression is also covered.
 /// </summary>
 public class RegistryTests
 {
@@ -30,7 +30,7 @@ public class RegistryTests
         Assert.Equal(typeof(TestObject), entry.ElementType);
         Assert.Same(pool, entry.Pool);
         Assert.Equal(pool.GetType(), entry.PoolType);
-        // 注册（≈构建）时间应落在最近一分钟内
+        // Registration (~build) time should fall within the last minute
         Assert.True(entry.RegisteredAt <= DateTimeOffset.UtcNow.AddSeconds(1));
         Assert.True(entry.RegisteredAt >= DateTimeOffset.UtcNow.AddMinutes(-1));
     }
@@ -51,7 +51,7 @@ public class RegistryTests
         var names = registry.GetAll().Select(m => m.PoolName).OrderBy(n => n).ToArray();
         Assert.Equal(new[] { "pool-a", "pool-b", "pool-c" }, names);
 
-        // Names 视图与 GetAll 一致
+        // The Names view is consistent with GetAll
         var namesLegacy = registry.Names.OrderBy(n => n).ToArray();
         Assert.Equal(names, namesLegacy);
     }
@@ -71,7 +71,7 @@ public class RegistryTests
         Assert.True(registry.TryGet("pool-b", out var remaining));
         Assert.Same(poolB, remaining);
 
-        // 重复移除 / 未知名称 / 空白名称均返回 false
+        // Repeated removal / unknown name / blank name all return false
         Assert.False(registry.Remove("pool-a"));
         Assert.False(registry.Remove("never-registered"));
         Assert.False(registry.Remove(null));
@@ -102,7 +102,7 @@ public class RegistryTests
         using var pool = BuildPool("pool-concurrent");
         registry.Register("pool-concurrent", pool);
 
-        // 并发注册/移除临时名称，GetAll 每次返回自洽快照（无异常、计数自洽）
+        // Concurrently register/remove temporary names; GetAll returns a self-consistent snapshot each time (no exception, consistent count)
         var workers = Enumerable.Range(0, 4).Select(async id =>
         {
             for (var i = 0; i < 200; i++)
@@ -117,7 +117,7 @@ public class RegistryTests
 
         await Task.WhenAll(workers);
 
-        // 并发Worker全部结束后，仅初始注册项留存
+        // After all concurrent workers finish, only the initial registration remains
         Assert.Equal(1, registry.Count);
         Assert.Equal("pool-concurrent", Assert.Single(registry.GetAll()).PoolName);
     }

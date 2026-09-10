@@ -5,9 +5,9 @@ using System.Threading.Tasks;
 namespace DotNetCore.HayateOP.Tests;
 
 /// <summary>
-/// PR-E A3（=M5 统一 CT 传递）：AcquireAsync 超时重载与取消传播测试。
-/// 语义对齐同步 Acquire(TimeSpan)：超时抛 TimeoutException（含 missed 计数/强制扩容），
-/// 外部取消传播 TaskCanceledException；旧签名 AcquireAsync(ct) 保持不变。
+/// Tests for the AcquireAsync timeout overload and cancellation propagation.
+/// Mirrors the synchronous Acquire(TimeSpan): a timeout throws TimeoutException (with the missed counter / forced expansion),
+/// external cancellation propagates a TaskCanceledException; the original AcquireAsync(ct) signature is unchanged.
 /// </summary>
 public class AcquireAsyncTimeoutTests
 {
@@ -16,7 +16,7 @@ public class AcquireAsyncTimeoutTests
     [Fact]
     public async Task Timeout_ShouldThrowTimeoutExceptionWhenExhausted()
     {
-        // Arrange：容量 1，首借自举拿走唯一对象；第二借无归还 → 超时。
+        // Arrange: capacity 1, the first borrow bootstraps and takes the only object; the second borrow has nothing to return -> times out.
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("a3-timeout-exhausted")
             .WithEnableAutoScaling(false)
@@ -28,20 +28,20 @@ public class AcquireAsyncTimeoutTests
         var first = await pool.AcquireAsync(CancellationToken.None);
         Assert.NotNull(first);
 
-        // Act + Assert：池耗尽（1 借出，Max=1 不自举），200ms 必超时
+        // Act + Assert: the pool is exhausted (1 borrowed, Max=1 so it does not bootstrap), so a 200ms timeout is guaranteed
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var ex = await Assert.ThrowsAsync<TimeoutException>(
             () => pool.AcquireAsync(TimeSpan.FromMilliseconds(200)));
         sw.Stop();
 
-        Assert.Contains("超时", ex.Message);
-        Assert.True(sw.Elapsed >= TimeSpan.FromMilliseconds(150), $"过早返回：{sw.Elapsed.TotalMilliseconds:F0}ms");
+        Assert.Contains("timed out", ex.Message);
+        Assert.True(sw.Elapsed >= TimeSpan.FromMilliseconds(150), $"Returned too early: {sw.Elapsed.TotalMilliseconds:F0}ms");
     }
 
     [Fact]
     public async Task Timeout_ShouldReturnImmediatelyWhenAvailable()
     {
-        // Arrange：Min=1 预热，池有可用对象
+        // Arrange: Min=1 warm-up, pool has an available object
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("a3-timeout-available")
             .WithEnableAutoScaling(false)
@@ -50,7 +50,7 @@ public class AcquireAsyncTimeoutTests
             .WithRejectPolicy(HayatePoolRejectPolicy.BlockTimeout)
             .Build();
 
-        // Act：极短超时也应立即成功（可用对象无需等待）
+        // Act: even a very short timeout must succeed immediately (an available object needs no wait)
         var obj = await pool.AcquireAsync(TimeSpan.FromMilliseconds(200));
 
         // Assert
@@ -61,7 +61,7 @@ public class AcquireAsyncTimeoutTests
     [Fact]
     public async Task Timeout_ShouldSucceedAfterReleaseWithinWindow()
     {
-        // Arrange：容量 1，首借占用；100ms 后后台归还
+        // Arrange: capacity 1, the first borrow occupies it; it is returned in the background after 100ms
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("a3-timeout-release-in-window")
             .WithEnableAutoScaling(false)
@@ -78,10 +78,10 @@ public class AcquireAsyncTimeoutTests
             pool.Release(first);
         });
 
-        // Act：5s 窗口内等待归还信号唤醒
+        // Act: wait within the 5s window for the return signal to wake the call
         var second = await pool.AcquireAsync(TimeSpan.FromSeconds(5));
 
-        // Assert：拿到的是归还的那个对象（池化复用）
+        // Assert: the retrieved object is the returned one (pooled reuse)
         Assert.Same(first, second);
         pool.Release(second);
     }
@@ -89,7 +89,7 @@ public class AcquireAsyncTimeoutTests
     [Fact]
     public async Task ExternalCancel_ShouldThrowTaskCanceledNotTimeout()
     {
-        // Arrange：容量 1，首借占用；外部 CT 200ms 后取消（远小于 10s 超时）
+        // Arrange: capacity 1, the first borrow occupies it; the external CT is cancelled after 200ms (far less than the 10s timeout)
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("a3-external-cancel")
             .WithEnableAutoScaling(false)
@@ -101,7 +101,7 @@ public class AcquireAsyncTimeoutTests
         var first = await pool.AcquireAsync(CancellationToken.None);
         using var cts = new CancellationTokenSource(200);
 
-        // Act + Assert：外部取消必须传播为 OCE 族，而非被转译成 TimeoutException
+        // Act + Assert: external cancellation must propagate as the OperationCanceledException family, not be translated into a TimeoutException
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => pool.AcquireAsync(TimeSpan.FromSeconds(10), cts.Token));
     }
@@ -109,7 +109,7 @@ public class AcquireAsyncTimeoutTests
     [Fact]
     public async Task InfiniteTimeout_ShouldHonorExternalCancel()
     {
-        // Arrange：InfiniteTimeSpan 转调无超时版本，外部预取消令牌
+        // Arrange: InfiniteTimeSpan delegates to the no-timeout overload with an externally pre-cancelled token
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("a3-infinite-cancel")
             .WithEnableAutoScaling(false)
@@ -130,7 +130,7 @@ public class AcquireAsyncTimeoutTests
     [Fact]
     public async Task LegacySignature_ShouldRemainAvailable()
     {
-        // 旧签名 AcquireAsync(ct) 保持不变（A3 零破坏承诺）
+        // The legacy AcquireAsync(ct) signature is unchanged (zero-breakage commitment)
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("a3-legacy-signature")
             .WithEnableAutoScaling(false)

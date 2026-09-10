@@ -55,7 +55,7 @@ public class BasicFunctionTests
         // Assert
         Assert.Equal(3, stats.TotalAcquired);
 
-        // 归还后再次借出，验证累计次数继续累加
+        // After returning, borrow again and verify the cumulative count keeps increasing
         pool.Release(obj1);
         var obj4 = pool.Acquire();
         stats = pool.GetStats();
@@ -65,23 +65,23 @@ public class BasicFunctionTests
     [Fact]
     public void FifoOrder_AcquireReturnsObjectsInReleaseOrder()
     {
-        // 关闭分片以在单分片内确定性验证 FIFO（多分片下 FIFO 仅保证分片内顺序）
+        // Disable sharding to deterministically verify FIFO within a single shard (under multiple shards FIFO only guarantees in-shard order)
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithEnableSharding(false)
             .WithMinSize(5)
             .WithMaxSize(5)
             .Build();
 
-        // 借出全部预暖对象并保留引用顺序
+        // Borrow all pre-warmed objects and keep the reference order
         var acquired = new TestObject[5];
         for (var i = 0; i < acquired.Length; i++)
             acquired[i] = pool.Acquire();
 
-        // 按借出顺序归还，形成 FIFO 空闲队列（分片空闲链表 Add 尾插）
+        // Return in borrow order to form the FIFO idle queue (shard idle linked list appends at tail)
         foreach (var o in acquired)
             pool.Release(o);
 
-        // 再次借出应保持归还顺序（TryTake 头取，先入先出）
+        // Borrowing again should preserve the return order (TryTake takes from head, first-in-first-out)
         for (var i = 0; i < acquired.Length; i++)
         {
             var o = pool.Acquire();
@@ -92,12 +92,12 @@ public class BasicFunctionTests
     [Fact]
     public void TrackedRegistry_ConservesObjectsAcrossBorrowReleaseCycles()
     {
-        // T09 回归守卫：登记表按分片拆分后不得产生孤儿登记项。
-        // 纯借还循环（驱逐/校验/自动扩缩容全关）后应满足：
-        //   1) CurrentSize（各分片登记表 TrackedCount 之和）== PooledCount（各分片空闲数之和）
-        //      —— 即「登记总数 == 空闲数」，无借出残留、无孤儿登记；
-        //   2) TotalCreated 不增长 —— 纯借还绝不新建对象；
-        //   3) 归还的对象能再次按原样借出（Release 反查逐分片探测路径正确）。
+        // Regression guard: after the registry is split per shard, no orphaned registration entries may appear.
+        // After a pure borrow/return loop (eviction/validation/auto-scaling all off), the following should hold:
+        //   1) CurrentSize (sum of per-shard registry TrackedCount) == PooledCount (sum of per-shard idle counts)
+        //      -- i.e. "total registered == idle count", with no outstanding borrow residue and no orphaned registrations;
+        //   2) TotalCreated does not grow -- a pure borrow/return never creates new objects;
+        //   3) returned objects can be borrowed again as-is (Release's per-shard probe path is correct).
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithEnableSharding(true)
             .WithShardCount(4)
@@ -127,7 +127,7 @@ public class BasicFunctionTests
         Assert.Equal(stats.PooledCount, stats.CurrentSize);
         Assert.Equal(createdBaseline, stats.TotalCreated);
 
-        // 末轮抽验：任取一个已归还对象仍可正常借出（登记项 round-trip 有效）
+        // Final-round spot check: any returned object can still be borrowed normally (registration round-trip is valid)
         var reAcquired = pool.Acquire();
         Assert.NotNull(reAcquired);
         pool.Release(reAcquired);
@@ -162,7 +162,7 @@ public class BasicFunctionTests
 
         var stats = pool.GetStats();
 
-        // Assert：累计借出次数 = 线程数 × 每个线程借出次数
+        // Assert: cumulative borrow count = thread count x borrows per thread
         Assert.Equal(threadCount * acquirePerThread, stats.TotalAcquired);
     }
     
@@ -181,7 +181,7 @@ public class BasicFunctionTests
 
         // Assert
         Assert.Equal(5, pool.GetStats().PooledCount);
-        Assert.True(obj.IsReset); // 验证Reset钩子被调用
+        Assert.True(obj.IsReset); // verify the Reset hook was called
     }
 
     [Fact]
@@ -207,7 +207,7 @@ public class BasicFunctionTests
         pool.Release(externalObj);
 
         // Assert
-        Assert.Equal(5, pool.GetStats().PooledCount); // 池大小不变
+        Assert.Equal(5, pool.GetStats().PooledCount); // pool size unchanged
     }
 
     [Fact]
@@ -225,7 +225,7 @@ public class BasicFunctionTests
         {
             new HayatePoolBuilder<TestObject>()
                 .WithMinSize(100)
-                .WithMaxSize(50) // Min > Max，无效配置
+                .WithMaxSize(50) // Min > Max, invalid configuration
                 .Build();
         });
     }

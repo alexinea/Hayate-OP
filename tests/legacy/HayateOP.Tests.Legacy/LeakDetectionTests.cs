@@ -9,8 +9,8 @@ public class LeakDetectionTests
     [Fact]
     public void EnableLeakDetection_ShouldAcquireAndReleaseNormally()
     {
-        // PR-D L1：泄漏检测（阈值判定 + LeakCount）与栈取证解耦后，开启检测
-        // 不再意味着每次借出抓栈（默认 Off）；本用例仅验证检测开启时借还路径正常。
+        // After leak detection (threshold judgment + LeakCount) was decoupled from stack capture, enabling detection
+        // no longer means capturing a stack on every borrow (default Off); this case only verifies the borrow/return path works when detection is on.
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithEnableLeakDetection(true)
             .WithLeakDetectionThreshold(TimeSpan.FromSeconds(1))
@@ -40,28 +40,28 @@ public class LeakDetectionTests
             .WithLeakDetectionThreshold(TimeSpan.FromMilliseconds(100))
             .Build();
 
-        // 借出对象不归还
+        // Borrowed object is not returned
         var obj = pool.Acquire();
 
-        // 等待超过泄漏阈值
+        // Wait beyond the leak threshold
         Thread.Sleep(200);
 
         var snapshot = pool.TakeSnapshot();
 
-        // T13：原断言 LeakCount >= 0 为恒真（掩盖了 T04 后泄漏检测失效的缺陷）。
-        // 修复后 TakeSnapshot 遍历分片登记表（含借出对象），借出超阈值未归还必须被检出。
-        // PR-D L1：默认 LeakTraceCaptureMode=Off 不抓栈，LeakTraces 条目为占位文案
-        //（"No stack trace available"），但泄漏发现与计数语义不变。
+        // The original assertion LeakCount >= 0 was always true (it masked a defect where leak detection silently failed).
+        // After the fix, TakeSnapshot walks the per-shard registry (including borrowed objects), so a borrowed object past the threshold without return must be detected.
+        // Default LeakTraceCaptureMode=Off does not capture a stack; LeakTraces entries are placeholder text
+        // ("No stack trace available"), but leak discovery and counting semantics are unchanged.
         Assert.True(snapshot.LeakCount >= 1,
-            $"借出超阈值对象应被检出泄漏，实际 LeakCount={snapshot.LeakCount}");
+            $"A borrowed object past the threshold should be detected as a leak; actual LeakCount={snapshot.LeakCount}");
         Assert.NotEmpty(snapshot.LeakTraces);
     }
 
     [Fact]
     public void DefaultOffMode_ShouldNotCaptureStackTrace()
     {
-        // PR-D L1 行为变更：默认取证模式 Off——借出热路径不抓取调用栈（2.0 及之前
-        // 每次借出抓全栈，37.5μs / 28.7KB 量级）。经分片登记表反射核验包装对象无栈。
+        // Behavior change: the default capture mode is Off -- the borrow hot path does not capture the call stack (in 2.0 and earlier
+        // every borrow captured the full stack, on the order of 37.5us / 28.7KB). Reflection over the sharded registry confirms the wrapped object has no stack.
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithEnableLeakDetection(true)
             .WithLeakDetectionThreshold(TimeSpan.FromMinutes(30))
@@ -80,7 +80,7 @@ public class LeakDetectionTests
     [Fact]
     public void EveryAcquireMode_ShouldCaptureStackTrace()
     {
-        // 显式 opt-in 旧行为（2.0 语义）：每次借出均抓取调用栈。
+        // Explicitly opt into the old behavior (2.0 semantics): capture the call stack on every borrow.
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithEnableLeakDetection(true)
             .WithLeakDetectionThreshold(TimeSpan.FromMinutes(30))
@@ -104,7 +104,7 @@ public class LeakDetectionTests
     [Fact]
     public void SampledMode_ShouldCaptureEveryNthAcquire()
     {
-        // 采样模式（1/N）：第 1 次必抓，之后每 N 次抓 1 次。N=2 借出 4 个 → 恰好 2 次抓栈（第 1、3 个）。
+        // Sampled mode (1/N): the 1st is always captured, then 1 of every N thereafter. N=2, 4 borrows -> exactly 2 captures (the 1st and 3rd).
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithEnableLeakDetection(true)
             .WithLeakDetectionThreshold(TimeSpan.FromMinutes(30))
@@ -121,8 +121,8 @@ public class LeakDetectionTests
 
     private static HayateObject<TestObject> GetWrapped(IHayateObjectPool<TestObject> pool, TestObject item)
     {
-        // T09：登记表已按分片拆分（池级 _objectMap → 各 Shard 私有字段 _objects），
-        // 此处经 _shards 逐分片探测登记表取包装对象（与 ShardAtomicRemovalTests 同款反射助手）。
+        // The registry is now split by shard (pool-level _objectMap -> each Shard's private _objects field),
+        // so we probe the registry table shard by shard via _shards to fetch the wrapped object (same reflection helper as in ShardAtomicRemovalTests).
         var shardsField = pool.GetType().GetField("_shards", BindingFlags.Instance | BindingFlags.NonPublic)!;
         Assert.NotNull(shardsField);
         var shards = (Array)shardsField.GetValue(pool)!;

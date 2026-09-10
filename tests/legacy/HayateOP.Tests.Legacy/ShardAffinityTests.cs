@@ -7,9 +7,9 @@ using System.Threading.Tasks;
 namespace DotNetCore.HayateOP.Tests;
 
 /// <summary>
-/// M18（2.5）：细粒度 affinity 策略——ShardAffinityMode（None/Thread/Custom）。
-/// 验收：Thread 模式同线程稳定命中同 shard；None 现状语义不变；
-/// Custom 委托生效且异常/越界安全回落；默认 None 热路径零额外开销（起始索引恒 0）。
+/// Fine-grained affinity policy -- ShardAffinityMode (None/Thread/Custom).
+/// Acceptance: Thread mode stably hits the same shard from the same thread; None keeps its current semantics;
+/// the Custom delegate takes effect and safely falls back on exception/out-of-range; default None has zero extra hot-path overhead (start index always 0).
 /// </summary>
 public class ShardAffinityTests
 {
@@ -26,7 +26,7 @@ public class ShardAffinityTests
             .WithShardAffinity(HayateShardAffinityMode.None)
             .Build();
 
-        // None 模式：从 0 号分片顺序扫描——首个借出对象必来自 0 号分片
+        // None mode: sequential scan from shard 0 -- the first borrowed object must come from shard 0
         Assert.Equal(4, pool.GetStats().PooledCount);
         var a = pool.Acquire();
         Assert.Equal(0, GetShardIndex(pool, a));
@@ -46,8 +46,8 @@ public class ShardAffinityTests
 
         Assert.Equal(8, pool.GetStats().PooledCount);
 
-        // 同一线程反复借还：每轮首个借出（起始分片有货时）必命中同一亲和分片。
-        // 归还后对象回源分片，起始分片始终有货（每分片 2 个空闲，每轮仅借 1 个）。
+        // Same thread repeatedly borrows/returns: each round's first borrow (when the start shard has stock) must hit the same affinity shard.
+        // After return the object goes back to its source shard, and the start shard always has stock (2 idle per shard, only 1 borrowed per round).
         var firstIndexes = new HashSet<int>();
         for (var round = 0; round < 30; round++)
         {
@@ -56,15 +56,15 @@ public class ShardAffinityTests
             pool.Release(obj);
         }
 
-        // 同一线程所有「从空闲池直接命中」的首个对象来自同一分片（稳定性核心断言）
+        // All first objects "directly hit from the idle pool" on the same thread come from the same shard (the core stability assertion)
         Assert.Single(firstIndexes);
     }
 
     [Fact]
     public void ThreadMode_ThreadIdsShouldMapToDeterminedShard()
     {
-        // 起始分片纯函数性验证：池满（每分片都有货）时，Thread 模式下
-        // 借出的第一个对象的 ShardIndex 应等于黄金比例散列映射结果。
+        // Pure-function verification of the start shard: when the pool is full (every shard has stock), under Thread mode
+        // the first borrowed object's ShardIndex should equal the golden-ratio hash mapping result.
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("affinity-thread-hash")
             .WithMinSize(8)
@@ -90,7 +90,7 @@ public class ShardAffinityTests
             .WithCustomShardAffinity(() => 2)
             .Build();
 
-        // Custom：委托指向 2 号分片，首个借出对象应来自 2 号分片
+        // Custom: the delegate points to shard 2, so the first borrowed object should come from shard 2
         var a = pool.Acquire();
         Assert.Equal(2, GetShardIndex(pool, a));
         pool.Release(a);
@@ -99,7 +99,7 @@ public class ShardAffinityTests
     [Fact]
     public void CustomMode_OutOfRangeAndThrowingSelectors_ShouldFallBackSafely()
     {
-        // 越界回落：委托返回 99（越界）→ 顺序扫描语义
+        // Out-of-range fallback: the delegate returns 99 (out of range) -> sequential scan semantics
         using var pool1 = new HayatePoolBuilder<TestObject>()
             .WithPoolName("affinity-oob")
             .WithMinSize(4)
@@ -111,7 +111,7 @@ public class ShardAffinityTests
         Assert.Equal(0, GetShardIndex(pool1, a1));
         pool1.Release(a1);
 
-        // 委托抛异常 → 回落顺序扫描，借出不中断
+        // Delegate throws -> fall back to sequential scan, borrow is not interrupted
         using var pool2 = new HayatePoolBuilder<TestObject>()
             .WithPoolName("affinity-throw")
             .WithMinSize(4)
@@ -127,17 +127,17 @@ public class ShardAffinityTests
     [Fact]
     public void CustomMode_WithoutSelector_ShouldFallBackToNoneOnBuild()
     {
-        // ApplyFeatureSwitches 规范化：Custom 但无委托 → 回落 None（不拒绝构建）
+        // ApplyFeatureSwitches normalization: Custom but no delegate -> falls back to None (does not reject the build)
         var options = new HayatePoolOptions { ShardAffinityMode = HayateShardAffinityMode.Custom };
         options.ApplyFeatureSwitches();
         Assert.Equal(HayateShardAffinityMode.None, options.ShardAffinityMode);
 
-        // 未知枚举值同样回落 None
+        // Unknown enum value also falls back to None
         var options2 = new HayatePoolOptions { ShardAffinityMode = (HayateShardAffinityMode)99 };
         options2.ApplyFeatureSwitches();
         Assert.Equal(HayateShardAffinityMode.None, options2.ShardAffinityMode);
 
-        // Builder 传入未知枚举值应快速失败
+        // Builder should fail fast when an unknown enum value is passed
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             new HayatePoolBuilder<TestObject>().WithShardAffinity((HayateShardAffinityMode)42));
     }
@@ -154,7 +154,7 @@ public class ShardAffinityTests
             .WithEnableMetrics(true)
             .Build();
 
-        // 多线程并发借还：affinity 只改变扫描起点，不改变并发正确性
+        // Multi-threaded concurrent borrow/return: affinity only changes the scan start, not concurrency correctness
         var tasks = Enumerable.Range(0, 8).Select(async _ =>
         {
             for (var i = 0; i < 200; i++)
@@ -171,7 +171,7 @@ public class ShardAffinityTests
         Assert.True(stats.TotalAcquired >= 1600);
     }
 
-    /// <summary>借出对象的 ShardIndex 在借出路径记录，经登记表反射读取。</summary>
+    /// <summary>The borrowed object's ShardIndex is recorded on the borrow path and read via reflection on the registry.</summary>
     private static int GetShardIndex(IHayateObjectPool<TestObject> pool, TestObject obj)
     {
         var w = GetWrapped(pool, obj);
@@ -179,7 +179,7 @@ public class ShardAffinityTests
         return w.ShardIndex;
     }
 
-    /// <summary>与 LeakDetectionTests 同款反射助手：经 _shards 逐分片探测登记表取包装对象。</summary>
+    /// <summary>Same reflection helper as in LeakDetectionTests: probes the registry table shard by shard via _shards to fetch the wrapped object.</summary>
     private static HayateObject<TestObject> GetWrapped(IHayateObjectPool<TestObject> pool, TestObject item)
     {
         var shardsField = pool.GetType().GetField("_shards", BindingFlags.Instance | BindingFlags.NonPublic)!;

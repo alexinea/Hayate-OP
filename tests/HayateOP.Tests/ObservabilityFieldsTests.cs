@@ -6,15 +6,15 @@ using System.Threading;
 namespace DotNetCore.HayateOP.Tests;
 
 /// <summary>
-/// M10+M20（2.5）：观测字段结构化。
-/// M10：借出取证 string 全文 → StackFrame[]（低开销采集，快照按需格式化）。
-/// M20：HayateObject 增 CreatedAtTick / LeaseCount / OwnerPoolName，经快照 ObjectDetails 输出。
+/// Observability fields structured.
+/// Borrow evidence changed from full string -> StackFrame[] (low-overhead capture, formatted on demand in snapshots).
+/// HayateObject gains CreatedAtTick / LeaseCount / OwnerPoolName, exposed via the snapshot's ObjectDetails.
 /// </summary>
 public class ObservabilityFieldsTests
 {
     private sealed class TestObject { }
 
-    // ---------- M10 ----------
+    // ---------- borrow-context capture ----------
 
     [Fact(Timeout = 30_000)]
     public void EveryAcquireMode_ShouldCaptureLeaseContext()
@@ -31,25 +31,25 @@ public class ObservabilityFieldsTests
         Assert.NotNull(w.LeaseContext);
         var ctx = w.LeaseContext;
 
-        // 结构化帧：包含借出调用链上的方法帧（Acquire 或测试辅助方法）
+        // Structured frames: contain the method frames on the borrow call chain (Acquire or a test helper method)
         var frames = ctx.Frames;
         Assert.NotEmpty(frames);
         var methodNames = frames.Select(f => f.GetMethod()?.Name).ToList();
-        // 借出调用链须留有方法帧。M3 后 Acquire()/Acquire(TimeSpan) 均为极薄转发
-        // （`return AcquireCore(...)`），高版本 JIT 的分层编译/PGO 可能将其内联，
-        // 栈帧中仅剩 AcquireCore —— 断言本意为「含借出链方法帧」，二者皆满足。
+        // The borrow call chain must leave a method frame. After the refactor Acquire()/Acquire(TimeSpan) are extremely thin forwards
+        // (`return AcquireCore(...)`), and higher-version JIT tiered compilation / PGO may inline it,
+        // leaving only AcquireCore in the stack -- the assertion means "contains a borrow-chain method frame", and either satisfies it.
         Assert.Contains(methodNames, n => n == "Acquire" || n == "AcquireCore");
         Assert.Contains("EveryAcquireMode_ShouldCaptureLeaseContext", methodNames);
-        // 低开销口径：不解析源文件行号
+        // Low-overhead measure: source file line numbers are not resolved
         Assert.All(frames, f => Assert.Null(f.GetFileName()));
 
-        // M16：租约 ID 单调递增；AsyncLocal 流上下文在租约期内与包装侧一致
+        // Lease ID is monotonically increasing; the AsyncLocal flow context matches the wrapper side during the lease
         Assert.True(ctx.LeaseId > 0);
         Assert.Same(ctx, HayateLeaseContext.Current);
-        Assert.True(ctx.BorrowedAt > 0); // 借出时刻（Stopwatch ticks）
+        Assert.True(ctx.BorrowedAt > 0); // borrow timestamp (Stopwatch ticks)
 
         pool.Release(a);
-        // Release 结束租约：流上下文清空
+        // Release ends the lease: the flow context is cleared
         Assert.Null(HayateLeaseContext.Current);
     }
 
@@ -84,7 +84,7 @@ public class ObservabilityFieldsTests
         var snapshot = pool.TakeSnapshot();
         Assert.NotEmpty(snapshot.LeakTraces);
         var trace = snapshot.LeakTraces[0];
-        // M16 格式化形态：[Lease {id}] 前缀 + Type.Method+0x偏移，帧间 " <- " 连接
+        // Format shape: a "[Lease {id}]" prefix + Type.Method+0x offset, frames joined by " <- "
         Assert.StartsWith("[Lease ", trace);
         Assert.Contains("ObservabilityFieldsTests", trace);
         Assert.Contains("+0x", trace);
@@ -93,7 +93,7 @@ public class ObservabilityFieldsTests
         pool.Release(obj);
     }
 
-    // ---------- M20 ----------
+    // ---------- lifecycle object fields ----------
 
     [Fact(Timeout = 30_000)]
     public void LeaseCount_ShouldIncrementPerAcquire()
@@ -109,7 +109,7 @@ public class ObservabilityFieldsTests
         Assert.Equal(1, w.LeaseCount);
         pool.Release(obj);
 
-        // 同一包装对象再次借出，计数应累计为 2
+        // The same wrapped object borrowed again; the count should accumulate to 2
         var again = pool.Acquire();
         Assert.Same(obj, again);
         Assert.Equal(2, GetWrapped(pool, again).LeaseCount);
@@ -129,7 +129,7 @@ public class ObservabilityFieldsTests
         var w = GetWrapped(pool, obj);
 
         Assert.Equal("m20-owner", w.OwnerPoolName);
-        // 挂钟创建时间应落在最近一分钟内
+        // Wall-clock creation time should fall within the last minute
         var createdAt = new DateTimeOffset(w.CreatedAtTick, TimeSpan.Zero);
         Assert.True(createdAt <= DateTimeOffset.UtcNow.AddSeconds(1));
         Assert.True(createdAt >= DateTimeOffset.UtcNow.AddMinutes(-1));
@@ -146,7 +146,7 @@ public class ObservabilityFieldsTests
             .WithMaxSize(4)
             .Build();
 
-        var borrowed = pool.Acquire(); // Min=2 预热 2 个，借出 1 → 1 借出 + 1 空闲
+        var borrowed = pool.Acquire(); // Min=2 prewarms 2, borrow 1 -> 1 borrowed + 1 idle
         var snapshot = pool.TakeSnapshot();
 
         Assert.Equal(2, snapshot.ObjectDetails.Count);
@@ -161,12 +161,12 @@ public class ObservabilityFieldsTests
 
         pool.Release(borrowed);
 
-        // 归还后借出态明细归零
+        // After return the borrowed-state details are zeroed
         var after = pool.TakeSnapshot();
         Assert.All(after.ObjectDetails, d => Assert.False(d.IsBorrowed));
     }
 
-    /// <summary>与 LeakDetectionTests 同款反射助手：经 _shards 逐分片探测登记表取包装对象。</summary>
+    /// <summary>Same reflection helper as in LeakDetectionTests: probe the registry shard-by-shard via _shards to fetch the wrapped object.</summary>
     private static HayateObject<TestObject> GetWrapped(IHayateObjectPool<TestObject> pool, TestObject item)
     {
         var shardsField = pool.GetType().GetField("_shards", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;

@@ -4,18 +4,22 @@ using System.Reflection;
 namespace DotNetCore.HayateOP.Tests;
 
 /// <summary>
-/// D3 阶段：HayateObjectPool.Release 并发语义单测。
+/// D3 phase: unit tests for HayateObjectPool.Release concurrency semantics.
 ///
-/// 之前 B 阶段（commit 56a5c47）通过 [CollectionDefinition] 串行化
-/// 抑制了测试间污染引发的偶发超时，但 Release 路径在以下场景仍
-/// 存在结构性缺陷：
-///   1. ProcessorId % ShardCount 落点的 shard max=0 时，
-///      Shard.Add 会静默 dispose 归还对象（Max &lt; ShardCount 时出现）。
-///   2. Shard.Remove(_queue.ToList + Clear + Enqueue) 与 Shard.Add
-///      并发时会产生对象丢失（previous T04 已暴露）。
-///   3. EvictionCallback / ValidateCallback 调度的 Remove 与 Release 竞态。
+/// Previously, the B phase (commit 56a5c47) serialized tests via
+/// [CollectionDefinition] to suppress intermittent timeouts caused by
+/// cross-test pollution, but the Release path still has structural
+///   1. When ProcessorId % ShardCount lands on a shard with max=0,
+///      Shard.Add silently disposes the returned object (occurs when
+///      Max &lt; ShardCount).
+///   2. Shard.Remove (_queue.ToList + Clear + Enqueue) racing with
+///      Shard.Add can lose objects (a previously exposed defect).
 ///
-/// 本文件锁定上述三类缺陷供回归保障；后续修复要确保所有 D3_* 测试通过。
+///   3. EvictionCallback / ValidateCallback scheduled Remove racing
+///      with Release.
+///
+/// This file locks down the above three defect classes for regression
+/// coverage; any later fix must keep all D3_* tests passing.
 /// </summary>
 public class D3ReleaseConcurrencyTests
 {
@@ -29,17 +33,22 @@ public class D3ReleaseConcurrencyTests
     }
 
     /// <summary>
-    /// D3-1：Acquire → Release → Acquire 环回应稳定返回同一对象，不应超时。
+    /// D3-1: the Acquire -> Release -> Acquire cycle should stably return
     ///
-    /// 触发路径：默认 ShardCount=4 + MaxSize=2 时，shard 0/1 max=1、shard 2/3 max=0。
-    /// 旧的 Release 通过 Thread.GetCurrentProcessorId() % 4 选 shard；若命中 max=0 的 shard，
-    /// Shard.Add 静默 dispose 对象，第二次 Acquire 阻塞到默认超时。
-    /// 修复后 Release 按 HayateObject&lt;T&gt;.ShardIndex round-trip，杜绝 ProcessorId 命中 max=0 shard。
+    /// an object without timing out.
+    ///
+/// Trigger path: with the default ShardCount=4 + MaxSize=2, shards 0/1
+    /// have max=1 while shards 2/3 have max=0. The old Release selected a
+    /// shard via Thread.GetCurrentProcessorId() % 4; if it hit a max=0
+/// shard, Shard.Add silently disposed the object and the second Acquire
+/// blocked until the default timeout. After the fix, Release round-trips
+/// via HayateObject&lt;T&gt;.ShardIndex, preventing ProcessorId from
+/// hitting a max=0 shard.
     /// </summary>
     [Fact]
     public void D3_1_ReleaseRoundTrip_SmallPoolOverSharding_NoTimeout()
     {
-        // ShardCount=4 + MaxSize=2 配置让 shard 2/3 的 max=0
+        // ShardCount=4 + MaxSize=2 makes shards 2/3 have max=0
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(1)
             .WithMaxSize(2)
@@ -59,26 +68,28 @@ public class D3ReleaseConcurrencyTests
             catch (TimeoutException)
             {
                 throw new TimeoutException(
-                    $"D3-1 触发：第 {i} 次 Acquire 在 Release 后超时（objects lost on shard）。" +
-                    "Release 应按 HayateObject<T>.ShardIndex round-trip，避免 ProcessorId 命中 max=0 的分片。");
+                    $"D3-1 triggered: the {i}-th Acquire timed out after Release (objects lost on shard). " +
+                    "Release should round-trip via HayateObject<T>.ShardIndex to avoid ProcessorId hitting a max=0 shard.");
             }
 
             pool.Release(obj);
 
-            // 关键：第二次 Acquire 若 Release 选择了 max=0 shard，对象已 dispose，
-            // 这里必在 2s 内抛 TimeoutException
+            // Key: if Release selected a max=0 shard, the object is already
+            // disposed and a TimeoutException must be thrown within 2s here.
             var obj2 = pool.Acquire();
             Assert.NotNull(obj2);
-            // 注：当前实现下 obj2 不一定是 obj（可能落在另一个 max≥1 的 shard）。
-            // 关键是 obj2 != null + 不超时。
+            // Note: under the current implementation obj2 is not necessarily
+            // the same object (it may land on another max>=1 shard).
+// The key is obj2 != null and no timeout.
             pool.Release(obj2);
         }
     }
 
     /// <summary>
-    /// D3-2：连续 Acquire/Release 环不应让 MinSize 失效。
-    /// 当 Release 命中 max=0 shard 时，对象被 dispose，下次 Acquire
-    /// 必超时（如果池被掏空）。修复后 round-trip 消除该故障路径。
+    /// D3-2: a continuous Acquire/Release cycle must not invalidate MinSize.
+    /// When Release hits a max=0 shard, the object is disposed and the next
+    /// Acquire times out (if the pool is drained). After the fix, round-trip
+/// eliminates this failure path.
     /// </summary>
     [Fact]
     public void D3_2_ReleaseShouldNotDescreasePooledCount_BelowMinSize()
@@ -88,7 +99,7 @@ public class D3ReleaseConcurrencyTests
             .WithMaxSize(2)
             .WithShardCount(4)
             .WithEnableSharding(true)
-            .WithEnableAutoScaling(false)   // 禁用自动扩容以便精确观测对象丢失
+            .WithEnableAutoScaling(false)   // disable auto-scaling to precisely observe object loss
             .WithEnableEviction(false)
             .WithAcquireTimeout(TimeSpan.FromSeconds(1))
             .Build();
@@ -102,16 +113,18 @@ public class D3ReleaseConcurrencyTests
             try { obj = pool.Acquire(); }
             catch (TimeoutException)
             {
-                throw new TimeoutException($"D3-2 触发：第 {i} 次 Acquire 超时。" +
-                    "Acquire → Release → Acquire 环丢失对象，导致池为空。");
+                throw new TimeoutException($"D3-2 triggered: the {i}-th Acquire timed out. " +
+                    "The Acquire -> Release -> Acquire cycle lost the object, draining the pool.");
             }
             pool.Release(obj);
         }
     }
 
     /// <summary>
-    /// D3-3：并发 Acquire/Release + 后台 Eviction 同时跑，对象总和应可对账。
-    /// 现有 Shard.Remove 的 LinkedList+SpinLock 实现保证不丢对象；本测试验证池级别一致性。
+    /// D3-3: concurrent Acquire/Release together with background Eviction
+    /// should keep the total object count reconcilable. The current
+/// Shard.Remove implementation (LinkedList + SpinLock) guarantees no
+/// object loss; this test verifies pool-level consistency.
     /// </summary>
     [Fact]
     public async Task D3_3_ConcurrentAcquireReleaseWithEviction_ObjectCountConsistent()
@@ -123,7 +136,7 @@ public class D3ReleaseConcurrencyTests
             .WithMaxLifeTime(TimeSpan.FromSeconds(2))
             .WithMaxIdleTime(TimeSpan.FromSeconds(1))
             .WithSoftMinEvictableIdleTime(TimeSpan.FromMilliseconds(500))
-            .WithEvictionInterval(1000)        // builder 限制 ≥1000ms
+            .WithEvictionInterval(1000)        // builder enforces a >=1000ms minimum
             .WithEnableMetrics(true)
             .WithShardCount(4)
             .WithEnableSharding(true)
@@ -159,7 +172,7 @@ public class D3ReleaseConcurrencyTests
         startSignal.Set();
         await Task.WhenAll(tasks);
 
-        // 池仍在合法区间内
+        // the pool is still within valid bounds
         var stats = pool.GetStats();
         Assert.Empty(exceptions);
         Assert.InRange(stats.PooledCount, 0, 100);
@@ -167,11 +180,14 @@ public class D3ReleaseConcurrencyTests
     }
 
     /// <summary>
-    /// D3-4：OnRelease=false 高并发回归，确保销毁路径与并发 Acquire 不互相干扰。
-    /// ForceScaleUpOneStep 的 3s 冷却是已知约束，本测试只校验：
-    ///   - 没有未捕获异常
-    ///   - 池不超出 MaxPoolSize
-    ///   - 全量 Acquire 都最终完成（不强制 All Return，因为冷却导致节奏差异）
+    /// D3-4: high-concurrency regression with OnRelease=false, ensuring the
+    /// destroy path does not interfere with concurrent Acquire. The 3s
+/// cooldown of ForceScaleUpOneStep is a known constraint; this test only
+/// verifies:
+    ///   - no uncaught exceptions
+    ///   - the pool never exceeds MaxPoolSize
+    ///   - all Acquires eventually complete (not forcing All Return, since
+///     the cooldown causes pacing differences)
     /// </summary>
     [Fact]
     public async Task D3_4_ConcurrentReleaseWhereOnReleaseFalse_PoolStaysConsistent()
@@ -186,11 +202,16 @@ public class D3ReleaseConcurrencyTests
             .WithEnableAutoScaling(true)
             .WithEnableMetrics(true)
             .WithEnableEviction(false)
-            // 围栏（R-挂起）：默认 ScaleUpCooldownSeconds=3 会让 ForceScaleUp 在"半数 Release 拒绝
-            // 不断销毁对象"的高频消耗下被冷却节流，池被掏空 → 6 线程反复触发 15s Acquire 超时，
-            // 600 次操作被拖成分钟级"超时活锁"，测试近乎挂死。
-            // 把扩容冷却置 0，让池在每次耗竭后立即补回 MinSize，Acquire 基本即时命中、
-            // 测试秒级完成；AcquireTimeout 收窄到 2s 仅作安全兜底，避免任何潜在活锁拖长。
+            // Guard (R-pending): the default ScaleUpCooldownSeconds=3 lets
+            // ForceScaleUp be throttled by the cooldown under high-frequency
+            // consumption where half the Releases are rejected and objects keep
+            // being destroyed; the pool is drained -> 6 threads keep hitting 15s
+            // Acquire timeouts, and 600 operations drag into minute-long "timeout
+// livelocks" that nearly hang the test. Setting the scale-up cooldown to
+// 0 lets the pool immediately replenish MinSize after each exhaustion, so
+// Acquire hits almost instantly and the test finishes in seconds; the
+// AcquireTimeout is narrowed to 2s only as a safety net against any
+// potential livelock dragging on.
             .WithScaleUpCooldownSeconds(0)
             .WithAcquireTimeout(TimeSpan.FromSeconds(2))
             .Build();
@@ -219,7 +240,7 @@ public class D3ReleaseConcurrencyTests
         }
 
         await Task.WhenAll(tasks);
-        Thread.Sleep(500);   // 让 ForceScaleUp 冷却回收
+        Thread.Sleep(500);   // let ForceScaleUp cooldown recover
 
         Assert.Empty(exceptions);
         var stats = pool.GetStats();
@@ -227,7 +248,7 @@ public class D3ReleaseConcurrencyTests
     }
 
     /// <summary>
-    /// 半数 Release 拒收的策略。
+    /// Policy that rejects half of the Releases.
     /// </summary>
     private sealed class HalfRejectPolicy : DotNetCore.HayateOP.Policies.IHayateObjectPolicy<TestObject>
     {

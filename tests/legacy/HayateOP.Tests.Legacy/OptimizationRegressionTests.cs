@@ -3,7 +3,7 @@
 namespace DotNetCore.HayateOP.Tests;
 
 /// <summary>
-/// 优化回归用例集：所有优化步骤必须100%通过此用例
+/// Optimization regression suite: every optimization step must pass this suite 100%.
 /// </summary>
 [Collection(OptimizationRegressionCollection.Name)]
 public class OptimizationRegressionTests
@@ -20,7 +20,7 @@ public class OptimizationRegressionTests
         public void Dispose() => IsDisposed = true;
     }
 
-    #region 核心功能必过用例
+    #region Core functionality must-pass cases
 
     [Fact]
     public void Acquire_ShouldReturnNonNullObject()
@@ -82,7 +82,7 @@ public class OptimizationRegressionTests
 
     #endregion
 
-    #region 并发安全必过用例
+    #region Concurrency safety must-pass cases
 
     [Fact]
     public async Task ConcurrentAcquireRelease_ShouldNotThrow()
@@ -95,9 +95,9 @@ public class OptimizationRegressionTests
             .Build();
 
         const int threadCount = 16;
-        const int operationsPerThread = 2000;   // P2/R7：由 10000 收敛到 2000（16 线程 × 2000 = 32k 次），
-                                                // 仍是 16 线程争抢 MaxSize=100 池的真实并发压力；
-                                                // 但把原先 16 万次锁操作对全量耗时的拖累降下来。
+        const int operationsPerThread = 2000;   // converged from 10000 to 2000 (16 threads x 2000 = 32k ops),
+                                                // still exercises real concurrency pressure from 16 threads contending for a MaxSize=100 pool;
+                                                // but avoids the drag of the original 160k lock operations on total run time.
         var tasks = new Task[threadCount];
         var totalOperations = 0L;
 
@@ -132,7 +132,7 @@ public class OptimizationRegressionTests
         const int threadCount = 100;
         var acquiredObjects = new ConcurrentBag<TestObject>();
         
-        // 用于准确统计并发峰值
+        // used to accurately count the concurrency peak
         long currentOutstanding = 0;
         long maxOutstanding = 0;
         
@@ -146,13 +146,13 @@ public class OptimizationRegressionTests
                 
                 try
                 {
-                    // 1. 获取对象（如果池满，这里会阻塞直到有对象归还或超时）
+                    // 1. acquire an object (blocks until one is returned or a timeout occurs if the pool is full)
                     obj = pool.Acquire(TimeSpan.FromSeconds(10));
                     
-                    // 2. 记录并发峰值
+                    // 2. record the concurrency peak
                     var newCount = Interlocked.Increment(ref currentOutstanding);
                     
-                    // 线程安全地更新最大值
+                    // update the maximum value in a thread-safe way
                     while (true)
                     {
                         var currentMax = Volatile.Read(ref maxOutstanding);
@@ -163,23 +163,23 @@ public class OptimizationRegressionTests
                     
                     acquiredObjects.Add(obj);
                     
-                    // 3. 模拟业务逻辑使用对象（让子弹飞一会儿，确保并发叠加）
+                    // 3. simulate business-logic use of the object (let it run a bit to ensure concurrency stacks up)
                     Thread.Sleep(50); 
                 }
                 catch
                 {
-                    // 对于 Block 策略，如果等待超时会走到这里，属于正常测试现象
+                    // for the Block policy, hitting the wait timeout lands here; this is a normal test occurrence
                 }
                 finally
                 {
-                    // 4. 【关键修复】无论成功与否，尝试归还对象（如果获取成功的话）
-                    // 注意：这里需要根据你的实际 HayatePool API 调整，
-                    // 如果 Acquire 失败返回 null 或抛出异常，需判断是否真的获取到了 obj。
-                    // 假设 acquiredObjects 里只包含成功获取的对象，我们在最后统一归还。
+                    // 4. [key fix] regardless of success, attempt to return the object (if one was successfully acquired)
+                    // note: this needs to be adjusted to your actual HayatePool API;
+                    // if Acquire fails by returning null or throwing, you must determine whether obj was actually acquired.
+                    // assume acquiredObjects contains only successfully acquired objects, which we return together at the end.
                     if (obj != null)
                     {
                         pool.Release(obj);
-                        // 归还后更新当前借出数
+                        // after returning, update the current outstanding count
                         Interlocked.Decrement(ref currentOutstanding);
                     }
                 }
@@ -189,13 +189,13 @@ public class OptimizationRegressionTests
         await Task.WhenAll(tasks);
         var stats = pool.GetStats();
     
-        // 断言 1: 总创建数绝对不能超过 MaxSize
+        // assertion 1: total created count must never exceed MaxSize
         Assert.True(stats.TotalCreated <= maxSize, $"TotalCreated: {stats.TotalCreated}, MaxSize: {maxSize}");
 
-        // 断言 2: 并发借出的峰值绝对不能超过 MaxSize
+        // assertion 2: the peak concurrent outstanding count must never exceed MaxSize
         Assert.True(maxOutstanding <= maxSize, $"Max Outstanding: {maxOutstanding}, MaxSize: {maxSize}");
         
-        // 归还所有对象
+        // return all objects
         foreach (var obj in acquiredObjects)
         {
             try
@@ -204,19 +204,19 @@ public class OptimizationRegressionTests
             }
             catch
             {
-                // 忽略重复归还的异常（如果有）
+                // ignore exceptions from duplicate returns (if any)
             }
         }
         
-        // 额外验证：最终空闲对象数≥最小容量（可选）
+        // extra check: final idle object count >= min capacity (optional)
         // var finalStats = pool.GetStats();
         // Assert.True(finalStats.TotalReleased >= finalStats.TotalAcquired  - maxSize,
-        //     "最终归还数异常，可能存在对象泄漏");
+        //     "final return count is abnormal; possible object leak");
     }
 
     #endregion
 
-    #region 功能开关必过用例
+    #region Feature-switch must-pass cases
 
     [Fact]
     public void DisableAutoScaling_ShouldFixPoolSize()
@@ -247,14 +247,14 @@ public class OptimizationRegressionTests
         obj.IsValidReturn = false;
         pool.Release(obj);
 
-        // 验证关闭后，无效对象仍能正常借出
+        // verify that after disabling, invalid objects can still be borrowed normally
         var newObj = pool.Acquire();
         Assert.Same(obj, newObj);
     }
 
     #endregion
 
-    #region 拒绝策略必过用例
+    #region Reject-policy must-pass cases
 
     [Fact]
     public void RejectPolicy_Abort_ShouldThrowImmediately()

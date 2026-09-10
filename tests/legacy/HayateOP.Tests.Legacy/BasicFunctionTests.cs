@@ -55,7 +55,7 @@ public class BasicFunctionTests
         // Assert
         Assert.Equal(3, stats.TotalAcquired);
 
-        // 归还后再次借出，验证累计次数继续累加
+        // After release, borrow again to verify the cumulative count keeps increasing
         pool.Release(obj1);
         var obj4 = pool.Acquire();
         stats = pool.GetStats();
@@ -91,7 +91,7 @@ public class BasicFunctionTests
 
         var stats = pool.GetStats();
 
-        // Assert：累计借出次数 = 线程数 × 每个线程借出次数
+        // Assert: total borrow count = thread count x borrow count per thread
         Assert.Equal(threadCount * acquirePerThread, stats.TotalAcquired);
     }
     
@@ -110,7 +110,7 @@ public class BasicFunctionTests
 
         // Assert
         Assert.Equal(5, pool.GetStats().PooledCount);
-        Assert.True(obj.IsReset); // 验证Reset钩子被调用
+        Assert.True(obj.IsReset); // verify the Reset hook was called
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public class BasicFunctionTests
         pool.Release(externalObj);
 
         // Assert
-        Assert.Equal(5, pool.GetStats().PooledCount); // 池大小不变
+        Assert.Equal(5, pool.GetStats().PooledCount); // pool size is unchanged
     }
 
     [Fact]
@@ -154,7 +154,7 @@ public class BasicFunctionTests
         {
             new HayatePoolBuilder<TestObject>()
                 .WithMinSize(100)
-                .WithMaxSize(50) // Min > Max，无效配置
+                .WithMaxSize(50) // Min > Max, invalid configuration
                 .Build();
         });
     }

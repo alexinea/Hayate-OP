@@ -40,8 +40,8 @@ public class MetricsTests
     [Fact]
     public void Build_WithCustomMetricsButMetricsDisabled_Throws()
     {
-        // L8（2.2 行为变更）：显式注册自定义 metrics 却未开启 EnableMetrics 时，
-        // Build() 快速失败，不再静默替换为 EmptyHayateMetrics。
+        // Behavior change (2.2): when a custom metrics implementation is explicitly registered but EnableMetrics is not enabled,
+        // Build() fails fast instead of silently substituting EmptyHayateMetrics.
         var mockMetrics = new Mock<IHayateMetrics>();
 
         var ex = Assert.Throws<InvalidOperationException>(() =>
@@ -59,7 +59,7 @@ public class MetricsTests
     [Fact]
     public void Build_MetricsDisabledWithoutCustomMetrics_DoesNotThrow()
     {
-        // 默认（未注册自定义 metrics）+ 禁用 metrics：合法配置，不抛错。
+        // Default (no custom metrics registered) + metrics disabled: valid configuration, no exception thrown.
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithEnableMetrics(false)
             .Build();
@@ -77,7 +77,7 @@ public class MetricsTests
             .WithMaxSize(100)
             .Build();
 
-        // 强制触发一次统计，让池完成初始化
+        // Force one stats trigger so the pool finishes initialization
         var dummy = pool.Acquire();
         pool.Release(dummy);
 

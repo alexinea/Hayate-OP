@@ -16,7 +16,7 @@ namespace DotNetCore.HayateOP.Tests
                 .WithEvictionInterval(1000)
                 .Build();
 
-            // 验证池能正常工作
+            // Verify the pool works normally
             var obj = pool.Acquire();
             pool.Release(obj);
             Assert.NotNull(obj);
@@ -29,7 +29,7 @@ namespace DotNetCore.HayateOP.Tests
                 .WithEnableEviction(false)
                 .Build();
 
-            // 验证池能正常工作
+            // Verify the pool works normally
             var obj = pool.Acquire();
             pool.Release(obj);
             Assert.NotNull(obj);
@@ -44,10 +44,10 @@ namespace DotNetCore.HayateOP.Tests
                 .WithMinSize(5)
                 .Build();
 
-            // 等待对象过期
+            // Wait for the object to expire
             Thread.Sleep(200);
 
-            // 验证池能正常工作
+            // Verify the pool works normally
             var obj = pool.Acquire();
             pool.Release(obj);
             Assert.NotNull(obj);

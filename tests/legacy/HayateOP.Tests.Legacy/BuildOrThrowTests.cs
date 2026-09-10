@@ -1,9 +1,9 @@
 namespace DotNetCore.HayateOP.Tests;
 
 /// <summary>
-/// M13：BuildOrThrow(bool) 容错构建入口。
-/// 默认 Build() 行为不变（失败抛 InvalidOperationException）；
-/// BuildOrThrow(false) 在构建失败时降级返回可用空池 + 错误日志。
+/// BuildOrThrow(bool) fault-tolerant build entry point.
+/// The default Build() behavior is unchanged (throws InvalidOperationException on failure);
+/// BuildOrThrow(false) degrades on build failure, returning a usable empty pool + an error log.
 /// </summary>
 public class BuildOrThrowTests
 {
@@ -12,7 +12,7 @@ public class BuildOrThrowTests
     [Fact]
     public void Build_InvalidOptions_ShouldThrow()
     {
-        // 基线：默认 Build() 在配置非法时抛出（本用例经 Configure 绕过 Builder 参数校验）
+        // Baseline: the default Build() throws on illegal configuration (this case bypasses Builder argument validation via Configure)
         var builder = new HayatePoolBuilder<TestObject>()
             .Configure(o => o.DefaultAcquireTimeout = TimeSpan.Zero);
 
@@ -38,23 +38,23 @@ public class BuildOrThrowTests
 
         Assert.NotNull(pool);
 
-        // 降级池为空池：无预热对象
+        // The degraded pool is empty: no warmed-up objects
         var stats = pool.GetStats();
         Assert.Equal(0, stats.PooledCount);
         Assert.Equal(0, stats.CurrentSize);
 
-        // 降级池保留拒绝策略语义：BlockTimeout 空池借出按短超时抛 TimeoutException
+        // The degraded pool keeps the reject-policy semantics: a BlockTimeout empty-pool borrow throws TimeoutException on the short timeout
         Assert.Throws<TimeoutException>(() => pool.Acquire(TimeSpan.FromMilliseconds(200)));
 
-        // 降级池可安全 Dispose
+        // The degraded pool can be disposed safely
         pool.Dispose();
     }
 
     [Fact]
     public void BuildOrThrow_False_MetricsMismatch_ShouldDegradeToEmptyPool()
     {
-        // 2.2 行为变更：显式注册自定义 metrics 但未开启 EnableMetrics → Build 快速失败；
-        // BuildOrThrow(false) 应降级为空池而非崩溃
+        // Behavior change (2.2): registering a custom metrics implementation without enabling EnableMetrics -> Build fails fast;
+        // BuildOrThrow(false) should degrade to an empty pool instead of crashing
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("metrics-mismatch-pool")
             .WithMetrics(new ThrowingMetrics())
@@ -67,7 +67,7 @@ public class BuildOrThrowTests
     [Fact]
     public void BuildOrThrow_False_ValidOptions_ShouldBuildNormally()
     {
-        // 合法配置下 BuildOrThrow(false) 与 Build() 等价（含正常预热）
+        // With valid configuration, BuildOrThrow(false) is equivalent to Build() (including normal warm-up)
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(3)
             .WithMaxSize(5)

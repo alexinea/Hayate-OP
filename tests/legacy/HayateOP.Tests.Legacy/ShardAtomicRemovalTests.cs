@@ -5,16 +5,16 @@ using DotNetCore.HayateOP.Policies;
 namespace DotNetCore.HayateOP.Tests;
 
 /// <summary>
-/// T04 / P0-3 回归测试：<c>Shard.Remove</c> 原子化重构。
+/// Regression test for the atomic <c>Shard.Remove</c> refactor.
 /// <para>
-/// 旧实现是 ConcurrentQueue +「ToList → Remove → Clear → Enqueue」重建队列，
-/// 重建窗口内并发的 TryTake / Add 会丢对象；更严重的是调用方在 Remove 之后
-/// 无条件 Destroy，会把一个刚被 TryTake 借出、正被业务线程使用的对象销毁掉。
+/// The old implementation was a ConcurrentQueue + "ToList -> Remove -> Clear -> Enqueue" queue rebuild,
+/// within the rebuild window, concurrent TryTake / Add would lose objects; worse, the caller, after Remove,
+/// unconditionally called Destroy, destroying an object that had just been borrowed via TryTake and was in use by a business thread.
 /// </para>
 /// <para>
-/// 新实现：LinkedList + SpinLock 做 O(1) 真实摘除，并引入「认领协议」——
-/// Remove 只有在对对象确实空闲且位于本分片链表内时才返回 true，
-/// 调用方必须写成 <c>if (shard.Remove(w)) Destroy(w);</c>。
+/// The new implementation: LinkedList + SpinLock for an O(1) real unlink, and introduces a "claim protocol" --
+/// Remove returns true only when the object is genuinely idle and located inside this shard's linked list,
+/// and the caller must be written as <c>if (shard.Remove(w)) Destroy(w);</c>.
 /// </para>
 /// </summary>
 [Collection(ShardAtomicRemovalCollection.Name)]
@@ -27,11 +27,11 @@ public class ShardAtomicRemovalTests
         public void Dispose() => IsDisposed = true;
     }
 
-    #region 反射代理：直接驱动内部 Shard，绕开池的生命周期干扰
+    #region Reflection proxy: drive the internal Shard directly, bypassing pool lifecycle interference
 
     /// <summary>
-    /// 通过反射获取池内部的 Shard 实例并缓存 MethodInfo，用于高频并发压测。
-    /// Shard 是 internal 嵌套类，测试项目未配置 InternalsVisibleTo，只能反射调用。
+    /// Obtain the pool's internal Shard instance via reflection and cache MethodInfo, for high-frequency concurrency stress.
+    /// Shard is an internal nested class; the test project does not configure InternalsVisibleTo, so it can only be called via reflection.
     /// </summary>
     private sealed class ShardProxy
     {
@@ -89,12 +89,12 @@ public class ShardAtomicRemovalTests
     private static HayateObject<TestObject> Wrap(int id) => new(new TestObject { Id = id });
 
     /// <summary>
-    /// 关闭所有后台定时器，构造一个不会被驱逐 / 校验 / 扩缩容打扰的池，
-    /// 便于在 Shard 层面做确定性与并发验证。
+    /// Disable all background timers and build a pool that will not be disturbed by eviction / validation / scaling,
+    /// so deterministic and concurrent verification can be done at the Shard level.
     /// <para>
-    /// 注意：必须保持 EnableAutoScaling = true。ApplyFeatureSwitches 在关闭自动扩缩容时
-    /// 会强制把 MaxPoolSize 钳到 MinPoolSize，否则分片容量会被压成 0。
-    /// MinSize 设为 0 时各分片登记表恒为空，ScalingCallback 会立即返回，不会干扰用例。
+    /// Note: EnableAutoScaling = true must be kept. When auto-scaling is turned off, ApplyFeatureSwitches
+    /// force-clamps MaxPoolSize down to MinPoolSize, otherwise the per-shard capacity would be squeezed to 0.
+    /// When MinSize is set to 0, every shard's registry is always empty, the ScalingCallback returns immediately, and the case is not disturbed.
     /// </para>
     /// </summary>
     private static IHayateObjectPool<TestObject> BuildQuietPool(int minSize, int maxSize)
@@ -114,8 +114,8 @@ public class ShardAtomicRemovalTests
     }
 
     /// <summary>
-    /// 取出池内部的后台回调，用于在本用例中手动高频驱动，
-    /// 绕开「定时器最小间隔 1000ms」的限制，把竞态窗口压缩到毫秒级。
+    /// Pull out the pool's internal background callbacks, to be manually driven at high frequency in this case,
+    /// bypassing the "minimum timer interval of 1000ms" limit and compressing the race window to millisecond scale.
     /// </summary>
     private static MethodInfo GetPrivateMethod(object pool, string name)
     {
@@ -126,12 +126,12 @@ public class ShardAtomicRemovalTests
 
     #endregion
 
-    #region 认领协议语义（确定性用例）
+    #region Claim-protocol semantics (deterministic cases)
 
     /// <summary>
-    /// Remove 只能认领「空闲且位于本分片链表内」的对象。
-    /// 已借出的对象必须认领失败 —— 这正是上一轮 T04 把 DisableValidation 用例打挂的根因：
-    /// 驱逐线程在快照之后无条件 Destroy，销毁了正在被业务线程使用的对象。
+    /// Remove may only claim an object that is "idle and located inside this shard's linked list".
+    /// A borrowed object must fail the claim -- this was exactly the root cause that broke the DisableValidation case in the previous round:
+    /// the eviction thread called Destroy unconditionally after the snapshot, destroying the object in use by a business thread.
     /// </summary>
     [Fact]
     public void T04_Remove_ClaimsOnlyIdleObjectInShard()
@@ -148,22 +148,22 @@ public class ShardAtomicRemovalTests
         Assert.True(shard.Add(c));
         Assert.Equal(3, shard.Count);
 
-        // FIFO：先入先出，取到的是 a
+        // FIFO: first in, first out, so the one retrieved is a
         Assert.True(shard.TryTake(out var borrowed));
         Assert.Same(a, borrowed);
         Assert.Equal(2, shard.Count);
 
-        // 已借出 → 不得认领，且分片内容不受影响
+        // Already borrowed -> must not be claimed, and the shard contents are unaffected
         Assert.False(shard.Remove(borrowed));
         Assert.Equal(2, shard.Count);
 
-        // 归还后重新入池（尾插），此时才允许被认领
+        // After return it re-enters the pool (tail insert), and only now may it be claimed
         Assert.True(shard.Add(borrowed));
         Assert.Equal(3, shard.Count);
         Assert.True(shard.Remove(borrowed));
         Assert.Equal(2, shard.Count);
 
-        // 被认领的对象已物理摘除，后续 TryTake 不会再拿到它
+        // The claimed object has been physically unlinked, so a later TryTake will not get it again
         Assert.True(shard.TryTake(out var next));
         Assert.Same(b, next);
         Assert.True(shard.TryTake(out var last));
@@ -172,8 +172,8 @@ public class ShardAtomicRemovalTests
     }
 
     /// <summary>
-    /// 被认领（待销毁 / 已销毁）的对象不得通过 Add 复活回池，
-    /// 防止 Dispose 过的对象被再次借出。
+    /// An object that has been claimed (pending destroy / already destroyed) must not be resurrected back into the pool via Add,
+    /// preventing a disposed object from being borrowed again.
     /// </summary>
     [Fact]
     public void T04_Add_RejectsClaimedObject()
@@ -185,7 +185,7 @@ public class ShardAtomicRemovalTests
         Assert.True(shard.Add(a));
         Assert.True(shard.Remove(a));
 
-        // 已被驱逐认领 → 归还时分片必须拒绝接收
+        // already evicted/claimed -> the shard must reject it on return
         Assert.False(shard.Add(a));
         Assert.Equal(0, shard.Count);
         Assert.False(shard.TryTake(out _));
@@ -193,14 +193,14 @@ public class ShardAtomicRemovalTests
 
     #endregion
 
-    #region 并发不变量（压力用例）
+    #region Concurrency invariants (stress cases)
 
     /// <summary>
-    /// 并发 Add / TryTake / Remove 下对象守恒：不丢、不重、不与「已借出」集合相交。
+    /// Object conservation under concurrent Add / TryTake / Remove: no loss, no duplication, no intersection with the "borrowed" set.
     /// <para>
-    /// 复刻 EvictionCallback 的真实并发形态：一批线程拿着 GetAll() 的快照去做 Remove，
-    /// 另一批线程同时 TryTake 借出。三条不变量中任意一条被打破，
-    /// 都意味着对象在并发下丢失或被重复发放。
+    /// Reproduce the real concurrency shape of EvictionCallback: a batch of threads takes a GetAll() snapshot and does Remove,
+    /// while another batch of threads borrows via TryTake at the same time. If any of the three invariants is broken,
+    /// it means objects were lost or double-issued under concurrency.
     /// </para>
     /// </summary>
     [Fact]
@@ -223,7 +223,7 @@ public class ShardAtomicRemovalTests
 
             Assert.Equal(Total, shard.Count);
 
-            // 打乱后一半走 TryTake（借出）、一半走 Remove（驱逐），模拟真实争抢
+            // After shuffling, half go through TryTake (borrow), half through Remove (eviction), simulating real contention
             var work = all.OrderBy(_ => Guid.NewGuid()).ToArray();
             var taken = new ConcurrentBag<HayateObject<TestObject>>();
             var removed = new ConcurrentBag<HayateObject<TestObject>>();
@@ -240,17 +240,17 @@ public class ShardAtomicRemovalTests
                 }
             });
 
-            // 排空剩余空闲对象
+            // Drain the remaining idle objects
             while (shard.TryTake(out var rest)) taken.Add(rest);
 
-            // 不变量 1：总数守恒 —— 每个对象要么被借出，要么被驱逐，没有第三种归宿
+            // Invariant 1: total conservation -- each object is either borrowed or evicted, with no third fate
             Assert.Equal(Total, taken.Count + removed.Count);
 
-            // 不变量 2：无重复 —— 同一个对象不会被两个线程同时拿到
+            // Invariant 2: no duplication -- the same object is never obtained by two threads at once
             Assert.Equal(taken.Count, taken.Distinct().Count());
             Assert.Equal(removed.Count, removed.Distinct().Count());
 
-            // 不变量 3：互斥 —— 不可能既被借出又被驱逐销毁（认领协议的核心保证）
+            // Invariant 3: mutual exclusion -- an object cannot be both borrowed and evicted/destroyed (the core guarantee of the claim protocol)
             Assert.Empty(taken.Intersect(removed));
 
             Assert.Equal(0, shard.Count);
@@ -259,12 +259,12 @@ public class ShardAtomicRemovalTests
 
     #endregion
 
-    #region 池级别回归
+    #region Pool-level regression
 
     /// <summary>
-    /// 上一轮 T04 打挂的 DisableValidation 场景：借出 → 归还 → 再借出，必须拿到同一个实例。
-    /// 配置与 <c>OptimizationRegressionTests.DisableValidation_ShouldSkipAllValidation</c> 一致，
-    /// 再叠加一个「归还后对象不再是池中唯一元素」的干扰对象，确保 FIFO 与摘除逻辑都正确。
+    /// The DisableValidation scenario that broke in the previous round: borrow -> return -> borrow again, must return the same instance.
+    /// The configuration matches <c>OptimizationRegressionTests.DisableValidation_ShouldSkipAllValidation</c>,
+    /// plus a distractor object so "the returned object is no longer the only element in the pool", ensuring FIFO and unlink logic are both correct.
     /// </summary>
     [Fact]
     public void T04_BorrowReleaseBorrow_ReturnsSameInstance()
@@ -283,7 +283,7 @@ public class ShardAtomicRemovalTests
         for (var i = 0; i < 200; i++)
         {
             var obj = pool.Acquire();
-            Assert.False(obj.IsDisposed, $"i={i} 借出了已释放对象");
+            Assert.False(obj.IsDisposed, $"i={i}: borrowed an already-disposed object");
 
             pool.Release(obj);
 
@@ -296,12 +296,12 @@ public class ShardAtomicRemovalTests
     }
 
     /// <summary>
-    /// 高并发借还 + 手动高频驱动驱逐 / 空闲校验回调，正被借出的对象绝不能被销毁。
-    /// 用策略层记录「OnDestroy 命中仍处借出态的对象」次数，该计数必须为 0。
+    /// High-concurrency borrow/return + manually driven eviction / idle-validation callbacks: a borrowed object must never be destroyed.
+    /// A policy layer records the count of "OnDestroy hit an object still in the borrowed state"; that count must be 0.
     /// <para>
-    /// 这是 P0-3 的核心竞态：EvictionCallback 先取 GetAll() 快照判断「该驱逐」，
-    /// 随后 Acquire 线程把同一对象 TryTake 借出，最后驱逐线程调用 Destroy —— 旧实现会
-    /// 无条件销毁，直接破坏正在使用它的业务线程。
+    /// This is the core race: EvictionCallback first takes a GetAll() snapshot to decide "should evict",
+    /// then an Acquire thread TryTakes the same object to borrow it, and finally the eviction thread calls Destroy -- the old implementation would
+    /// destroy it unconditionally, directly corrupting the business thread using it.
     /// </para>
     /// </summary>
     [Fact]
@@ -327,22 +327,22 @@ public class ShardAtomicRemovalTests
         var eviction = GetPrivateMethod(pool, "EvictionCallback");
         var validate = GetPrivateMethod(pool, "ValidateCallback");
 
-        // 手动高频驱动后台回调：定时器最小间隔是 1000ms，压不出足够的竞态密度
+        // Drive the background callbacks manually at high frequency: the timer minimum interval is 1000ms, which cannot produce enough race density
         var running = true;
         var drivers = new List<Thread>();
         foreach (var m in new[] { eviction, validate })
         {
             var t = new Thread(() =>
             {
-                // P1/R1 围栏：原实现是 Thread.Yield() 满速空转调用回调，数秒内吃满一个核，
-                // 拖累宿主。这里改为自适应退避——仍在每次回调间让出时间片，但引入短暂
-                // Thread.Sleep 降低空转频率：既保留足够驱逐/校验密度去冲击借出态竞态，
-                // 又不至于把 CPU 打到 100%。循环由 finally 中的 running=false + Join(2s) 兜底。
+                // Guard: the original implementation used Thread.Yield() to spin-call the callback at full speed, pegging a core within seconds,
+                // dragging down the host. Here we switch to adaptive backoff -- still yielding time slices between callbacks, but introducing a brief
+                // Thread.Sleep to lower the spin frequency: this keeps enough eviction/validation density to attack the borrowed-state race,
+                // without driving CPU to 100%. The loop is backed by running=false + Join(2s) in the finally block.
                 while (Volatile.Read(ref running))
                 {
                     try { m.Invoke(pool, new object?[] { null }); }
-                    catch (TargetInvocationException) { /* 回调内部已兜底，忽略 */ }
-                    Thread.Sleep(1);   // 有界退避：~1ms/次，避免忙自旋烧 CPU
+                    catch (TargetInvocationException) { /* the callback already handles failures internally; ignore */ }
+                    Thread.Sleep(1);   // Bounded backoff: ~1ms per call, to avoid busy-spin burning CPU
                 }
             })
             { IsBackground = true, Name = "hayate-bg-driver" };
@@ -362,13 +362,13 @@ public class ShardAtomicRemovalTests
                     try
                     {
                         var obj = pool.Acquire();
-                        Assert.False(obj.IsDisposed, "池不应借出已释放的对象");
+                        Assert.False(obj.IsDisposed, "the pool must not hand out an already-disposed object");
                         Thread.SpinWait(20);
                         pool.Release(obj);
                     }
                     catch (TimeoutException)
                     {
-                        // 驱逐较为激进时偶发借出超时，本用例只校验销毁语义，不校验吞吐
+                        // Occasional borrow timeouts when eviction is aggressive; this case only checks destroy semantics, not throughput
                     }
                     catch (Exception ex)
                     {
@@ -386,21 +386,21 @@ public class ShardAtomicRemovalTests
         Assert.Empty(unexpected);
         Assert.Equal(0, policy.DestroyedWhileBorrowed);
 
-        // 池在压测后仍然健康
+        // The pool is still healthy after the stress test
         var final = pool.Acquire();
         Assert.False(final.IsDisposed);
         pool.Release(final);
     }
 
-    #region §3.3 未覆盖路径：快照一致性（Shard.Count / GetAll / 池级 BorrowedCount）
+    #region Section 3.3 uncovered paths: snapshot consistency (Shard.Count / GetAll / pool-level BorrowedCount)
 
     /// <summary>
-    /// §3.3 Shard 级：并发 Add / TryTake 期间反复采样 GetAll()。
+    /// Section 3.3 shard level: repeatedly sample GetAll() during concurrent Add / TryTake.
     /// <para>
-    /// GetAll 在 SpinLock 内 ToArray，返回的快照必然内部自洽：同一快照内不会出现
-    /// 「同一对象两次」（LinkedList 不允许重复节点）也不会读到已物理摘除的撕裂态。
-    /// 本用例让一批线程做 TryTake→立即 Add 归还的纯 churn，另一批线程持续抽样，
-    /// 用并发破坏去冲击这条快照自洽不变量。
+    /// GetAll calls ToArray inside the SpinLock, so the returned snapshot is internally self-consistent: within the same snapshot there will be no
+    /// "same object twice" (LinkedList forbids duplicate nodes) nor a torn read of an already physically unlinked object.
+    /// This case has one batch of threads do pure TryTake -> immediate Add churn, and another batch continuously sample,
+    /// using concurrency to attack this snapshot-self-consistency invariant.
     /// </para>
     /// </summary>
     [Fact]
@@ -427,7 +427,7 @@ public class ShardAtomicRemovalTests
             for (var n = 0; n < SampleCount && !Volatile.Read(ref stop); n++)
             {
                 var snap = shard.GetAllArray();
-                // 同一次快照内不得出现重复对象（快照自洽，无撕裂读）
+                // No duplicate object may appear within the same snapshot (snapshot self-consistency, no torn reads)
                 var distinct = new HashSet<HayateObject<TestObject>>(snap);
                 if (distinct.Count != snap.Length)
                 {
@@ -440,7 +440,7 @@ public class ShardAtomicRemovalTests
         { IsBackground = true, Name = "hayate-snapshot-sampler" };
         sampler.Start();
 
-        // 纯 churn：取头再放回，保持总量稳定，制造高频节点增删（有界轮次，独立结束）
+        // Pure churn: take from head and put back, keeping the total stable, generating high-frequency node add/remove (bounded rounds, independent termination)
         Parallel.For(0, 4, _ =>
         {
             for (var n = 0; n < 4000; n++)
@@ -461,11 +461,11 @@ public class ShardAtomicRemovalTests
     }
 
     /// <summary>
-    /// §3.3 池级：无驱逐 / 校验干扰的安静池里，确定性校验 TakeSnapshot 的借出口径。
+    /// Section 3.3 pool level: deterministically verify TakeSnapshot's borrow accounting in a quiet pool with no eviction / validation interference.
     /// <para>
-    /// 分片登记表恒持有「空闲 + 借出」的全部存活对象（Destroy 才移除），因此
-    /// BorrowedCount = 登记总数 - 池内空闲数 在无驱逐瞬态下应精确成立。
-    /// 用 MinSize 预热让 Acquire 立即命中，避免触发拒绝策略的超时等待。
+    /// The shard registry always holds all live objects ("idle + borrowed") (removed only on Destroy), so
+    /// BorrowedCount = total registered - idle in pool should hold exactly in the absence of eviction transients.
+    /// Prewarm with MinSize so Acquire hits immediately, avoiding the reject-policy timeout wait.
     /// </para>
     /// </summary>
     [Fact]
@@ -474,24 +474,24 @@ public class ShardAtomicRemovalTests
         const int Capacity = 32;
         const int Held = 8;
 
-        // MinSize=MaxSize=Capacity 预热满池 → Acquire 即时命中、无需扩容等待
+        // MinSize=MaxSize=Capacity prewarms a full pool -> Acquire hits instantly, no scaling wait
         using var pool = BuildQuietPool(minSize: Capacity, maxSize: Capacity);
 
         var held = new List<TestObject>(Held);
         for (var i = 0; i < Held; i++) held.Add(pool.Acquire());
 
-        // 已借出 8、仍空闲 24 → 借出数精确等于 Held
+        // 8 borrowed, 24 still idle -> borrowed count exactly equals Held
         var snap = pool.TakeSnapshot();
         Assert.Equal(Held, snap.BorrowedCount);
         Assert.Equal(Capacity - Held, snap.PooledCount);
 
-        // 归还一半 → 空闲 +4、借出 -4，二者之和恒等于存活总数 Capacity
+        // Return half -> idle +4, borrowed -4; their sum is always equal to the total live count Capacity
         for (var i = 0; i < Held / 2; i++) pool.Release(held[i]);
         snap = pool.TakeSnapshot();
         Assert.Equal(Held / 2, snap.BorrowedCount);
         Assert.Equal(Capacity - Held / 2, snap.PooledCount);
 
-        // 全部归还 → 借出归零、全部空闲
+        // Return all -> borrowed goes to zero, all idle
         for (var i = Held / 2; i < Held; i++) pool.Release(held[i]);
         snap = pool.TakeSnapshot();
         Assert.Equal(0, snap.BorrowedCount);
@@ -499,12 +499,12 @@ public class ShardAtomicRemovalTests
     }
 
     /// <summary>
-    /// §3.3 池级：并发借还期间反复采样 TakeSnapshot，不变量恒定。
+    /// Section 3.3 pool level: repeatedly sample TakeSnapshot during concurrent borrow/return; invariants hold.
     /// <para>
-    /// 关键不变量：PooledCount 与 BorrowedCount 恒非负，且二者之和（= 真实存活对象数）
-    /// ≤ 池容量；驱逐关闭时不存在「已认领未销毁」瞬态，二者之和精确等于分片登记表存活总数。
-    /// 每个 worker 一次只借一个、借完即还，峰值并发持有 ≤ 线程数，永远不把池掏空，
-    /// 因此 Acquire 不会走到拒绝策略的超时路径。
+    /// Key invariant: PooledCount and BorrowedCount are always non-negative, and their sum (= the true live object count)
+    /// <= pool capacity; with eviction off there is no "claimed but not yet destroyed" transient, so their sum exactly equals the shard registry's live total.
+    /// Each worker borrows only one at a time and returns it immediately; peak concurrent holding <= thread count, so the pool is never drained,
+    /// therefore Acquire never reaches the reject-policy timeout path.
     /// </para>
     /// </summary>
     [Fact]
@@ -513,13 +513,13 @@ public class ShardAtomicRemovalTests
         const int Capacity = 64;
         const int WorkerRounds = 3000;
 
-        // MinSize=MaxSize=Capacity 预热满池；worker 峰值持有 ≤ 8，永不完全耗尽
+        // MinSize=MaxSize=Capacity prewarms a full pool; peak worker holding <= 8, never fully drained
         using var pool = BuildQuietPool(minSize: Capacity, maxSize: Capacity);
 
         var stop = false;
         var unexpected = new ConcurrentBag<Exception>();
 
-        // 采样线程：有界时间片，独立结束，不依赖 worker
+        // Sampler thread: bounded time slice, independent termination, not dependent on workers
         var sampler = new Thread(() =>
         {
             var deadline = Environment.TickCount + 1500;
@@ -539,7 +539,7 @@ public class ShardAtomicRemovalTests
         { IsBackground = true, Name = "hayate-invariant-sampler" };
         sampler.Start();
 
-        // worker：有界轮次，独立结束
+        // worker: bounded rounds, independent termination
         Parallel.For(0, 8, _ =>
         {
             for (var n = 0; n < WorkerRounds; n++)
@@ -551,7 +551,7 @@ public class ShardAtomicRemovalTests
                 }
                 catch (TimeoutException)
                 {
-                    // 理论不会发生（永不完全耗尽）；即便偶发也不判失败，仅跳过
+                    // Should not happen in theory (never fully drained); even if it occurs occasionally, do not fail, just skip
                 }
                 catch (Exception ex)
                 {
@@ -569,7 +569,7 @@ public class ShardAtomicRemovalTests
     #endregion
 
     /// <summary>
-    /// 借出态探测策略：OnAcquire 打标、OnRelease 清标、OnDestroy 时若仍带标即为违规。
+    /// Borrowed-state probe policy: mark on OnAcquire, clear on OnRelease, and if OnDestroy still sees the mark it is a violation.
     /// </summary>
     private sealed class BorrowedDestroyDetector<T> : IHayateObjectPolicy<T> where T : class
     {
@@ -594,17 +594,17 @@ public class ShardAtomicRemovalTests
 
         public void OnDestroy(T item)
         {
-            // 对象仍处借出态却被销毁 —— 说明后台线程破坏了正在使用它的业务线程
+            // The object is still in the borrowed state yet was destroyed -- meaning a background thread corrupted the business thread using it
             if (_borrowed.ContainsKey(item)) Interlocked.Increment(ref _destroyedWhileBorrowed);
         }
     }
 
     #endregion
 
-    #region PR-A：P0-新-1 / P1-新-1（overflow / 分片拒绝须走完整 Destroy 触发 OnDestroy）
+    #region Overflow / shard rejection must go through the full Destroy to trigger OnDestroy
 
     /// <summary>
-    /// 计数 OnDestroy 的 policy，用于验证「经分片拒绝而销毁的对象」策略钩子必被触发一次。
+    /// A policy that counts OnDestroy, used to verify that the policy hook is triggered exactly once for an object destroyed via shard rejection.
     /// </summary>
     private sealed class OnDestroyCounterPolicy<T> : IHayateObjectPolicy<T> where T : class
     {
@@ -625,8 +625,8 @@ public class ShardAtomicRemovalTests
 
     private static HayateObject<TestObject> GetWrapped(IHayateObjectPool<TestObject> pool, TestObject item)
     {
-        // T09：登记表已按分片拆分（原池级 _objectMap → 各 Shard 私有字段 _objects），
-        // 此处经 _shards 逐分片探测登记表取包装对象。
+        // The registry is now split by shard (was pool-level _objectMap -> each Shard's private _objects field),
+        // so we probe the registry table shard by shard via _shards to fetch the wrapped object.
         var shardsField = pool.GetType().GetField("_shards", BindingFlags.Instance | BindingFlags.NonPublic)!;
         Assert.NotNull(shardsField);
         var shards = (Array)shardsField.GetValue(pool)!;
@@ -665,39 +665,39 @@ public class ShardAtomicRemovalTests
     }
 
     /// <summary>
-    /// P0-新-1：Shard.Add 在分片满（overflow）时不再自行短路处置。
-    /// 修复前 overflow 分支会「置 Destroyed=1 + 改终态 Location + 裸 SafeDispose（只 Dispose 不调
-    /// _policy.OnDestroy）」，这会让外层完整 Destroy(w) 因幂等 CAS 直接 return，OnDestroy 永不触发。
-    /// 修复后 Shard 只拒绝并返回 false，对象的销毁责任完整留给调用方 Destroy(w)。
+    /// Overflow add: when the shard is full (overflow), Shard.Add no longer short-circuits handling.
+    /// Before the fix, the overflow branch would "set Destroyed=1 + change the terminal Location + bare SafeDispose (only Dispose, no
+    /// _policy.OnDestroy call)", which made the outer full Destroy(w) return immediately due to the idempotent CAS, so OnDestroy never fired.
+    /// After the fix, Shard only rejects and returns false, leaving the full destroy responsibility to the caller Destroy(w).
     /// </summary>
     [Fact]
     public void P0_AddOverflow_RejectsWithoutPrematureDestroy()
     {
-        // 单分片、容量 1：塞满后第二个 Add 必然 overflow。
+        // single shard, capacity 1: after filling, the second Add must overflow.
         using var pool = BuildQuietPool(minSize: 0, maxSize: 1);
         var shard = new ShardProxy(pool);
 
         var w1 = Wrap(1);
-        Assert.True(shard.Add(w1));            // 填满分片（None → InPool）
+        Assert.True(shard.Add(w1));            // fill the shard (None -> InPool)
 
-        // 模拟「已借出后归还」的对象（真实 Release overflow 时对象处于 Borrowed）。
+        // simulate an object that was borrowed then returned (in a real Release overflow the object is in the Borrowed state).
         var w2 = Wrap(2);
         SetLocation(w2, /* Borrowed */ 2);
         var accepted = shard.Add(w2);
 
-        // overflow → 拒绝
+        // overflow -> rejected
         Assert.False(accepted);
-        // P0-新-1 修复：Shard 不自行标记 Destroyed、不改写 Location 终态
+        // fix: the Shard no longer marks Destroyed itself nor rewrites the terminal Location state
         Assert.Equal(0, GetDestroyedFlag(w2));
         Assert.Equal(/* Borrowed */ 2, GetLocationCode(w2));
-        // 该分片仍只有 w1
+        // the shard still contains only w1
         Assert.Equal(1, shard.Count);
     }
 
     /// <summary>
-    /// P0-新-1 池级端到端：一个对象被驱逐 / 空闲校验认领（Location=Removing）后，
-    /// 业务线程仍 Release 它 → Shard.Add 拒绝 → 走 Release 的完整 Destroy(w) →
-    /// OnDestroy 恰触发一次。修复前该对象在 overflow 分支被裸 Dispose 短路，OnDestroy 不会触发。
+    /// Pool-level end-to-end: after an object is evicted / idle-validated and claimed (Location=Removing),
+    /// a business thread still Releases it -> Shard.Add rejects -> goes through the full Release Destroy(w) ->
+    /// OnDestroy fires exactly once. Before the fix, the object was short-circuited by a bare Dispose in the overflow branch, so OnDestroy never fired.
     /// </summary>
     [Fact]
     public void ReleaseRejectedByShard_TriggersOnDestroyOnce()
@@ -717,20 +717,20 @@ public class ShardAtomicRemovalTests
             .WithEnableGenerationOptimization(false)
             .Build();
 
-        var item = pool.Acquire();                      // 预填 1 个，Location=Borrowed，位于分片登记表
+        var item = pool.Acquire();                      // pre-fill 1 object, Location=Borrowed, in the shard registry
         var w = GetWrapped(pool, item);
         Assert.Equal(0, policy.OnDestroyCount);
 
-        // 模拟驱逐线程已认领该对象（仅改状态，不真正销毁），随后业务线程误 Release。
+        // simulate the eviction thread having claimed this object (only changed state, not actually destroyed it), then a business thread wrongly Releases it.
         SetLocation(w, /* Removing */ 3);
-        pool.Release(item);                             // Shard.Add 拒绝 → 完整 Destroy → OnDestroy++
+        pool.Release(item);                             // Shard.Add rejected -> full Destroy -> OnDestroy++
 
-        Assert.Equal(1, policy.OnDestroyCount);         // P0-新-1：OnDestroy 必触发一次
+        Assert.Equal(1, policy.OnDestroyCount);         // OnDestroy must fire exactly once
     }
 
     /// <summary>
-    /// P1-新-1：Release 分片拒绝路径在销毁对象后补水位，池不跌破 MinPoolSize。
-    /// 修复前该分支缺 ForceScaleUpOneStep，驱逐 / 归还交错时可能跌破最小水位导致冷启动。
+    /// Release shard-rejection path tops up the water level after destroying an object, so the pool does not drop below MinPoolSize.
+    /// Before the fix this branch lacked ForceScaleUpOneStep, so interleaved eviction/return could dip below the minimum water level and cause a cold start.
     /// </summary>
     [Fact]
     public void ReleaseRejectedByShard_ForceScalesUpToKeepMinPoolSize()
@@ -746,24 +746,24 @@ public class ShardAtomicRemovalTests
             .WithEnableValidation(false)
             .WithEnableAutoScaling(true)
             .WithScalingInterval(600000)
-            .WithScaleUpCooldownSeconds(0)              // 消除扩容冷却，ForceScaleUp 同步立即执行
+            .WithScaleUpCooldownSeconds(0)              // remove scale-up cooldown so ForceScaleUp runs synchronously and immediately
             .WithScaleUpStep(2)
             .WithEnableLeakDetection(false)
             .WithEnableGenerationOptimization(false)
             .Build();
 
-        // 预填 MinPoolSize=4。借 1 → 剩 3 InPool + 1 Borrowed。
+        // pre-fill MinPoolSize=4. Borrow 1 -> 3 InPool + 1 Borrowed remain.
         var item = pool.Acquire();
         Assert.True(pool.GetStats().CurrentSize >= 4);
 
-        // 制造分片拒绝：把对象标记为已认领(Removing)，Release 将销毁它。
+        // force a shard rejection: mark the object as claimed (Removing), then Release will destroy it.
         var w = GetWrapped(pool, item);
         SetLocation(w, /* Removing */ 3);
-        pool.Release(item);                             // → Destroy 1 个 → 池 3 < Min 4 → ForceScaleUp 补
+        pool.Release(item);                             // -> Destroy 1 -> pool 3 < Min 4 -> ForceScaleUp tops up
 
-        // P1-新-1：水位补回 ≥ MinPoolSize（ForceScaleUp 同步执行补 2 → 5）
+        // The water level is topped back to >= MinPoolSize (ForceScaleUp runs synchronously and adds 2 -> 5)
         var current = pool.GetStats().CurrentSize;
-        Assert.True(current >= 4, $"分片拒绝销毁后池应补回水位，实际 CurrentSize={current}");
+        Assert.True(current >= 4, $"after shard-rejection destroy the pool should top the water level back up; actual CurrentSize={current}");
         Assert.Equal(1, policy.OnDestroyCount);
     }
 

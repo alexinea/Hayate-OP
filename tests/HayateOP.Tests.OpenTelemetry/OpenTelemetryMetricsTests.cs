@@ -13,12 +13,12 @@ using Xunit;
 namespace DotNetCore.HayateOP.Tests.OpenTelemetry;
 
 /// <summary>
-/// T14 验收：HayateOtelMetrics 桥接契约验证。
+/// Acceptance: HayateOtelMetrics bridge contract validation.
 /// <para>
-/// 三层验证：
-/// 1. MeterListener 直连 —— 计数器/直方图/gauge 的名称、数值、tag 契约；
-/// 2. 真实池端到端 —— builder WithMetrics + registry，gauge 反映池容量变化；
-/// 3. OpenTelemetry SDK InMemory Exporter 管线 —— 与 OTLP Collector 共享采集管线（仅末端不同）。
+/// Three layers of validation:
+/// 1. MeterListener direct connection - contract for counter/histogram/gauge names, values, and tags;
+/// 2. Real pool end-to-end - builder WithMetrics + registry; the gauge reflects pool capacity changes;
+/// 3. OpenTelemetry SDK InMemory Exporter pipeline - shares the scraping pipeline with the OTLP Collector (only the terminal differs).
 /// </para>
 /// </summary>
 public class OpenTelemetryMetricsTests
@@ -36,7 +36,7 @@ public class OpenTelemetryMetricsTests
         public Dictionary<string, object?> Tags { get; init; } = new();
     }
 
-    /// <summary>ReadOnlySpan 上不能用 LINQ ToDictionary（扩展解析歧义），手动转换。</summary>
+    /// <summary>LINQ ToDictionary cannot be used on a ReadOnlySpan (extension resolution ambiguity); convert manually.</summary>
     private static Dictionary<string, object?> ToDict(ReadOnlySpan<KeyValuePair<string, object?>> tags)
     {
         var dict = new Dictionary<string, object?>();
@@ -44,7 +44,7 @@ public class OpenTelemetryMetricsTests
         return dict;
     }
 
-    /// <summary>构建监听指定 Meter 的 MeterListener，收集所有 long/double 测量值。</summary>
+    /// <summary>Build a MeterListener that observes the specified Meter, collecting all long/double measurements.</summary>
     private static (MeterListener Listener, List<TagCollector> Points) BuildListener(string meterName)
     {
         var points = new List<TagCollector>();
@@ -66,7 +66,7 @@ public class OpenTelemetryMetricsTests
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 1. 计数器 + 直方图契约（MeterListener 直连）
+    // 1. Counter + histogram contract (MeterListener direct connection)
     // ─────────────────────────────────────────────────────────────
 
     [Fact]
@@ -82,7 +82,7 @@ public class OpenTelemetryMetricsTests
         metrics.RecordObjectMiss("poolA");
         metrics.RecordPoolScaled("poolA", "expand", 5, 10);
 
-        // 断言计数器点
+        // Assert counter points
         var acquires = points.Where(p => p.Name == "HayatePoolAcquire").ToList();
         Assert.Equal(2, acquires.Count);
         Assert.Equal("poolA", acquires[0].Tags["pool.name"]);
@@ -100,7 +100,7 @@ public class OpenTelemetryMetricsTests
         var scaled = Assert.Single(points.Where(p => p.Name == "HayatePoolScaled"));
         Assert.Equal("expand", scaled.Tags["action"]);
 
-        // 断言直方图点（逐次测量值）
+        // Assert histogram points (per-measurement values)
         var waits = points.Where(p => p.Name == "HayatePoolWaitTime").ToList();
         Assert.Equal(2, waits.Count);
         Assert.Equal(12.5, waits[0].Value);
@@ -110,7 +110,7 @@ public class OpenTelemetryMetricsTests
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 2. Gauge 契约（registry 数据源 + 真实池端到端）
+    // 2. Gauge contract (registry data source + real pool end-to-end)
     // ─────────────────────────────────────────────────────────────
 
     [Fact]
@@ -128,20 +128,20 @@ public class OpenTelemetryMetricsTests
             .WithEnableValidation(false)
             .WithEnableEviction(false)
             .WithEnableLeakDetection(false)
-            .WithEnableMetrics(true)       // 打开事件门控：借/还事件才会到达桥接实例
+            .WithEnableMetrics(true)       // Enable the event gate: only then do borrow/return events reach the bridge instance
             .WithMetrics(metrics)
             .Build();
 
         registry.Register("otel-gauge-pool", pool);
 
-        // 初始：Min=5 预热 → CurrentSize=5, PooledCount=5
+        // Initial: Min=5 warm-up -> CurrentSize=5, PooledCount=5
         listener.RecordObservableInstruments();
         var size0 = points.Where(p => p.Name == "HayatePoolSize").Single(p => p.Tags["pool.name"] as string == "otel-gauge-pool");
         var avail0 = points.Where(p => p.Name == "HayatePoolAvailable").Single(p => p.Tags["pool.name"] as string == "otel-gauge-pool");
         Assert.Equal(5, size0.Value);
         Assert.Equal(5, avail0.Value);
 
-        // 借出 2 个 → PooledCount=3，容量不变；同一窗口内 Acquire 计数器也应各发 1 次
+        // Borrow 2 -> PooledCount=3, capacity unchanged; the Acquire counter should also fire once per borrow in the same window
         points.Clear();
         var a = pool.Acquire();
         var b = pool.Acquire();
@@ -153,7 +153,7 @@ public class OpenTelemetryMetricsTests
         Assert.Equal(2, points.Count(p => p.Name == "HayatePoolAcquire"));
         Assert.All(points.Where(p => p.Name == "HayatePoolAcquire"), p => Assert.Equal("otel-gauge-pool", p.Tags["pool.name"]));
 
-        // 归还 → PooledCount 回到 5；同一窗口内 Release 计数器发 2 次
+        // Return -> PooledCount back to 5; the Release counter fires twice in the same window
         points.Clear();
         pool.Release(a);
         pool.Release(b);
@@ -166,15 +166,15 @@ public class OpenTelemetryMetricsTests
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 3. DI 注册：覆盖默认 EmptyHayateMetrics
+    // 3. DI registration: overrides the default EmptyHayateMetrics
     // ─────────────────────────────────────────────────────────────
 
     [Fact]
     public void AddHayateOpenTelemetryMetrics_OverridesDefaultEmptyMetrics()
     {
         var services = new ServiceCollection();
-        // AddHayatePoolSupport 返回 IHayateServiceCollection（自定义 builder），链式终止；
-        // OTel 桥接扩展定义在 IServiceCollection 上，须单独调用
+        // AddHayatePoolSupport returns IHayateServiceCollection (a custom builder) and terminates the chain;
+        // the OTel bridge extension is defined on IServiceCollection and must be called separately
         services.AddHayatePoolSupport();
         services.AddHayateOpenTelemetryMetrics();
 
@@ -184,7 +184,7 @@ public class OpenTelemetryMetricsTests
         Assert.IsType<HayateOtelMetrics>(metrics);
         Assert.NotSame(EmptyHayateMetrics.Instance, metrics);
 
-        // 事件经 DI 解析的桥接实例正常发布
+        // Events are published normally through the DI-resolved bridge instance
         var (listener, points) = BuildListener("DotNetCore.HayateOP");
         metrics.RecordObjectMiss("di-pool");
         var miss = Assert.Single(points.Where(p => p.Name == "HayatePoolMiss"));
@@ -193,7 +193,7 @@ public class OpenTelemetryMetricsTests
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 4. OpenTelemetry SDK 管线（InMemory Exporter，与 OTLP 采集管线同构）
+    // 4. OpenTelemetry SDK pipeline (InMemory Exporter, isomorphic to the OTLP scraping pipeline)
     // ─────────────────────────────────────────────────────────────
 
     [Fact]
@@ -215,7 +215,7 @@ public class OpenTelemetryMetricsTests
         var missMetric = exported.Single(m => m.Name == "HayatePoolMiss");
         var waitMetric = exported.Single(m => m.Name == "HayatePoolWaitTime");
 
-        // Counter 聚合值
+        // Counter aggregated value
         var acquirePoints = new List<MetricPoint>();
         foreach (var p in acquireMetric.GetMetricPoints()) acquirePoints.Add(p);
         Assert.Equal(1, acquirePoints.Count);
@@ -228,7 +228,7 @@ public class OpenTelemetryMetricsTests
         foreach (var p in missMetric.GetMetricPoints()) missPoints.Add(p);
         Assert.Equal(1, missPoints[0].GetSumLong());
 
-        // Histogram 采集到 count=1、sum=3.0
+        // Histogram collected count=1, sum=3.0
         var waitPoints = new List<MetricPoint>();
         foreach (var p in waitMetric.GetMetricPoints()) waitPoints.Add(p);
         Assert.Equal(1, waitPoints[0].GetHistogramCount());

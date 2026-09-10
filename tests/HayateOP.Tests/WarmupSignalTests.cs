@@ -3,17 +3,17 @@ using DotNetCore.HayateOP.Policies;
 namespace DotNetCore.HayateOP.Tests;
 
 /// <summary>
-/// M17：预热就绪信号（WaitForWarmup）。
+/// Warm-up ready signal (WaitForWarmup).
 /// <para>
-/// 语义：<c>true</c> 时预热转后台执行，构造立即返回；借出（同步/异步）在预热完成前阻塞，
-/// 预热失败时信号同样置位（不出现永久阻塞）。默认 <c>false</c> 与 2.4 行为完全一致。
+/// Semantics: when <c>true</c>, prewarming runs in the background and construction returns immediately; borrows (sync/async) block until prewarming completes,
+/// and if prewarming fails the signal is still set (no permanent block). The default <c>false</c> is fully identical to the 2.4 behavior.
 /// </para>
 /// </summary>
 public class WarmupSignalTests
 {
     private class GateObject { }
 
-    /// <summary>创建过程被外部 gate 阻塞的策略——用于确定性地证明「预热未完成 → 借出阻塞」。</summary>
+    /// <summary>A policy whose creation is blocked by an external gate -- used to deterministically prove "prewarm incomplete -> borrow blocks".</summary>
     private sealed class GatedPolicy : IHayateObjectPolicy<GateObject>
     {
         private readonly ManualResetEventSlim _gate;
@@ -35,10 +35,10 @@ public class WarmupSignalTests
         public void OnDestroy(GateObject item) { }
     }
 
-    /// <summary>创建必失败的策略——用于验证预热失败路径不会把借出永久挂住。</summary>
+    /// <summary>A policy whose creation always fails -- used to verify the prewarm-failure path does not hang borrows forever.</summary>
     private sealed class ThrowingPolicy : IHayateObjectPolicy<GateObject>
     {
-        public GateObject Create() => throw new InvalidOperationException("create failed (M17 test)");
+        public GateObject Create() => throw new InvalidOperationException("create failed (warmup test)");
         public bool OnRelease(GateObject item) => true;
         public bool Validate(GateObject item) => true;
         public void OnAcquire(GateObject item) { }
@@ -65,7 +65,7 @@ public class WarmupSignalTests
     [Fact(Timeout = 30_000)]
     public void WaitForWarmup_False_ShouldKeepSynchronousPrewarm()
     {
-        // 零破坏：默认不等待 → 构造返回时预热已完成（同步预热）
+        // Zero regression: by default it does not wait -> prewarming is already complete when construction returns (synchronous prewarm)
         using var pool = BaseBuilder("m17-default").Build();
 
         Assert.Equal(4, pool.GetStats().CurrentSize);
@@ -84,17 +84,17 @@ public class WarmupSignalTests
             .WithWaitForWarmup(true)
             .Build();
 
-        // 构造已返回而预热被 gate 阻塞 → 尚无对象创建（后台预热确实与构造解耦）
+        // Construction has returned but prewarming is blocked by the gate -> no object created yet (background prewarm is truly decoupled from construction)
         Assert.Equal(0, policy.CreatedCount);
 
         var acquire = Task.Run(() => pool.Acquire());
 
-        // 预热未完成期间借出必须阻塞（就绪门生效；L5 冷池自举让位）
-        Assert.False(acquire.Wait(TimeSpan.FromMilliseconds(500)), "预热未完成时 Acquire 不应返回");
+        // During prewarm the borrow must block (the ready gate is in effect; the cold-pool bootstrap yields)
+        Assert.False(acquire.Wait(TimeSpan.FromMilliseconds(500)), "Acquire should not return before prewarm completes");
 
-        // 放行预热 → 就绪信号置位 → 借出放行
+        // Release the gate -> the ready signal is set -> the borrow is released
         gate.Set();
-        Assert.True(acquire.Wait(TimeSpan.FromSeconds(15)), "预热完成后 Acquire 应放行");
+        Assert.True(acquire.Wait(TimeSpan.FromSeconds(15)), "Acquire should be released after prewarm completes");
         Assert.Equal(4, policy.CreatedCount);
     }
 
@@ -111,7 +111,7 @@ public class WarmupSignalTests
 
         var pending = pool.AcquireAsync();
         await Task.Delay(300);
-        Assert.False(pending.IsCompleted, "预热未完成时 AcquireAsync 不应完成");
+        Assert.False(pending.IsCompleted, "AcquireAsync should not complete before prewarm completes");
 
         gate.Set();
         var item = await pending.WaitAsync(TimeSpan.FromSeconds(15));
@@ -127,7 +127,7 @@ public class WarmupSignalTests
             .WithWaitForWarmup(true)
             .Build();
 
-        // 预热全程创建失败 → 就绪信号仍须置位，借出不得永久挂起（按拒绝语义快速失败）
+        // Prewarm fails to create throughout -> the ready signal must still be set, and borrows must not hang forever (fast-fail per the rejection semantics)
         var outcome = Task.Run(() =>
         {
             try
@@ -141,6 +141,6 @@ public class WarmupSignalTests
             }
         });
 
-        Assert.True(outcome.Wait(TimeSpan.FromSeconds(15)), "预热失败后 Acquire 不得永久阻塞");
+        Assert.True(outcome.Wait(TimeSpan.FromSeconds(15)), "Acquire must not block forever after prewarm fails");
     }
 }

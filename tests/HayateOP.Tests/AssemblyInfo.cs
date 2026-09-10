@@ -1,18 +1,18 @@
-// 测试套件级"围栏"（P0/R2, R3）：
-// 本程序集以对象池并发/线程压测为主，多个类都会驱动 ThreadPool、GC、SpinLock、
-// 后台驱逐/校验回调与扩缩容冷却。默认跨类并行会让重并发类与轻量确定性用例互相竞争 CPU，
-// 既造成偶发超时/时序 flaky，也在宿主机器上叠加 CPU 空转。
+// Assembly-level "fence" (highest priority; requirements R2, R3):
+// This assembly focuses on object-pool concurrency and thread stress testing; many classes drive the ThreadPool, GC, SpinLock,
+// background eviction/validation callbacks, and scale-up/down cooldown. By default, cross-class parallelism makes heavy-concurrency classes compete for CPU with lightweight deterministic cases,
+// causing intermittent timeouts/timing flakiness and adding idle CPU spin on the host machine.
 //
-// 因此在此**程序集级关闭测试并行化**：所有 collection 串行执行，作为最强的确定性围栏。
-// 其代价是整套基本串行；换取的是：任一用例不与它类并发争抢，CPU 占用收敛、结果可复现。
-// 若日后需要吞吐，可在并发类稳定后再改为按 collection 粒度精细并行，而把轻量类留在并行组。
+// Therefore, disable test parallelism at the **assembly level** here: all collections run serially, acting as the strongest determinism fence.
+// The cost is that the whole suite is essentially serial; the benefit is that no case competes concurrently with other classes, so CPU usage converges and results are reproducible.
+// If throughput is needed later, once the concurrency classes are stable you can switch to fine-grained parallelism per collection, keeping the lightweight classes in the parallel group.
 //
-// 世代说明（FUTURE）：本文件属于 tests/HayateOP.Tests（future 世代，xunit v3 + MTP）。
-// v3 中 v2 的 CollectionBehavior.DisableTestParallelization 已过时(编译错误 CS0619)，
-// 程序集级关闭并行改用 v3 的 Xunit.v3.Parallelization(Mode = ParallelMode.None)。
-// net6/net7(v2+VSTest) 的兼容版本见 tests/legacy/HayateOP.Tests.Legacy/AssemblyInfo.cs，
-// 那里使用 v2 写法；本文件不再需要条件编译切分。
+// Generation note (FUTURE): this file belongs to tests/HayateOP.Tests (future generation, xunit v3 + MTP).
+// In v3, v2's CollectionBehavior.DisableTestParallelization is obsolete (compiler error CS0619),
+// so assembly-level parallelism disable uses v3's Xunit.v3.Parallelization(Mode = ParallelMode.None).
+// The net6/net7 (v2 + VSTest) compatible version is in tests/legacy/HayateOP.Tests.Legacy/AssemblyInfo.cs,
+// which uses the v2 syntax; this file no longer needs conditional-compilation splits.
 using Xunit.v3;
 
-// v3：程序集级关闭所有并行（等价 v2 的 DisableTestParallelization）
+// v3: disable all parallelism at the assembly level (equivalent to v2's DisableTestParallelization)
 [assembly: Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]

@@ -1,13 +1,13 @@
-// T12 — 五场景压力测试 + T06 遗留 CPU 验收（PR-C，2026-09-08）
+// Five-scenario pressure tests + the legacy CPU acceptance for block-wait behavior (2026-09-08)
 //
-// 硬性约束：每个场景挂 xunit v3 Timeout 看门狗（超时即杀，防 CI 挂起）。
-// 时长口径：默认短跑（CI 友好，总时长 < 6 min）；设置环境变量 HAYATE_PRESSURE_LONG=1
-// 可将 SustainedHighLoad 恢复为 10 分钟全量口径（对应原计划 "100 线程 × 10min"）。
+// Hard constraint: every scenario attaches an xunit v3 Timeout watchdog (kills on timeout, prevents CI hangs).
+// Duration policy: a short run by default (CI-friendly, total under 6 min); set the environment variable HAYATE_PRESSURE_LONG=1
+// to restore SustainedHighLoad to its full 10-minute run (matching the original plan of "100 threads x 10 min").
 //
-// 与计划的偏差说明（有意为之）：
-// - BurstLoad 断言"每轮缩回 MinPoolSize"在默认缩容参数（ScalingInterval=5s、Step=5）下
-//   一个 5s 轮内不可能收敛（200→100 需 20 个周期）。本套件将 ScalingIntervalMs 调至 1000、
-//   ScaleDownStep 调至 50，使断言在真实缩容机制下可成立。
+// Deviations from the plan (intentional):
+// - The BurstLoad assertion "scales back to MinPoolSize each round" cannot converge under the default scale-down parameters (ScalingInterval=5s, Step=5)
+//   within a single 5s round (200->100 would need 20 cycles). This suite lowers ScalingIntervalMs to 1000,
+//   and ScaleDownStep to 50, so the assertion holds under the real scale-down mechanism.
 
 using System.Diagnostics;
 using DotNetCore.HayateOP;
@@ -23,12 +23,12 @@ public class PressureScenarios
         public void DoWork() => AccessCount++;
     }
 
-    /// <summary>长跑口径开关：HAYATE_PRESSURE_LONG=1 时 SustainedHighLoad 跑 600s。</summary>
+    /// <summary>Long-run toggle: when HAYATE_PRESSURE_LONG=1, SustainedHighLoad runs for 600s.</summary>
     private static bool LongRun =>
         Environment.GetEnvironmentVariable("HAYATE_PRESSURE_LONG") == "1";
 
     // ─────────────────────────────────────────────────────────────
-    // 场景 1：SustainedHighLoad — 持续高负载，断言零泄漏
+    // Scenario 1: SustainedHighLoad - sustained high load, asserting zero leaks
     // ─────────────────────────────────────────────────────────────
     [Fact(Timeout = 700_000)]
     public void SustainedHighLoad_ZeroLeakDetected()
@@ -43,7 +43,7 @@ public class PressureScenarios
             .WithEnableAutoScaling(true)
             .WithEnableValidation(true)
             .WithEnableEviction(true)
-            .WithEnableLeakDetection(true)     // 泄漏检测开启，借出全程计时
+            .WithEnableLeakDetection(true)     // Leak detection enabled; the entire borrow is timed
             .WithEnableMetrics(true)
             .Build();
 
@@ -73,13 +73,13 @@ public class PressureScenarios
 
         var snapshot = pool.TakeSnapshot();
         Assert.Equal(0, errors);
-        Assert.Equal(0, snapshot.LeakCount);                 // 核心断言：零泄漏
+        Assert.Equal(0, snapshot.LeakCount);                 // Core assertion: zero leaks
         Assert.True(snapshot.LeakTraces.Count == 0);
         Assert.True(ops > 0, "scenario must perform work");
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 场景 2：BurstLoad — 10→200 并发脉冲 × 5 轮，每轮缩回 MinPoolSize
+    // Scenario 2: BurstLoad - 10->200 concurrent pulse x 5 rounds, scaling back to MinPoolSize each round
     // ─────────────────────────────────────────────────────────────
     [Fact(Timeout = 180_000)]
     public void BurstLoad_ScalesBackToMinAfterEachBurst()
@@ -93,9 +93,9 @@ public class PressureScenarios
             .WithMinSize(minSize)
             .WithMaxSize(200)
             .WithEnableAutoScaling(true)
-            .WithScalingInterval(800)          // 缩容检查 0.8s/次
-            .WithScaleDownStep(150)            // 200→50 一步到位，消除渐进缩容的轮末残留
-            .WithScaleDownCooldownSeconds(1)   // 默认 15s 冷却会把多数轮次的缩容拦掉（round 5 踩坑实测）
+            .WithScalingInterval(800)          // Scale-down check every 0.8s
+            .WithScaleDownStep(150)            // 200->50 in one step, eliminating the end-of-round residue from gradual scale-down
+            .WithScaleDownCooldownSeconds(1)   // The default 15s cooldown would block scale-down for most rounds (observed in round 5 testing)
             .WithEnableValidation(false)
             .WithEnableEviction(false)
             .WithEnableLeakDetection(false)
@@ -124,10 +124,10 @@ public class PressureScenarios
             Task.WaitAll(workers);
             Assert.Equal(0, errors);
 
-            // 轮间等待缩容收敛：轮询直至 ≤ min+5（上限 10s）。
-            // 2.3 及以前此处存在「实测 round 2 残留 current=60」：池内缩容门控
-            // （usage>0.6 才放行）与策略层（usage<0.2 才缩）互斥成死代码，缩容从不触发。
-            // S1（2.4）移除门控后缩容真实生效，轮询收敛成为确定性断言（本场景自此转正为缩容回归守卫）。
+            // Between rounds, wait for scale-down to converge: poll until <= min+5 (10s cap).
+            // In 2.3 and earlier, there was a "round 2 residue current=60" observation here: the in-pool scale-down gate
+            // (release allowed only when usage>0.6) and the policy layer (scale down only when usage<0.2) were mutually exclusive dead code, so scale-down never triggered.
+            // After the gate was removed (2.4), scale-down actually takes effect, and polling convergence became a deterministic assertion (this scenario became the scale-down regression guard).
             var deadline = DateTime.UtcNow.AddSeconds(10);
             var current = pool.GetStats().CurrentSize;
             while (current > minSize + 5 && DateTime.UtcNow < deadline)
@@ -141,7 +141,7 @@ public class PressureScenarios
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 场景 3：OscillatingLoad — 30s 周期性升降负载 × 3 周期，内存有界
+    // Scenario 3: OscillatingLoad - 30s periodic up/down load x 3 cycles, bounded memory
     // ─────────────────────────────────────────────────────────────
     [Fact(Timeout = 120_000)]
     public void OscillatingLoad_NoOomAndBoundedPoolSize()
@@ -199,7 +199,7 @@ public class PressureScenarios
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 场景 4：SpikeLoad — 瞬时 1000 并发 + Abort 策略，不崩溃不挂起
+    // Scenario 4: SpikeLoad - instantaneous 1000 concurrent + Abort policy, no crash or hang
     // ─────────────────────────────────────────────────────────────
     [Fact(Timeout = 90_000)]
     public void SpikeLoad_AbortPolicyNeverCrashes()
@@ -210,7 +210,7 @@ public class PressureScenarios
             .WithPoolName("pressure-spike")
             .WithMinSize(50)
             .WithMaxSize(300)
-            .WithRejectPolicy(HayatePoolRejectPolicy.Abort)   // 池空立即拒绝，绝不阻塞
+            .WithRejectPolicy(HayatePoolRejectPolicy.Abort)   // Reject immediately when the pool is empty; never block
             .WithEnableAutoScaling(true)
             .WithEnableValidation(false)
             .WithEnableEviction(false)
@@ -230,43 +230,43 @@ public class PressureScenarios
                 finally { pool.Release(r); }
                 Interlocked.Increment(ref succeeded);
             }
-            catch (Exception)                       // Abort 拒绝属预期行为，必须被捕获而非逃逸
+            catch (Exception)                       // Abort rejection is expected behavior and must be caught, not allowed to escape
             {
                 Interlocked.Increment(ref rejected);
             }
         })).ToArray();
 
-        Task.WaitAll(tasks);                        // 全部完成 = 无挂起；Timeout 看门狗兜底
+        Task.WaitAll(tasks);                        // All completed = no hang; the Timeout watchdog is the backstop
 
-        Assert.Equal(spike, succeeded + rejected);  // 无丢失请求
+        Assert.Equal(spike, succeeded + rejected);  // No lost requests
         Assert.True(succeeded > 0, "spike should acquire at least some objects");
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 场景 5：ColdStart — 冷池行为（两段）
+    // Scenario 5: ColdStart - cold-pool behavior (two segments)
     //
-    // ⚠️ 测试发现的产品空缺（2026-09-08 实测确认）：
-    //   Min=0 冷池**无法自举**——
-    //   ① ScalingCallback 对 currentTotal == 0 直接 return（HayateObjectPool.cs 扩容短路），
-    //      扩容永不创建首个对象；
-    //   ② CreateNew 策略实际是"超时后创建"（等满 AcquireTimeout 才 Create），
-    //      首借仍要等满 5s；
-    //   因此原计划验收"预热 0ms 时借出 P99 < 1ms"在 Min=0 下不可达。
-    // 段 A：文档化现有行为——冷池（Min=0）"超时驱动间接自举"：部分等待者超时、
-    //   部分在首个超时触发的 ForceScaleUpOneStep 补货后借到（Known Limitation 守卫）。
-    // 段 B：真正可用的冷启动路径——Min=5（构造即 PreWarm）首借无等待，P99 < 1ms。
-    // 「ScalingCallback 空池短路」+「CreateNew 滞后创建」登记为 PR-D 改进项。
+    // WARNING: a product gap discovered in testing (confirmed by measurement on 2026-09-08):
+    //   A Min=0 cold pool **cannot bootstrap itself** -
+    //   1) ScalingCallback returns directly when currentTotal == 0 (the HayateObjectPool.cs scale-up short-circuit),
+    //      so scale-up never creates the first object;
+    //   2) The CreateNew policy actually means "create after timeout" (it only calls Create once AcquireTimeout elapses),
+    //      so the first borrow still waits the full 5s;
+    //   Therefore the original acceptance "borrow P99 < 1ms at 0ms warm-up" is unreachable with Min=0.
+    // Segment A: documents the current behavior - the cold pool (Min=0) "timeout-driven indirect bootstrap": some waiters time out,
+    //   while others borrow after the first timeout triggers ForceScaleUpOneStep to replenish (Known Limitation guard).
+    // Segment B: the actually usable cold-start path - Min=5 (pre-warmed at construction) borrows with no wait, P99 < 1ms.
+    // The "ScalingCallback empty-pool short-circuit" and "CreateNew delayed creation" are logged as improvement items.
     // ─────────────────────────────────────────────────────────────
     [Fact(Timeout = 60_000)]
     public void ColdStart_ColdPoolBehaviorAndWarmPathP99()
     {
-        // 段 A：Min=0 冷池 —— L5 后首批并发首借全部经冷启动自举即时成功（确定性）
+        // Segment A: Min=0 cold pool - after the fix, the first concurrent borrows all succeed instantly via cold-boot bootstrap (deterministic)
         using (var cold = new HayatePoolBuilder<PooledResource>()
             .WithPoolName("pressure-coldstart-cold")
             .WithMinSize(0)
             .WithMaxSize(100)
             .WithEnableAutoScaling(true)
-            .WithAcquireTimeout(TimeSpan.FromSeconds(1))   // 压缩超时，加快断言
+            .WithAcquireTimeout(TimeSpan.FromSeconds(1))   // Compress the timeout to speed up the assertion
             .WithEnableValidation(false)
             .WithEnableEviction(false)
             .WithEnableLeakDetection(false)
@@ -286,17 +286,17 @@ public class PressureScenarios
             Task.WaitAll(tasks);
             var succeeded = 5 - (int)Interlocked.Read(ref timeouts);
 
-            // 行为守卫（PR-D L5，2.1 行为变更）：
-            //  - 旧语义：ScalingCallback 对空池短路（currentTotal==0 return）无法周期自举；
-            //    仅 BlockTimeout 超时抛异常前的 ForceScaleUpOneStep() 间接补货，首个超时者
-            //    "牺牲自己"，结果不确定（实测 2/5 与 5/5 超时两种时序）。
-            //  - 新语义：借出路径冷启动自举——池完全空时首个 Acquire 按需同步创建（CAS 防重），
-            //    其余等待者经归还信号轮转复用，全部即时成功、零超时。
+            // Behavior guard (2.1 behavior change):
+            //  - Old semantics: ScalingCallback short-circuits on an empty pool (returns when currentTotal==0) and cannot bootstrap periodically;
+            //    only the ForceScaleUpOneStep() before a BlockTimeout exception indirectly replenishes, and the first to time out
+            //    "sacrifices itself", yielding non-deterministic results (observed timings of 2/5 and 5/5 timeouts).
+            //  - New semantics: the borrow path cold-bootstraps - when the pool is completely empty the first Acquire creates on demand synchronously (CAS de-dup),
+            //    while the remaining waiters reuse via return signals, all succeeding instantly with zero timeouts.
             Assert.Equal(0L, Interlocked.Read(ref timeouts));
-            Console.WriteLine($"[ColdStart] cold pool (Min=0): {succeeded}/5 acquired instantly via L5 cold-boot, {timeouts} timeouts");
+            Console.WriteLine($"[ColdStart] cold pool (Min=0): {succeeded}/5 acquired instantly via cold-boot, {timeouts} timeouts");
         }
 
-        // 段 B：Min=5 池（构造即预热）—— 首借走池内热对象，P99 < 1ms
+        // Segment B: Min=5 pool (pre-warmed at construction) - the first borrow uses a hot in-pool object, P99 < 1ms
         using var warm = new HayatePoolBuilder<PooledResource>()
             .WithPoolName("pressure-coldstart-warm")
             .WithMinSize(5)
@@ -319,22 +319,22 @@ public class PressureScenarios
         }
 
         Array.Sort(latencies);
-        var p99 = latencies[latencies.Length - 2];   // 100 样本 P99 ≈ 倒数第 2 个（容忍 1 个离群）
+        var p99 = latencies[latencies.Length - 2];   // 100-sample P99 ~= the 2nd-to-last value (tolerating 1 outlier)
         Assert.True(p99 < 1.0, $"prewarmed cold-start P99 = {p99:F3}ms, expected < 1ms");
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 场景 6（T06 遗留验收）：BlockPolicy_100Concurrent_CpuLess5Percent
-    // 100 并发 Block 等待期间，进程 CPU 必须远离"忙等"量级。
+    // Scenario 6 (legacy acceptance): BlockPolicy_100Concurrent_CpuLess5Percent
+    // During 100 concurrent Block waits, process CPU must stay far below "busy-spin" levels.
     //
-    // ⚠️ 实测记录（2026-09-08，Release 四轮）：11.7% / 14.1% / 27.3% / 45.3% / 57.0%——
-    //   100 等待者 × BlockWaitSliceMs=100ms 定时唤醒 × 4 分片自旋锁扫描，
-    //   且所有等待者同相位唤醒（Wait(100ms) 同步到期）形成锁争用风暴，CPU 随调度相位波动巨大；
-    //   - 对照 PR-B 改造前的 SpinWait 忙等（100 线程满核空转 = 万级百分比），
-    //     SemaphoreSlim 改造已达成"远离忙等"目标；
-    //   - 严格 5% 目标需 Block 退避切片（连续无信号时 100→200→400→800ms 指数退避）
-    //     + 随机抖动打散同相位，登记为 PR-D 优化项。
-    // 本场景断言"忙等防护线 80%"（单核口径；忙等应为数千百分点），并输出与 5% 目标的差距。
+    // WARNING: measured record (2026-09-08, four Release runs): 11.7% / 14.1% / 27.3% / 45.3% / 57.0% -
+    //   100 waiters x BlockWaitSliceMs=100ms timed wakeups x 4 shards of spinlock scanning,
+    //   and all waiters wake in phase (Wait(100ms) expires synchronously), forming a lock-contention storm; CPU swings widely with scheduling phase;
+    //   - Compared with the SpinWait busy-spin before the rework (100 threads spinning at full core = tens-of-thousands of percent),
+    //    the SemaphoreSlim rework already achieved the "far below busy-spin" goal;
+    //   - Hitting the strict 5% target requires Block backoff slicing (exponential 100->200->400->800ms backoff when no signal arrives)
+    //     plus random jitter to break the in-phase wakeups; logged as an optimization item.
+    // This scenario asserts the "busy-spin guard line 80%" (single-core basis; busy-spin would be thousands of percent), and reports the gap to the 5% target.
     // ─────────────────────────────────────────────────────────────
     [Fact(Timeout = 90_000)]
     public void BlockPolicy_100Concurrent_CpuLess5Percent()
@@ -345,9 +345,9 @@ public class PressureScenarios
         using var pool = new HayatePoolBuilder<PooledResource>()
             .WithPoolName("pressure-block-cpu")
             .WithMinSize(poolCapacity)
-            .WithMaxSize(poolCapacity)         // 固定容量：借光后其余请求全部 Block
+            .WithMaxSize(poolCapacity)         // Fixed capacity: once exhausted, all remaining requests Block
             .WithRejectPolicy(HayatePoolRejectPolicy.BlockTimeout)
-            .WithAcquireTimeout(TimeSpan.FromSeconds(4))   // 大于测量窗口，等待期间不抛超时
+            .WithAcquireTimeout(TimeSpan.FromSeconds(4))   // Larger than the measurement window, so no timeout is thrown during the wait
             .WithEnableAutoScaling(false)
             .WithEnableValidation(false)
             .WithEnableEviction(false)
@@ -355,11 +355,11 @@ public class PressureScenarios
             .WithEnableMetrics(false)
             .Build();
 
-        // 借光全部对象
+        // Borrow all objects
         var held = new List<PooledResource>(poolCapacity);
         for (var i = 0; i < poolCapacity; i++) held.Add(pool.Acquire());
 
-        // 100 线程全部进入 Block 等待（4s 超时兜底，异常计入 rejected）
+        // All 100 threads enter Block wait (4s timeout backstop; exceptions counted as rejected)
         var allQueued = new ManualResetEventSlim(false);
         long queuedCount = 0;
         var rejected = 0L;
@@ -370,7 +370,7 @@ public class PressureScenarios
             startGate.Wait();
             try
             {
-                var r = pool.Acquire();            // BlockTimeout：阻塞等待 4s
+                var r = pool.Acquire();            // BlockTimeout: blocks for 4s
                 try { r.DoWork(); }
                 finally { pool.Release(r); }
             }
@@ -381,27 +381,27 @@ public class PressureScenarios
 
         foreach (var t in threads) t.Start();
         startGate.Set();
-        allQueued.Wait(TimeSpan.FromSeconds(2));   // 等全部进入等待态（或 2s 兜底）
-        Thread.Sleep(300);                          // 静置，确保 Block 等待稳定
+        allQueued.Wait(TimeSpan.FromSeconds(2));   // Wait for all to enter the wait state (or the 2s backstop)
+        Thread.Sleep(300);                          // Settle to ensure the Block wait is stable
 
         var proc = Process.GetCurrentProcess();
         proc.Refresh();
         var cpuBefore = proc.TotalProcessorTime;
 
-        Thread.Sleep(TimeSpan.FromSeconds(2));      // CPU 测量窗口：100 线程持续 Block
+        Thread.Sleep(TimeSpan.FromSeconds(2));      // CPU measurement window: 100 threads continuously Block
 
         proc.Refresh();
         var cpuAfter = proc.TotalProcessorTime;
         var cpuDelta = (cpuAfter - cpuBefore).TotalSeconds;
-        var cpuRatio = cpuDelta / 2.0;              // 折算单核占用率（1.0 = 100% 单核）
+        var cpuRatio = cpuDelta / 2.0;              // Converted to single-core occupancy (1.0 = 100% of one core)
 
-        // 释放并收割等待线程（4s 超时自然到期后线程自行退出）
+        // Release and reap the waiting threads (they exit on their own once the 4s timeout elapses)
         foreach (var h in held) pool.Release(h);
         foreach (var t in threads) t.Join(TimeSpan.FromSeconds(6));
 
-        // 忙等防护线断言：单核口径 < 80%（SpinWait 忙等时代为数千百分点；
-        // SemaphoreSlim 切片唤醒实测 12%~57%，随调度相位波动；严格 5% 目标需 PR-D 退避切片 + 抖动）。
-        Console.WriteLine($"[BlockCpu] {cpuRatio:P2} of one core over 2s window (T06 target 5%, measured 12-57%, PR-D backoff-slice item)");
+        // Busy-spin guard-line assertion: single-core basis < 80% (in the SpinWait busy-spin era this was thousands of percent;
+        // the SemaphoreSlim sliced wakeup measured 12%-57%, swinging with scheduling phase; the strict 5% target needs backoff slicing + jitter).
+        Console.WriteLine($"[BlockCpu] {cpuRatio:P2} of one core over 2s window (target 5%, measured 12-57%, backoff-slice item)");
         Assert.True(cpuRatio < 0.80,
             $"Block wait CPU = {cpuRatio:P2} of one core over 2s window — must stay far below busy-spin levels (< 80%)");
         Assert.True(rejected > 0, "part of waiters should have timed out and been rejected");

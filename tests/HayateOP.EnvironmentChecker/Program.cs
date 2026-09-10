@@ -9,55 +9,55 @@ Console.WriteLine("Hello, World!");
 Console.InputEncoding = Encoding.UTF8;
 Console.OutputEncoding = Encoding.UTF8;
 
-Console.WriteLine("=== Hayate Object Pool 测试环境校验 ===");
-Console.WriteLine($"操作系统: {RuntimeInformation.OSDescription}");
-Console.WriteLine($"架构: {RuntimeInformation.OSArchitecture}");
-Console.WriteLine($".NET版本: {RuntimeInformation.FrameworkDescription}");
-Console.WriteLine($"CPU核心数: {Environment.ProcessorCount}");
-Console.WriteLine($"是否64位系统: {Environment.Is64BitOperatingSystem}");
-Console.WriteLine($"是否64位进程: {Environment.Is64BitProcess}");
+Console.WriteLine("=== Hayate Object Pool test environment check ===");
+Console.WriteLine($"OS: {RuntimeInformation.OSDescription}");
+Console.WriteLine($"Architecture: {RuntimeInformation.OSArchitecture}");
+Console.WriteLine($".NET version: {RuntimeInformation.FrameworkDescription}");
+Console.WriteLine($"CPU core count: {Environment.ProcessorCount}");
+Console.WriteLine($"Is 64-bit OS: {Environment.Is64BitOperatingSystem}");
+Console.WriteLine($"Is 64-bit process: {Environment.Is64BitProcess}");
 
-// 校验Release模式
+// Verify Release mode
 #if DEBUG
 Console.ForegroundColor = ConsoleColor.Red;
-Console.WriteLine("[严重错误] 当前为Debug模式！性能测试必须用Release模式！");
+Console.WriteLine("[FATAL] Currently in Debug mode! Performance tests must run in Release mode!");
 Console.ResetColor();
 #else
 Console.ForegroundColor = ConsoleColor.Green;
-Console.WriteLine("[√] 当前为Release模式，符合要求");
+Console.WriteLine("[OK] Currently in Release mode, meets requirements");
 Console.ResetColor();
 #endif
 
-// 校验调试器是否附加
+// Verify whether a debugger is attached
 if (Debugger.IsAttached)
 {
     Console.ForegroundColor = ConsoleColor.Red;
-    Console.WriteLine("[严重错误] 调试器已附加！性能测试必须禁用调试器！");
+    Console.WriteLine("[FATAL] A debugger is attached! Performance tests must run without a debugger!");
     Console.ResetColor();
 }
 else
 {
     Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine("[√] 无调试器附加，符合要求");
+    Console.WriteLine("[OK] No debugger attached, meets requirements");
     Console.ResetColor();
 }
 
-// 校验CPU负载
+// Verify CPU load
 var cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total");
 cpuCounter.NextValue();
 System.Threading.Thread.Sleep(1000);
 var cpuUsage = cpuCounter.NextValue();
-Console.WriteLine($"当前CPU总使用率: {cpuUsage:F2}%");
+Console.WriteLine($"Current total CPU usage: {cpuUsage:F2}%");
 if (cpuUsage > 20)
 {
     Console.ForegroundColor = ConsoleColor.Yellow;
-    Console.WriteLine("[警告] CPU使用率过高，会影响测试结果准确性，请关闭后台程序");
+    Console.WriteLine("[WARN] CPU usage is too high and will affect test accuracy; please close background programs");
     Console.ResetColor();
 }
 else
 {
     Console.ForegroundColor = ConsoleColor.Green;
-    Console.WriteLine("[√] CPU负载正常，符合要求");
+    Console.WriteLine("[OK] CPU load is normal, meets requirements");
     Console.ResetColor();
 }
 

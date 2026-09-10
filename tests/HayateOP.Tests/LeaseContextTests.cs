@@ -10,15 +10,15 @@ using DotNetCore.HayateOP.Policies;
 namespace DotNetCore.HayateOP.Tests;
 
 /// <summary>
-/// M16（2.5，breaking）：AsyncLocal 租约上下文——HayateLeaseContext。
-/// 核心语义：并发借还各自持有独立租约上下文（AsyncLocal 流隔离），不再相互覆盖；
-/// Release 结束租约（DetachFromFlow），Destroy 清空包装侧引用。
+/// AsyncLocal lease context -- HayateLeaseContext.
+/// Core semantics: concurrent borrows/releases each hold an independent lease context (AsyncLocal flow isolation), no longer overwriting each other;
+/// Release ends the lease (DetachFromFlow), and Destroy clears the wrapper-side reference.
 /// </summary>
 public class LeaseContextTests
 {
     private sealed class TestObject { }
 
-    /// <summary>归还即拒绝的策略：迫使 Release 走 Destroy 路径（验证 Destroy 清空租约引用）。</summary>
+    /// <summary>A policy that rejects on release: forces Release down the Destroy path (verifies Destroy clears the lease reference).</summary>
     private sealed class RejectOnReleasePolicy : IHayateObjectPolicy<TestObject>
     {
         public TestObject Create() => new TestObject();
@@ -40,9 +40,9 @@ public class LeaseContextTests
             .WithLeakTraceCapture(HayateLeakTraceCaptureMode.EveryAcquire)
             .Build();
 
-        // 并发借出：每个任务拿到自己的对象与自己的租约上下文。
-        // 验证点：①租约 ID 全局唯一；②各上下文帧包含各自任务的标记方法名（流隔离）；
-        // ③包装侧与流侧引用一致；④await 之后（ExecutionContext 流动）Current 仍随流携带。
+        // Concurrent borrows: each task gets its own object and its own lease context.
+        // Verification points: (1) lease IDs are globally unique; (2) each context's frames contain their own task's marker method name (flow isolation);
+        // (3) the wrapper-side and flow-side references match; (4) after await (ExecutionContext flows) Current still travels with the flow.
         var done = await Task.WhenAll(Enumerable.Range(0, 8).Select(async id =>
         {
             var obj = BorrowMarked(pool, id);
@@ -50,7 +50,7 @@ public class LeaseContextTests
             Assert.NotNull(ctx);
             Assert.Same(ctx, GetWrapped(pool, obj).LeaseContext);
 
-            // 模拟租约期工作（含 await，ExecutionContext 流动后 Current 仍随流携带）
+            // Simulate in-lease work (including await; after ExecutionContext flows, Current still travels with the flow)
             await Task.Yield();
             Assert.Same(ctx, HayateLeaseContext.Current);
 
@@ -59,9 +59,9 @@ public class LeaseContextTests
         }));
 
         var leaseIds = done.Select(d => d.ctx.LeaseId).ToHashSet();
-        Assert.Equal(8, leaseIds.Count); // ① 租约 ID 唯一
-        Assert.All(done, d => Assert.Contains("BorrowMarked", d.frames.Select(f => f.GetMethod()?.Name).ToList())); // ② 流隔离
-        Assert.All(done, _ => Assert.Null(HayateLeaseContext.Current)); // ④ Release 后流上下文已清空
+        Assert.Equal(8, leaseIds.Count); // (1) lease IDs are unique
+        Assert.All(done, d => Assert.Contains("BorrowMarked", d.frames.Select(f => f.GetMethod()?.Name).ToList())); // (2) flow isolation
+        Assert.All(done, _ => Assert.Null(HayateLeaseContext.Current)); // (4) flow context cleared after Release
     }
 
     [Fact(Timeout = 30_000)]
@@ -75,8 +75,8 @@ public class LeaseContextTests
             .WithLeakTraceCapture(HayateLeakTraceCaptureMode.EveryAcquire)
             .Build();
 
-        // 同一包装对象被复借：每次借出产生新租约上下文（ID 递增），
-        // 不存在 2.4 及之前 string 采集被复借覆盖的问题
+        // The same wrapped object is re-borrowed: each borrow produces a new lease context (ID increments),
+        // avoiding the pre-2.4 problem where string capture was overwritten by re-borrow
         var seen = new HashSet<long>();
         for (var i = 0; i < 5; i++)
         {
@@ -92,7 +92,7 @@ public class LeaseContextTests
     [Fact(Timeout = 30_000)]
     public void Destroy_ShouldClearWrapperLeaseContextReference()
     {
-        // 归还即拒绝 → Release 走 Destroy(w) → 包装侧 LeaseContext 引用清空
+        // Release is rejected -> Release goes down Destroy(w) -> the wrapper-side LeaseContext reference is cleared
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m16-destroy")
             .WithMinSize(1)
@@ -106,7 +106,7 @@ public class LeaseContextTests
         var w = GetWrapped(pool, obj);
         Assert.NotNull(w.LeaseContext);
 
-        pool.Release(obj); // 策略拒绝 → Destroy
+        pool.Release(obj); // policy rejects -> Destroy
 
         Assert.Null(w.LeaseContext);
     }
@@ -125,17 +125,17 @@ public class LeaseContextTests
         pool.Release(obj);
     }
 
-    /// <summary>带独立调用帧标记的借出（帧数组应含本方法名，证明流隔离）。</summary>
+    /// <summary>A borrow with an independent call-frame marker (the frame array should contain this method's name, proving flow isolation).</summary>
     /// <remarks>
-    /// 必须 <see cref="MethodImplOptions.NoInlining"/>：本方法仅一次转发调用，
-    /// net48 的 JIT 会将其内联进调用方（async 状态机 <c>MoveNext</c>），导致
-    /// 栈帧中不再出现本方法名，令「帧含标记方法」断言随 JIT 行为漂移而误报。
+    /// Must use <see cref="MethodImplOptions.NoInlining"/>: this method only forwards the call once,
+    /// and net48's JIT would inline it into the caller (the async state machine <c>MoveNext</c>), so
+    /// the method name no longer appears on the stack frame, making the "frame contains the marker method" assertion drift with JIT behavior and falsely fail.
     /// </remarks>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static TestObject BorrowMarked(IHayateObjectPool<TestObject> pool, int marker)
         => pool.Acquire();
 
-    /// <summary>与 LeakDetectionTests 同款反射助手：经 _shards 逐分片探测登记表取包装对象。</summary>
+    /// <summary>Same reflection helper as LeakDetectionTests: probe the registry per shard via _shards to get the wrapped object.</summary>
     private static HayateObject<TestObject> GetWrapped(IHayateObjectPool<TestObject> pool, TestObject item)
     {
         var shardsField = pool.GetType().GetField("_shards", BindingFlags.Instance | BindingFlags.NonPublic)!;

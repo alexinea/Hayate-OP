@@ -3,7 +3,7 @@ using DotNetCore.HayateOP.Metrics;
 namespace DotNetCore.HayateOP.Tests;
 
 /// <summary>
-/// M12：容量告警阈值（WarnAtRatio / CriticalAtRatio + 状态翻转去抖回调）。
+/// Capacity alarm thresholds (WarnAtRatio / CriticalAtRatio + state-transition debounce callback).
 /// </summary>
 public class CapacityAlarmTests
 {
@@ -23,7 +23,7 @@ public class CapacityAlarmTests
         var warnCount = new int[1];
         var criticalCount = new int[1];
 
-        // Min=Max=10 且关闭扩缩/驱逐，保证借出水位完全由用例控制、无后台干扰
+        // Min=Max=10 and scaling/eviction off, so the borrow water level is fully controlled by the test with no background interference
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(10)
             .WithMaxSize(10)
@@ -36,26 +36,26 @@ public class CapacityAlarmTests
 
         var items = new List<TestObject>();
 
-        // 借出 8 个 → 使用率 0.8 ≥ 0.8，首次触发警告
+        // Borrow 8 -> usage 0.8 >= 0.8, first warning fires
         for (var i = 0; i < 8; i++) items.Add(pool.Acquire());
         Assert.Equal(1, warnCount[0]);
         Assert.Equal(0, criticalCount[0]);
 
-        // 再借 1 个 → 0.9 仍处于 Warning 级别，状态未翻转，不得重复触发
+        // Borrow 1 more -> 0.9 is still at the Warning level, state has not flipped, must not fire again
         items.Add(pool.Acquire());
         Assert.Equal(1, warnCount[0]);
 
-        // 归还 1 个 → 0.8 仍在 Warning 级别，不触发
+        // Return 1 -> 0.8 is still at the Warning level, no fire
         pool.Release(items[items.Count - 1]);
         items.RemoveAt(items.Count - 1);
         Assert.Equal(1, warnCount[0]);
 
-        // 再归还 1 个 → 0.7 回落 Normal，静默复位
+        // Return 1 more -> 0.7 drops to Normal, silent reset
         pool.Release(items[items.Count - 1]);
         items.RemoveAt(items.Count - 1);
         Assert.Equal(1, warnCount[0]);
 
-        // 重新借出至 0.8 → 状态翻转，第二次触发
+        // Borrow back up to 0.8 -> state flips, second fire
         items.Add(pool.Acquire());
         items.Add(pool.Acquire());
         Assert.Equal(2, warnCount[0]);
@@ -91,16 +91,16 @@ public class CapacityAlarmTests
 
         var items = new List<TestObject>();
 
-        // 借出 5 个 → 0.5 触发警告
+        // Borrow 5 -> 0.5 triggers warning
         for (var i = 0; i < 5; i++) items.Add(pool.Acquire());
         Assert.Equal(1, warnCount[0]);
 
-        // 借出至满池 → 1.0 ≥ 0.95，状态翻转触发危急（正常 → 危急直接跳档，不补发警告）
+        // Borrow to full -> 1.0 >= 0.95, state flips to Critical (Normal -> Critical jumps a level, no extra warning is emitted)
         for (var i = 5; i < 10; i++) items.Add(pool.Acquire());
         Assert.Equal(1, warnCount[0]);
         Assert.Equal(1, criticalCount[0]);
 
-        // 事件参数口径校验
+        // Event-argument shape validation
         var args = lastArgs;
         Assert.NotNull(args);
         Assert.Equal(HayatePoolCapacityAlarmLevel.Critical, args.Level);
@@ -109,7 +109,7 @@ public class CapacityAlarmTests
         Assert.Equal(10, args.MaxPoolSize);
         Assert.Equal(typeof(TestObject).Name, args.PoolName);
 
-        // 归还全部 → 回落复位；再次满借 → 危急再次触发（去抖后可重入）
+        // Return all -> drops and resets; borrow to full again -> Critical fires again (re-entrant after debounce)
         foreach (var item in items) pool.Release(item);
         for (var i = 0; i < 10; i++) items.Add(pool.Acquire());
         Assert.Equal(2, criticalCount[0]);
@@ -120,7 +120,7 @@ public class CapacityAlarmTests
     [Fact]
     public void DisabledByDefault_ShouldNotFireCallbacks()
     {
-        // 默认 WarnAtRatio=0 / CriticalAtRatio=0：未配置告警时即使满池借出也不触发
+        // Default WarnAtRatio=0 / CriticalAtRatio=0: even a fully borrowed pool does not fire when no alarm is configured
         var fired = new int[1];
 
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -145,7 +145,7 @@ public class CapacityAlarmTests
     [Fact]
     public void CallbackException_ShouldNotBreakAcquire()
     {
-        // 用户回调抛异常必须被池吞掉（记录日志），不得影响借出主流程
+        // A user callback exception must be swallowed by the pool (logged), and must not affect the main borrow flow
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(10)
             .WithMaxSize(10)
@@ -171,14 +171,14 @@ public class CapacityAlarmTests
 
         Assert.Throws<ArgumentOutOfRangeException>(() => builder.WithCapacityAlarm(-0.1));
         Assert.Throws<ArgumentOutOfRangeException>(() => builder.WithCapacityAlarm(1.5));
-        // 两档同时启用时危急不得低于警告
+        // When both levels are enabled, Critical must not be below Warning
         Assert.Throws<ArgumentOutOfRangeException>(() => builder.WithCapacityAlarm(0.9, 0.8));
     }
 
     [Fact]
     public void ThresholdNormalization_ShouldClampToValidRange()
     {
-        // 大于 1 的阈值经 ApplyFeatureSwitches 钳制为 1（经 Build 间接验证）
+        // A threshold greater than 1 is clamped to 1 by ApplyFeatureSwitches (verified indirectly through Build)
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(1)
             .WithMaxSize(2)

@@ -3,14 +3,14 @@ using DotNetCore.HayateOP.Logging;
 namespace DotNetCore.HayateOP.Tests;
 
 /// <summary>
-/// M19：每池独立 LoggerFactory（WithLoggerFactory）。
-/// 零破坏要点：未指定工厂时沿用内建单例日志器；显式 WithLogger 优先于工厂。
+/// Per-pool independent LoggerFactory (WithLoggerFactory).
+/// Zero-regression point: when no factory is given, the built-in singleton logger is used; an explicit WithLogger takes precedence over the factory.
 /// </summary>
 public class LoggerFactoryTests
 {
     private class TestObject { }
 
-    /// <summary>记录所有日志文本的内存日志器。</summary>
+    /// <summary>In-memory logger that records all log text.</summary>
     private sealed class RecordingLogger : IHayateLogger
     {
         public List<string> Lines { get; } = new();
@@ -22,7 +22,7 @@ public class LoggerFactoryTests
 
         private static string Render(string level, string message, object[] args)
         {
-            // 与 DefaultHayateLogger.RenderTemplate 同构：按占位符出现顺序依次代入参数
+            // Same shape as DefaultHayateLogger.RenderTemplate: substitute parameters in the order their placeholders appear
             var sb = new System.Text.StringBuilder(message.Length + 32);
             var argIndex = 0;
             for (var i = 0; i < message.Length; i++)
@@ -45,7 +45,7 @@ public class LoggerFactoryTests
         }
     }
 
-    /// <summary>按分类名分发的记录型工厂。</summary>
+    /// <summary>A recording factory that dispatches by category name.</summary>
     private sealed class RecordingLoggerFactory : IHayateLoggerFactory
     {
         public List<string> Categories { get; } = new();
@@ -83,19 +83,19 @@ public class LoggerFactoryTests
             .WithEnableEviction(false)
             .Build();
 
-        // 工厂按池名各创建一次，且两个池拿到的是不同实例
+        // The factory creates one logger per pool name, and the two pools get distinct instances
         Assert.Equal(new[] { "pool-alpha", "pool-beta" }, factory.Categories);
         var loggerA = Assert.IsType<RecordingLogger>(factory.Loggers["pool-alpha"]);
         var loggerB = Assert.IsType<RecordingLogger>(factory.Loggers["pool-beta"]);
         Assert.NotSame(loggerA, loggerB);
 
-        // 日志按池分流：各自只出现自己的池名
+        // Logs are routed per pool: each only shows its own pool name
         Assert.Contains(loggerA.Lines, l => l.Contains("pool-alpha"));
         Assert.DoesNotContain(loggerA.Lines, l => l.Contains("pool-beta"));
         Assert.Contains(loggerB.Lines, l => l.Contains("pool-beta"));
         Assert.DoesNotContain(loggerB.Lines, l => l.Contains("pool-alpha"));
 
-        // 池本身可用
+        // The pool itself is usable
         var obj = poolA.Acquire();
         poolA.Release(obj);
     }
@@ -103,7 +103,7 @@ public class LoggerFactoryTests
     [Fact(Timeout = 30_000)]
     public void WithoutLoggerFactory_ShouldKeepBuiltInSingletonBehaviour()
     {
-        // 零破坏：不指定工厂时构建与使用不受影响
+        // Zero regression: building and using without a factory are unaffected
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("pool-default-logger")
             .WithMinSize(1)
@@ -114,7 +114,7 @@ public class LoggerFactoryTests
 
         var obj = pool.Acquire();
         pool.Release(obj);
-        // Min=1 预热 1 个对象（分片均分后每片 1 个容量），构建未受工厂缺省影响
+        // Min=1 pre-warms 1 object (after even shard split each shard has capacity 1); build is unaffected by the default factory
         Assert.True(pool.GetStats().CurrentSize >= 1);
     }
 
@@ -134,7 +134,7 @@ public class LoggerFactoryTests
             .WithEnableEviction(false)
             .Build();
 
-        // 显式日志器优先：工厂未被调用，日志落在显式实例上
+        // The explicit logger takes precedence: the factory is not called; logs land on the explicit instance
         Assert.Empty(factory.Categories);
         Assert.Contains(explicitLogger.Lines, l => l.Contains("pool-explicit"));
     }
@@ -142,7 +142,7 @@ public class LoggerFactoryTests
     [Fact(Timeout = 30_000)]
     public void WithLoggerFactory_ShouldFailFast_WhenFactoryReturnsNull()
     {
-        // 工厂返回 null 时快速失败（不静默降级为无日志）
+        // Fail fast when the factory returns null (do not silently degrade to no logging)
         var builder = new HayatePoolBuilder<TestObject>()
             .WithPoolName("pool-null-logger")
             .WithLoggerFactory(new DelegateHayateLoggerFactory(_ => null!))

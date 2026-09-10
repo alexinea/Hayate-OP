@@ -1,9 +1,9 @@
 namespace DotNetCore.HayateOP.Tests;
 
 /// <summary>
-/// M4：关闭泄漏检测时的回查告警通路（LeakSuspectedCount）。
-/// EnableLeakDetection=false 时 TakeSnapshot 按同一阈值统计疑似泄漏，
-/// 仅计数、不取证（无 AcquireTrace 采集）、不回收，L1 取证语义不变。
+/// The suspected-leak callback path (LeakSuspectedCount) when leak detection is off.
+/// When EnableLeakDetection=false, TakeSnapshot counts suspected leaks by the same threshold,
+/// counting only, without evidence capture (no AcquireTrace collection) and without reclaim; the capture semantics are unchanged.
 /// </summary>
 public class LeakSuspectedTests
 {
@@ -21,23 +21,23 @@ public class LeakSuspectedTests
             .WithLeakDetectionThreshold(TimeSpan.FromMilliseconds(150))
             .Build();
 
-        // 借出 1 个并滞留（其余保持空闲），等待超过回查阈值
+        // Borrow 1 and keep it (the rest stay idle), wait beyond the callback threshold
         var obj = pool.Acquire();
         Thread.Sleep(300);
 
         var snapshot = pool.TakeSnapshot();
         Assert.True(snapshot.LeakSuspectedCount >= 1,
-            $"借出超阈值未归还对象应计入 LeakSuspectedCount，实际 {snapshot.LeakSuspectedCount}");
+            $"Borrowed object past threshold with no return should be counted in LeakSuspectedCount, actual {snapshot.LeakSuspectedCount}");
         Assert.Equal(0, snapshot.LeakCount);
         Assert.Empty(snapshot.LeakTraces);
 
-        // 持续滞留 → 累计计数继续递增（与 LeakDetectedCount 的累计口径一致）
+        // Continuing to linger -> the cumulative count keeps increasing (consistent with LeakDetectedCount's cumulative measure)
         Thread.Sleep(100);
         var snapshot2 = pool.TakeSnapshot();
         Assert.True(snapshot2.LeakSuspectedCount > snapshot.LeakSuspectedCount,
-            "滞留期间重复快照应继续累计疑似计数");
+            "Repeated snapshots during lingering should keep accumulating the suspected count");
 
-        // 归还后不再新增疑似计数（累计值保持不变）
+        // After return no new suspected count (cumulative value stays unchanged)
         pool.Release(obj);
         var snapshot3 = pool.TakeSnapshot();
         Assert.Equal(snapshot2.LeakSuspectedCount, snapshot3.LeakSuspectedCount);
@@ -46,8 +46,8 @@ public class LeakSuspectedTests
     [Fact(Timeout = 30_000)]
     public void LeakDetectionOff_AllFeaturesOff_ShouldStillCountSuspected()
     {
-        // 2.5 行为配套：LastBorrowedAt 在借出路径无条件记录，
-        // 即使 eviction / leakDetection / autoScaling 全关，回查通路依然可用
+        // Behavior companion for 2.5: LastBorrowedAt is recorded unconditionally on the borrow path,
+        // so the callback path still works even with eviction / leakDetection / autoScaling all off
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(1)
             .WithMaxSize(2)
@@ -64,7 +64,7 @@ public class LeakSuspectedTests
 
         var snapshot = pool.TakeSnapshot();
         Assert.True(snapshot.LeakSuspectedCount >= 1,
-            "全功能关闭配置下借出超阈值对象仍应被回查统计");
+            "With all features off, a borrowed object past threshold should still be counted by the callback");
 
         pool.Release(obj);
     }
@@ -72,7 +72,7 @@ public class LeakSuspectedTests
     [Fact(Timeout = 30_000)]
     public void LeakDetectionOn_ShouldNotCountSuspected()
     {
-        // 检测开启时走原有 LeakDetectedCount 通路，两计数互不重复计账
+        // When detection is on it uses the original LeakDetectedCount path; the two counters do not double-count
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(1)
             .WithMaxSize(2)
@@ -86,7 +86,7 @@ public class LeakSuspectedTests
         Thread.Sleep(250);
 
         var snapshot = pool.TakeSnapshot();
-        Assert.True(snapshot.LeakCount >= 1, "检测开启时借出超阈值对象应计入 LeakDetectedCount");
+        Assert.True(snapshot.LeakCount >= 1, "With detection on, a borrowed object past threshold should be counted in LeakDetectedCount");
         Assert.Equal(0, snapshot.LeakSuspectedCount);
 
         pool.Release(obj);
@@ -109,7 +109,7 @@ public class LeakSuspectedTests
 
         Assert.True(pool.TakeSnapshot().LeakSuspectedCount >= 1);
         Assert.True(pool.GetStats().LeakSuspectedCount >= 1,
-            "LeakSuspectedCount 应同步暴露到 GetStats");
+            "LeakSuspectedCount should also be exposed in GetStats");
 
         pool.Release(obj);
     }

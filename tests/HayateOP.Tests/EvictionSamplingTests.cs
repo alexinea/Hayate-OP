@@ -4,9 +4,9 @@ using System.Threading;
 namespace DotNetCore.HayateOP.Tests
 {
     /// <summary>
-    /// PR-D A2：驱逐采样由「每次 GetALL().ToArray()」改为复用缓冲的 SnapshotHead(buffer, limit)，
-    /// 避免每次对整条空闲链表做全量数组分发（长尾分配）。本用例验证有界采样窗口下，
-    /// 驱逐仍跨周期正确收敛并清空过期对象，覆盖 SnapshotHead 的有界复制与缓冲复用路径。
+    /// Eviction sampling changed from "calling GetAll().ToArray() every time" to reusing the buffered SnapshotHead(buffer, limit),
+    /// avoiding a full array distribution over the entire idle linked list on every call (long-tail allocation). This case verifies that under a bounded sampling window,
+    /// eviction still converges correctly across cycles and clears expired objects, covering SnapshotHead's bounded-copy and buffer-reuse paths.
     /// </summary>
     public class EvictionSamplingTests
     {
@@ -25,8 +25,8 @@ namespace DotNetCore.HayateOP.Tests
 
             Assert.Equal(12, pool.GetStats().PooledCount);
 
-            // 采样窗口为 3，远小于空闲对象数，驱逐必须跨多个周期才覆盖全部；
-            // 等待足够窗口后所有过期的空闲对象应被清空，验证缓冲复用 + 有界复制逻辑。
+            // The sampling window is 3, far smaller than the number of idle objects, so eviction must span multiple cycles to cover them all;
+            // after waiting long enough, all expired idle objects should be cleared, verifying the buffer-reuse + bounded-copy logic.
             Thread.Sleep(6000);
 
             Assert.Equal(0, pool.GetStats().PooledCount);

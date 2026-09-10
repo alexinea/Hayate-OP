@@ -6,10 +6,10 @@ using System.Threading.Tasks;
 namespace DotNetCore.HayateOP.Tests;
 
 /// <summary>
-/// PR-E A4（=M9 线程安全验证）：多线程 acquire/release/scale/evict/管理操作混合 fuzz。
-/// 目标：N 轮混合压测零死锁（xunit Timeout 看门狗兜底）、零泄漏（TotalAcquired==TotalReleased）、
-/// 零异常逃逸、容量全程有界。
-/// 轮次可通过环境变量 HAYATE_FUZZ_ROUNDS 缩放（沿用 HAYATE_PRESSURE_LONG 惯例），默认 150。
+/// Mixed fuzz of multi-threaded acquire/release/scale/evict/management operations.
+/// Goal: over N rounds of mixed stress, zero deadlock (xunit Timeout watchdog as backstop), zero leak (TotalAcquired==TotalReleased),
+/// zero escaped exceptions, and capacity stays bounded throughout.
+/// Rounds can be scaled via the HAYATE_FUZZ_ROUNDS environment variable (following the HAYATE_PRESSURE_LONG convention), default 150.
 /// </summary>
 public class ThreadFuzzTests
 {
@@ -35,14 +35,14 @@ public class ThreadFuzzTests
         const int workers = 8;
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("fuzz-sync")
-            .WithEnableMetrics(true)   // TotalAcquired/TotalReleased 计数受 metrics 门控，断言需开启
+            .WithEnableMetrics(true)   // TotalAcquired/TotalReleased counters are gated by metrics; assertions require it enabled
             .WithEnableAutoScaling(false)
             .WithMinSize(4)
             .WithMaxSize(12)
             .WithRejectPolicy(HayatePoolRejectPolicy.BlockTimeout)
             .Build();
 
-        // Act：8 线程 × N 轮同步借还；借出/归还间偶发让步制造窗口竞争
+        // Act: 8 threads x N rounds of sync borrow/return; occasional yields between borrow/release create window races
         await RunWorkersAsync(workers, async _ =>
         {
             for (var i = 0; i < Rounds; i++)
@@ -55,7 +55,7 @@ public class ThreadFuzzTests
             }
         });
 
-        // Assert：零泄漏 + 计数一致 + 容量有界
+        // Assert: zero leak + consistent counters + bounded capacity
         var stats = pool.GetStats();
         Assert.Equal(workers * Rounds, stats.TotalAcquired);
         Assert.Equal(workers * Rounds, stats.TotalReleased);
@@ -69,14 +69,14 @@ public class ThreadFuzzTests
         const int workers = 8;
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("fuzz-async")
-            .WithEnableMetrics(true)   // 计数断言需开启 metrics（同 ColdBootTests 踩坑）
+            .WithEnableMetrics(true)   // Counter assertions require metrics enabled (same pitfall as ColdBootTests)
             .WithEnableAutoScaling(false)
             .WithMinSize(4)
             .WithMaxSize(12)
             .WithRejectPolicy(HayatePoolRejectPolicy.BlockTimeout)
             .Build();
 
-        // Act：异步路径（含 A3 超时重载）混合借还
+        // Act: async path (including the timeout overload) mixed borrow/return
         await RunWorkersAsync(workers, async _ =>
         {
             for (var i = 0; i < Rounds; i++)
@@ -101,14 +101,14 @@ public class ThreadFuzzTests
         const int workers = 8;
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("fuzz-mixed-scaling")
-            .WithEnableMetrics(true)   // 计数断言需开启 metrics（同 ColdBootTests 踩坑）
-            .WithEnableAutoScaling(true)   // 借还压力触发扩缩容，与 worker 竞争
+            .WithEnableMetrics(true)   // Counter assertions require metrics enabled (same pitfall as ColdBootTests)
+            .WithEnableAutoScaling(true)   // borrow/return pressure triggers scale up/down, racing with workers
             .WithMinSize(2)
             .WithMaxSize(16)
             .WithRejectPolicy(HayatePoolRejectPolicy.BlockTimeout)
             .Build();
 
-        // 后台读路径竞争线程：GetStats / TakeSnapshot 与借还、扩缩容并发
+        // Background read-path racing threads: GetStats / TakeSnapshot run concurrently with borrow/return and scaling
         using var stopReaders = new CancellationTokenSource();
         var readerTasks = new List<Task>();
         for (var r = 0; r < 2; r++)
@@ -127,7 +127,7 @@ public class ThreadFuzzTests
 
         try
         {
-            // Act：同步/异步借还混跑，扩缩容并发
+            // Act: sync/async borrow/return mixed run, with concurrent scaling
             await RunWorkersAsync(workers, async id =>
             {
                 for (var i = 0; i < Rounds; i++)
@@ -152,7 +152,7 @@ public class ThreadFuzzTests
             await Task.WhenAll(readerTasks);
         }
 
-        // Assert：全程无死锁（Timeout 看门狗兜底）、零泄漏、容量有界
+        // Assert: no deadlock throughout (Timeout watchdog as backstop), zero leak, bounded capacity
         var stats = pool.GetStats();
         Assert.Equal(workers * Rounds, stats.TotalAcquired);
         Assert.Equal(workers * Rounds, stats.TotalReleased);
@@ -162,8 +162,8 @@ public class ThreadFuzzTests
     [Fact]
     public async Task Fuzz_ConcurrentClearAndAcquire_RemainsUsableNoCrash()
     {
-        // Clear 与借还并发：空闲对象被销毁、借出对象归还时按「不属于池」安全销毁——
-        // fuzz 验证该路径无崩溃、无死锁，且 Clear 后池仍可正常借还。
+        // Clear runs concurrently with borrow/return: idle objects are destroyed, and borrowed objects are safely destroyed on return as "not belonging to the pool" --
+        // fuzz verifies this path has no crash, no deadlock, and the pool remains usable for borrow/return after Clear.
         const int workers = 6;
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("fuzz-clear")
@@ -197,7 +197,7 @@ public class ThreadFuzzTests
 
         await clearTask;
 
-        // Assert：Clear 风暴后池仍可用
+        // Assert: the pool is still usable after the Clear storm
         var obj2 = pool.Acquire(TimeSpan.FromSeconds(10));
         Assert.NotNull(obj2);
         pool.Release(obj2);

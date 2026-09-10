@@ -3,10 +3,10 @@ using System.Diagnostics;
 namespace DotNetCore.HayateOP.Tests;
 
 /// <summary>
-/// PR-D L5：冷池（Min=0）借出路径自举测试。
-/// 池完全空（无空闲且无借出）时，Block / BlockTimeout 策略与异步路径按需创建首个对象，
-/// 消除「等超时者补货」的不确定性（T12 ColdStart 实测 2/5 与 5/5 超时两种时序）；
-/// CreateNew 策略保持「等满超时后创建」语义不变（L6）。
+/// Cold-pool (Min=0) bootstrap-on-borrow test.
+/// When the pool is completely empty (no idle and no borrowed), the Block / BlockTimeout policies and the async path create the first object on demand,
+/// eliminating the uncertainty of "waiting for a timeout to replenish" (the ColdStart measurement showed two timings: 2/5 and 5/5 timeouts);
+/// the CreateNew policy keeps the "create only after the full timeout" semantics unchanged.
 /// </summary>
 public class ColdBootTests
 {
@@ -19,25 +19,25 @@ public class ColdBootTests
     [Fact]
     public void ColdBoot_BlockTimeout_FirstAcquireShouldNotTimeout()
     {
-        // Min=0 冷池 + BlockTimeout：旧语义首借等满超时（且仅 autoScaling on 时被首个超时者补货，
-        // 结果不确定）；L5 后池完全空时按需创建，立即成功。
+        // Min=0 cold pool + BlockTimeout: the old semantics waited the full timeout on first borrow (and was only replenished by the first timeout waiter when autoScaling was on,
+        // so the result was non-deterministic); after the fix, when the pool is completely empty it creates on demand and succeeds immediately.
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("coldboot-blocktimeout")
-            .WithEnableAutoScaling(false)   // 与 L9 协同：Max 保留硬上限，Min=0 不塌缩
-            .WithEnableMetrics(true)        // TotalCreated 计数受 metrics 门控，需开启才能断言
+            .WithEnableAutoScaling(false)   // Works with the fix: Max stays a hard upper bound, and Min=0 does not collapse
+            .WithEnableMetrics(true)        // TotalCreated counter is gated by metrics; must be enabled to assert
             .WithMinSize(0)
             .WithMaxSize(10)
             .WithRejectPolicy(HayatePoolRejectPolicy.BlockTimeout)
             .Build();
 
         var sw = Stopwatch.StartNew();
-        var obj = pool.Acquire(TimeSpan.FromSeconds(5));   // 旧语义此处必然等满 5s 或被补货，结果不确定
+        var obj = pool.Acquire(TimeSpan.FromSeconds(5));   // Under old semantics this would inevitably wait the full 5s or be replenished, with non-deterministic results
         sw.Stop();
 
         Assert.NotNull(obj);
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2), $"cold-boot acquire took {sw.Elapsed.TotalMilliseconds:F0}ms");
 
-        // 归还后二次借出复用同一对象（池化生效，TotalCreated 保持 1）
+        // A second borrow after return reuses the same object (pooling works, TotalCreated stays 1)
         pool.Release(obj);
         var obj2 = pool.Acquire(TimeSpan.FromSeconds(5));
         Assert.Same(obj, obj2);
@@ -50,8 +50,8 @@ public class ColdBootTests
     [Fact]
     public async Task ColdBoot_Async_FirstAcquireShouldNotHang()
     {
-        // Min=0 冷池 + 异步路径：旧语义无限等归还信号（池空永不回池）→ 永久挂起直到取消；
-        // L5 后按需创建首个对象，确定性完成。
+        // Min=0 cold pool + async path: old semantics waited forever for a return signal (an empty pool never returns to the pool) -> hangs until cancellation;
+        // after the fix it creates the first object on demand and completes deterministically.
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("coldboot-async")
             .WithEnableAutoScaling(false)
@@ -72,7 +72,7 @@ public class ColdBootTests
     [Fact]
     public void ColdBoot_ConcurrentFirstAcquire_ShouldCreateExactlyOne()
     {
-        // 并发首借防重：CAS 认领保证冷启动只创建一个对象，其余等待者复用归还信号。
+        // Concurrent first-borrow de-duplication: CAS claim guarantees cold start creates only one object, and the other waiters reuse the return signal.
         const int concurrency = 8;
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("coldboot-concurrent")
@@ -89,9 +89,9 @@ public class ColdBootTests
         {
             tasks[i] = Task.Run(async () =>
             {
-                await barrier.Task;   // 全员对齐后同时首借，最大化竞争
+                await barrier.Task;   // All threads align, then borrow simultaneously to maximize contention
                 var obj = pool.Acquire(TimeSpan.FromSeconds(15));
-                pool.Release(obj);    // 立即归还：单个冷启动对象在等待者间轮转复用
+                pool.Release(obj);    // Return immediately: the single cold-start object rotates among the waiters
                 return obj;
             });
         }
@@ -100,13 +100,13 @@ public class ColdBootTests
         var results = Task.WhenAll(tasks).GetAwaiter().GetResult();
 
         Assert.All(results, Assert.NotNull);
-        Assert.Equal(1, pool.GetStats().TotalCreated);   // 冷启动仅创建一个，其余轮转复用
+        Assert.Equal(1, pool.GetStats().TotalCreated);   // Cold start creates only one; the rest rotate and reuse
     }
 
     [Fact]
     public void ColdBoot_CreateNew_SemanticsShouldStayUnchanged()
     {
-        // CreateNew 语义守卫（L6）：等满 AcquireTimeout 后才创建，不受 L5 冷启动影响。
+        // CreateNew semantics guard: it creates only after the full AcquireTimeout, unaffected by cold-start bootstrap.
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("coldboot-createnew")
             .WithEnableAutoScaling(false)

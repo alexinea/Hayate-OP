@@ -59,9 +59,9 @@ namespace HayateOP.Tests.Configuration
         [Fact]
         public void AddHayatePool_ShouldApplyPoolValueEqualToBuiltInDefault()
         {
-            // T13 回归（默认值误判）：池配置显式设置为与 C# 默认值相同（MinPoolSize=5，
-            // 即 DEFAULT_MIN_POOL_SIZE）时，旧实现以「值 != 默认值」判断显式性，
-            // 会误判为"未配置"而让全局值 30 生效。正确行为：池配置优先，Min=5。
+            // Regression (default-value misjudgment): when the pool config is set explicitly to the same value as the C# default (MinPoolSize=5,
+            // i.e. DEFAULT_MIN_POOL_SIZE), the old implementation judged explicitness by "value != default",
+            // which misjudged it as "not configured" and let the global value 30 take effect. Correct behavior: the pool config takes precedence, Min=5.
             var configData = new Dictionary<string, string>
             {
                 {"HayatePool:Global:MinPoolSize", "30"},

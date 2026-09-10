@@ -24,7 +24,7 @@ namespace DotNetCore.HayateOP.Tests
             obj.IsValidReturn = false;
             pool.Release(obj);
 
-            // 下次借出时应该验证失败，销毁对象
+            // The next borrow should fail validation and destroy the object
             var newObj = pool.Acquire();
             Assert.NotSame(obj, newObj);
         }
@@ -59,7 +59,7 @@ namespace DotNetCore.HayateOP.Tests
             obj.IsValidReturn = false;
             pool.Release(obj);
 
-            // 验证对象被销毁，池大小减少
+            // Verify the object was destroyed and the pool size decreased
             Assert.Equal(4, pool.GetStats().PooledCount);
         }
     }

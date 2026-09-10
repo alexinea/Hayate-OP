@@ -1,15 +1,15 @@
 namespace DotNetCore.HayateOP.Tests;
 
 /// <summary>
-/// M3：分配追踪（EnableAllocationTracking）。
+/// Allocation tracking (EnableAllocationTracking).
 /// <para>
-/// 语义：可选开关，默认关闭（零额外开销、计数恒 0）；开启后按同步借出 / 归还路径统计
-/// 线程分配增量（字节）与样本数，并经 <c>GetStats()</c> / <c>TakeSnapshot()</c> 暴露。
-/// 追踪仅作诊断口径，不参与任何池行为决策。
+/// Semantics: an optional switch, off by default (zero extra overhead, counters are always 0); once enabled it counts along the synchronous borrow / return paths
+/// the per-thread allocation delta (bytes) and sample count, exposed through <c>GetStats()</c> / <c>TakeSnapshot()</c>.
+/// Tracking is diagnostic only and takes part in no pool behavior decision.
 /// </para>
 /// <note>
-/// net48 / netstandard2.0 缺少 <c>GC.GetAllocatedBytesForCurrentThread()</c>，
-/// 这些目标框架下字节数恒 0（样本数仍正常累加）——断言按「字节 ≥ 0、样本数精确」编写。
+/// net48 / netstandard2.0 lack <c>GC.GetAllocatedBytesForCurrentThread()</c>,
+/// so on those target frameworks the byte count is always 0 (sample count still accumulates normally) -- assertions are written as "bytes >= 0, exact sample count".
 /// </note>
 /// </summary>
 public class AllocationTrackingTests
@@ -61,13 +61,13 @@ public class AllocationTrackingTests
         Assert.Equal(iterations, stats.AcquireAllocationSamples);
         Assert.Equal(iterations, stats.ReleaseAllocationSamples);
 
-        // 字节数为非负统计量；高版本 TFM 上借出路径必然产生分配（包装器/链表节点）
+        // The byte count is a non-negative statistic; on higher TFM versions the borrow path necessarily allocates (wrapper / linked-list node)
         Assert.True(stats.AcquireAllocatedBytes >= 0);
         Assert.True(stats.ReleaseAllocatedBytes >= 0);
         Assert.Equal(stats.AcquireAllocatedBytes / (double)iterations, stats.AverageAcquireAllocatedBytes, 3);
         Assert.Equal(stats.ReleaseAllocatedBytes / (double)iterations, stats.AverageReleaseAllocatedBytes, 3);
 
-        // 快照与统计同口径
+        // The snapshot and the stats use the same accounting
         var snapshot = pool.TakeSnapshot();
         Assert.True(snapshot.AllocationTrackingEnabled);
         Assert.Equal(stats.AcquireAllocatedBytes, snapshot.AcquireAllocatedBytes);

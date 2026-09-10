@@ -17,7 +17,7 @@ namespace DotNetCore.HayateOP.Tests
                 .WithOldGenerationValidationInterval(3)
                 .Build();
 
-            // 验证池能正常工作
+            // Verify the pool works normally
             var obj = pool.Acquire();
             pool.Release(obj);
             Assert.NotNull(obj);
@@ -32,7 +32,7 @@ namespace DotNetCore.HayateOP.Tests
                 .WithValidateOnBorrow(true)
                 .Build();
 
-            // 验证每次借出都会验证
+            // Verify that every borrow is validated
             for (int i = 0; i < 10; i++)
             {
                 var obj = pool.Acquire();

@@ -8,11 +8,11 @@ using Xunit;
 namespace DotNetCore.HayateOP.Tests.OpenTelemetry;
 
 /// <summary>
-/// M22 验收：Prometheus 序列化器与抓取端点。
+/// Acceptance: Prometheus serializer and scrape endpoint.
 /// <para>
-/// 三层验证：①Prometheus 文本格式（HELP/TYPE/样本行 + 标签转义）；
-/// ②真实池端到端（registry + GetStats 取数，借出后计数递增）；
-/// ③DI 注册与 ASP.NET Core 端点映射（net8+）。
+/// Three layers of validation: 1) Prometheus text format (HELP/TYPE/sample lines + label escaping);
+/// 2) Real pool end-to-end (registry + GetStats data fetch, counter increments after borrowing);
+/// 3) DI registration and ASP.NET Core endpoint mapping (net8+).
 /// </para>
 /// </summary>
 public class PrometheusExporterTests
@@ -45,7 +45,7 @@ public class PrometheusExporterTests
         {
             var text = new HayatePrometheusExporter(registry).Scrape();
 
-            // 指标族头 + 带池名标签的样本行
+            // Metric family header + sample lines with pool-name labels
             Assert.Contains("# TYPE hayateop_pool_size gauge", text);
             Assert.Contains("# HELP hayateop_pool_size ", text);
             Assert.Contains("hayateop_pool_size{pool=\"prom-pool\"} ", text);
@@ -55,10 +55,10 @@ public class PrometheusExporterTests
             Assert.Contains("hayateop_pool_leak_suspected_total{pool=\"prom-pool\"} ", text);
             Assert.Contains("hayateop_pool_wait_average_milliseconds{pool=\"prom-pool\"} ", text);
 
-            // 未启用 M3 分配追踪的池不出现分配指标族
+            // A pool without allocation tracking does not expose the allocation metric family
             Assert.DoesNotContain("hayateop_pool_acquire_allocated_bytes_average", text);
 
-            // 端到端：借出一次后 acquired_total 递增
+            // End-to-end: acquired_total increments after a single borrow
             var item = pool.Acquire();
             var after = new HayatePrometheusExporter(registry).Scrape();
             Assert.Contains("hayateop_pool_acquired_total{pool=\"prom-pool\"} 1", after);
@@ -79,7 +79,7 @@ public class PrometheusExporterTests
         {
             var text = new HayatePrometheusExporter(registry).Scrape();
 
-            // 引号与换行按协议转义，保证单行样本格式不被破坏
+            // Quotes and newlines are escaped per the protocol so the single-line sample format is preserved
             Assert.Contains("pool=\"we\\\"ird\\nname\"", text);
         }
         finally
@@ -111,7 +111,7 @@ public class PrometheusExporterTests
             Assert.Contains("hayate_pool_size{pool=\"alloc-pool\"} ", text);
             Assert.DoesNotContain("hayateop_pool_size", text);
 
-            // M3 追踪开启 → 分配指标族出现
+            // Allocation tracking enabled -> the allocation metric family appears
             Assert.Contains("# TYPE hayate_pool_acquire_allocated_bytes_average gauge", text);
             Assert.Contains("hayate_pool_release_allocated_bytes_average{pool=\"alloc-pool\"} ", text);
         }
