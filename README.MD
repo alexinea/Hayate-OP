@@ -20,6 +20,9 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 - **Configuration Binding**: Load pool settings from `appsettings.json` (global + per-pool).
 - **Cross-Version Compatibility**: Supports .NET Framework 4.8 (core, ObjectPoolCompat and DependencyInjection packages) and .NET 6/7/8/9/10 (all packages).
 
+Release notes live in [`CHANGELOG.md`](CHANGELOG.md); breaking changes and behavioural notes are
+documented in [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md).
+
 ## Installation
 
 ### NuGet Packages
@@ -446,93 +449,18 @@ var options = new HayatePoolOptions
 };
 ```
 
-### Leak trace capture (breaking change in 2.1)
+### Breaking changes
 
-Since 2.1, stack-trace capture is **decoupled** from leak detection and **off by
-default** (`LeakTraceCaptureMode.Off`). In 2.0 and earlier, every `Acquire` captured
-a full `Environment.StackTrace` (tens of microseconds and 10–40 KB per borrow when
-the call chain is deep). Leak detection itself — threshold detection and `LeakCount`
-reporting — is unaffected and still costs nothing on the hot path; `LeakTraces`
-entries become the placeholder text `"No stack trace available"` unless capture is
-enabled.
+HayateOP follows Semantic Versioning. Breaking changes so far:
 
-| Mode | Behavior |
+| Version | Change |
 | :--- | :--- |
-| `Off` (default) | Never capture; hot path pays zero forensics overhead |
-| `Sampled` | Capture 1-in-N borrows (`LeakTraceSampleRate`, first borrow always captured) |
-| `EveryAcquire` | Capture on every borrow (2.0 behavior; opt-in for diagnostics) |
+| 2.5 | `HayateObject<T>.AcquireTrace` (string) replaced by `HayateLeaseContext`; new lifecycle fields (`CreatedAtTick`, `LeaseCount`, `OwnerPoolName`) |
+| 2.4 | Idle pools actually scale down (the contradicting internal gate was removed) |
+| 2.2 | `Build()` fails fast when custom metrics are registered while metrics are disabled |
+| 2.1 | Leak stack-trace capture decoupled from leak detection and off by default |
 
-```csharp
-// Sampling mode: capture 1-in-256 borrows
-var pool = new HayatePoolBuilder<MyPooledObject>()
-    .WithLeakTraceCapture(HayateLeakTraceCaptureMode.Sampled, 256)
-    .Build();
-```
-
-### Builder fails fast on orphaned custom metrics (breaking change in 2.2)
-
-Since 2.2, `Build()` throws `InvalidOperationException` when a custom `IHayateMetrics`
-is registered via `WithMetrics(...)` while metrics collection is disabled
-(`EnableMetrics = false`). In 2.1 and earlier the custom instance was **silently
-replaced** with `EmptyHayateMetrics`, so a forgotten `WithEnableMetrics(true)` went
-undetected. Either enable metrics or remove the `WithMetrics` registration:
-
-```csharp
-// Throws: custom metrics registered but never activated
-var pool = new HayatePoolBuilder<MyPooledObject>()
-    .WithMetrics(myMetrics)
-    .Build(); // InvalidOperationException since 2.2
-
-// Correct: activate the custom metrics
-var pool = new HayatePoolBuilder<MyPooledObject>()
-    .WithEnableMetrics(true)
-    .WithMetrics(myMetrics)
-    .Build();
-```
-
-> The DI / Configuration integration is unaffected: pools built through
-> `AddHayatePool` / `RegisterHayatePool` attach the DI-registered `IHayateMetrics`
-> only when metrics are enabled, exactly as in 2.1.
-
-### Idle pools actually scale down (breaking change in 2.4)
-
-Since 2.4, the background scaling callback honors the scaling strategy's
-scale-down decision. In 2.3 and earlier, an internal gate
-(`totalIdle < currentTotal * 0.4f`, i.e. usage above 60%) contradicted the default
-`ThresholdScalingStrategy`, which only proposes shrinking when usage is below
-`ScaleDownThreshold` (0.2 by default). The two conditions could never hold at the
-same time, so **with default settings the pool never scaled down** — auto-scaling
-only grew. The gate has been removed: shrinking now proceeds whenever the strategy
-proposes a smaller target and the scale-down cooldown has elapsed, still bounded by
-`MinPoolSize`. If you relied on pools staying at their high-water mark, set
-`EnableAutoScaling = false` or raise `ScaleDownThreshold`.
-
-### Structured lease context and lifecycle fields (breaking changes in 2.5)
-
-Two observability-facing breaking changes land in 2.5 (M10/M16/M20):
-
-1. **`HayateObject<T>.AcquireTrace` (string) removed.** When leak-trace capture is
-   enabled (`LeakTraceCaptureMode = EveryAcquire` or `Sampled`), each borrow now
-   creates an immutable `HayateLeaseContext` (monotonic `LeaseId` + captured
-   `StackFrame[]` + `BorrowedAt`). The context is carried by an
-   `AsyncLocal<HayateLeaseContext>` flow (`HayateLeaseContext.Current`), so
-   **concurrent acquires each own an isolated context instead of overwriting a
-   shared string**; the wrapper exposes the same instance via
-   `HayateObject<T>.LeaseContext`. Frames are captured with
-   `new StackTrace(fNeedFileInfo: false)` (no PDB/source-file I/O). Release ends
-   the lease (flow context detached); `Destroy` clears the wrapper reference.
-   The three capture modes (Off by default / Sampled / EveryAcquire) keep their
-   2.1+ semantics. For the old text form, read `TakeSnapshot().LeakTraces`,
-   which the pool formats as `[Lease {id}] Type.Method+0xoffset <- ...`.
-2. **New lifecycle fields on `HayateObject<T>`** (M20): `CreatedAtTick`
-   (wall-clock creation time as `DateTimeOffset.UtcNow.Ticks`, complementing the
-   Stopwatch-based `CreatedAt` used for durations), `LeaseCount` (monotonic
-   borrow counter), and `OwnerPoolName` (logical pool name stamped at creation).
-   These flow through snapshots via the new `HayatePoolSnapshot.ObjectDetails`
-   collection (`HayatePoolObjectDetail`), populated on every `TakeSnapshot()`.
-
-Also new in 2.5: shard affinity (`ShardAffinityMode`, M18) and the full registry
-surface (`GetAll`/`Remove`/`HayatePoolMetadata`, M11+).
+Full migration guidance — plus the behavioural notes worth reading before adopting (cold boot, `CreateNew` laziness, ~100 ms blocking wake-up granularity) — lives in [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md). A per-version summary of every change is in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Monitoring and Diagnostics
 
@@ -614,56 +542,30 @@ builder.Services.AddOpenTelemetry()
 
 ## Performance
 
-Benchmark suite (BenchmarkDotNet, short-iteration job: 3 warmup + 10 iterations, Server GC)
-comparing HayateOP against `Microsoft.Extensions.ObjectPool.DefaultObjectPool<T>` (baseline).
-Run it with `dotnet run -c Release --project tests/HayateOP.Benchmarks`; archived reports live
-in [`docs/benchmarks/`](docs/benchmarks).
+BenchmarkDotNet compares HayateOP against `Microsoft.Extensions.ObjectPool.DefaultObjectPool<T>`
+(baseline) and plain `new` (no-pool lower bound) across the `Acquire`, `Release` and `AcquireAsync`
+paths, with `[MemoryDiagnoser]` / `[ThreadingDiagnoser]` and P50/P90/P95/P99 latency columns.
 
-Latest run (2026-09-09, .NET 10.0, Release):
+```bash
+dotnet run -c Release --project tests/HayateOP.Benchmarks
+```
 
-| Suite | MEOOP (baseline) | HayateOP minimal | HayateOP 4-shard | HayateOP full-feature |
-| :--- | ---: | ---: | ---: | ---: |
-| Acquire+Release (single-thread) | 22.7 ns | 188.8 ns (8.3×) | 212.6 ns (9.4×) | 304.7 ns (13.5×)¹ |
-| Release-only (with refill acquire) | 22.8 ns | 186.4 ns (8.2×) | — | — |
-| Mixed 50/50 acquire/release | 42.3 ns | 226.4 ns (10.0×) | 200.4 ns (8.9×) | — |
-| 100-thread concurrent borrow/return | 20.0 µs | ~1033 µs² | ~1292 µs² | — |
+Archived reports and the machine-readable baseline used by the CI performance-regression gate live in
+[`docs/benchmarks/`](docs/benchmarks). Latest baseline (2026-09-10, .NET 10.0): a single-threaded
+`Acquire+Release` round-trip costs ~252 ns / 384 B for the lean configuration (all features off) and
+~364 ns for the full-feature configuration, versus ~16.5 ns / 0 B for MEOP's minimal `Get()/Return()`.
 
-> ¹ Fixed in 2.3: full-feature mode (validation + metrics + leak detection + eviction enabled)
-> dropped from ~37.5 µs / ~28.7 KB per acquire to ~305 ns / ~0.4 KB after the PR-C/PR-D eviction &
-> timestamp rework (was dominated by per-iteration full free-list `ToArray()` allocation).
->
-> ² The concurrent 100-thread suite is **high-variance** on this dev box (a hybrid-core laptop under a
-> debugger); per-run means fluctuate by an order of magnitude. Treat it as a sanity/regression smoke
-> test, not a cross-run numeric comparison.
+HayateOP's single acquire/release round-trip is currently slower than MEOP's minimal `Get()/Return()`
+(HayateOP tracks per-object state and a shard index, and supports validation/metrics hooks that MEOP
+does not). In exchange it provides sharding, eviction, leak detection, metrics and management
+endpoints. Closing this gap is the focus of the 2.6 performance work.
 
-HayateOP's single acquire/release round-trip is currently slower than MEOOP's minimal `Get()/Return()`
-(HayateOP tracks per-object state, shard index, and supports validation/metrics hooks that MEOOP does not).
-In exchange it provides sharding, eviction, leak detection, metrics, and management endpoints.
+## Known limitations
 
-## Known Limitations
-
-Behaviors to be aware of before adopting HayateOP (several are queued for follow-up releases):
-
-* **Empty pool cold-boot (changed in 2.1).** If the pool is completely empty (e.g. `MinPoolSize = 0`
-  and not pre-warmed), `Acquire` under `Block` / `BlockTimeout` — and `AcquireAsync` — now
-  synchronously creates the first object on demand (cold-boot, atomically de-duplicated) instead of
-  waiting for a return that may never come. Previously the call waited the full acquire timeout and
-  then threw `TimeoutException` (or hung forever on the async path).
-* **`CreateNew` reject policy creates lazily, not eagerly.** Under `RejectPolicy.CreateNew` the pool
-  first waits up to the acquire timeout for a return, and only then synchronously creates a new
-  tracked object. A cold first call on an empty pool therefore incurs up to a full-timeout delay
-  before the new object is handed out.
-* **Blocking wake-up granularity is ~100 ms.** Blocking waits (`Block` / `BlockTimeout` /
-  `CreateNew`) re-check in fixed slices of 100 ms, so the observed tail latency of a
-  return-to-acquire handoff is quantized to that slice size.
-* **`MinPoolSize = 0` cold pools bootstrap on first acquire (changed in 2.1).** No background
-  component pre-creates objects to reach `MinPoolSize`; the pool starts empty, and the first
-  acquire on a fully empty pool creates its object on demand (see the cold-boot note above).
-  Background scaling never grows toward `MinPoolSize = 0`.
-* **`ApplyFeatureSwitches` capacity semantics (changed in 2.1).** With `EnableAutoScaling = false`,
-  your explicit `MaxPoolSize` is kept as the hard capacity cap (previously it was forced to
-  `MinPoolSize`, which silently collapsed capacity to 0 when `MinPoolSize = 0`). Only a
-  `MaxPoolSize < MinPoolSize` misconfiguration is lifted to `MaxPoolSize = MinPoolSize`.
+Behavioural notes to be aware of before adopting HayateOP — cold boot on an empty pool, the lazy
+`CreateNew` policy, ~100 ms blocking wake-up granularity, and `ApplyFeatureSwitches` capacity
+semantics — are collected in
+[`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md#behavioural-notes-non-breaking).
 
 ## Samples
 
