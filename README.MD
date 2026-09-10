@@ -37,7 +37,7 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 
 | Package | Target Frameworks |
 | :--- | :--- |
-| `DotNetCore.HayateOP` | .NET Framework 4.8; .NET 6/7/8/9/10 |
+| `DotNetCore.HayateOP` | .NET Standard 2.0; .NET Framework 4.8; .NET 6/7/8/9/10 |
 | `DotNetCore.HayateOP.Extensions.ObjectPoolCompat` | .NET Framework 4.8; .NET 6/7/8/9/10 |
 | `DotNetCore.HayateOP.Extensions.DependencyInjection` | .NET Framework 4.8; .NET 6/7/8/9/10 |
 | All other `DotNetCore.HayateOP.Extensions.*` packages | .NET 6/7/8/9/10 |
@@ -45,8 +45,12 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 > **.NET Framework 4.8 support (added in 2.4)** targets `net48` for classic ASP.NET 4.x / WPF / WinForms
 > hosts that consume the core pool or the `ObjectPool<T>` / DI bridges. Prefer `PackageReference` and add a
 > `bindingRedirect` when the host already loads `Microsoft.Extensions.*` (6.x/8.x/10.x) assemblies.
+> **.NET Standard 2.0 support (added in 2.5)** ships for the **core package only** (`DotNetCore.HayateOP`),
+> targeting Unity / Xamarin / older .NET hosts that cannot consume `net6.0`+ or `net48` assets. On
+> `netstandard2.0` / `net48`, allocation tracking reports `0` (no `GC.GetAllocatedBytesForCurrentThread`)
+> and `Math.Clamp` falls back to an equivalent `Max/Min` composition.
 > The ASP.NET Core–based packages (`Endpoints`, `HealthCheck`) and the `OpenTelemetry` / `Configuration` /
-> `Diagnostics` extensions do not ship `net48` assets; `netstandard2.0` assets are not shipped yet.
+> `Diagnostics` extensions do not ship `net48` or `netstandard2.0` assets.
 
 ### .NET CLI
 
