@@ -112,6 +112,16 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
+    /// 设置是否启用分配追踪（M3）。开启后 <c>GetStats()</c> / <c>TakeSnapshot()</c> 暴露
+    /// 借出 / 归还路径的分配字节增量与样本数。
+    /// </summary>
+    public HayatePoolBuilder<T> WithEnableAllocationTracking(bool enable = true)
+    {
+        _options.EnableAllocationTracking = enable;
+        return this;
+    }
+
+    /// <summary>
     /// 设置容量告警阈值（M12）。使用率口径为「借出数 / MaxPoolSize」。
     /// </summary>
     /// <param name="warnAtRatio">警告阈值（0~1；0 表示禁用警告档）。</param>

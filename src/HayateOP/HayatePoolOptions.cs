@@ -472,6 +472,20 @@ public class HayatePoolOptions
     /// </remarks>
     public bool EnableMetrics { get; set; } = false;
 
+    /// <summary>
+    /// 是否启用分配追踪（M3）。<br />
+    /// 默认值：<c>false</c>。
+    /// </summary>
+    /// <remarks>
+    /// 用途：统计借出 / 归还路径的线程分配增量（字节），用于定位热路径上的隐藏分配，
+    /// 与基准测试的 <c>B/Op</c> 口径互为印证。<br />
+    /// 特例：每次借还额外调用一次分配查询 API（近似零分配），仍有少量开销；
+    /// <c>net48</c> / <c>netstandard2.0</c> 目标框架缺少该 API，追踪在这些框架下静默不可用（计数恒 0）。<br />
+    /// 边界：布尔开关。<br />
+    /// 推荐值区间：诊断 / 调优期开启，生产热路径建议关闭。
+    /// </remarks>
+    public bool EnableAllocationTracking { get; set; } = false;
+
     #endregion
 
     #region 预热就绪（M17）
@@ -571,6 +585,9 @@ public class HayatePoolOptions
 
         // 统计指标
         options.EnableMetrics = this.EnableMetrics;
+
+        // 分配追踪（M3）
+        options.EnableAllocationTracking = this.EnableAllocationTracking;
 
         // 预热就绪（M17）
         options.WaitForWarmup = this.WaitForWarmup;

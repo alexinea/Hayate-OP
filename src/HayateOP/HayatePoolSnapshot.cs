@@ -21,6 +21,21 @@ public class HayatePoolSnapshot
     public IReadOnlyList<string> LeakTraces { get; set; } = [];
 
     /// <summary>
+    /// 是否启用分配追踪（M3）。
+    /// </summary>
+    public bool AllocationTrackingEnabled { get; set; }
+
+    /// <summary>
+    /// 借出路径累计分配字节数（M3，仅同步 <c>Acquire</c>）。
+    /// </summary>
+    public long AcquireAllocatedBytes { get; set; }
+
+    /// <summary>
+    /// 归还路径累计分配字节数（M3，仅同步 <c>Release</c>）。
+    /// </summary>
+    public long ReleaseAllocatedBytes { get; set; }
+
+    /// <summary>
     /// M20（2.5）：逐对象生命周期明细（覆盖全部存活包装对象：空闲 + 借出）。
     /// </summary>
     public IReadOnlyList<HayatePoolObjectDetail> ObjectDetails { get; set; } = [];

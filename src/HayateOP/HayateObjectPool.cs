@@ -134,6 +134,14 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private readonly bool _waitForWarmup;
     private readonly TaskCompletionSource<object> _warmupCompletion;
 
+    // M3：分配追踪（默认关闭）。统计同步借出 / 归还路径的线程分配增量（字节）与样本数；
+    // 仅作诊断口径，不参与任何池行为决策。net48 / netstandard2.0 下 API 缺失，计数恒 0。
+    private readonly bool _enableAllocationTracking;
+    private long _acquireAllocatedBytes;
+    private long _releaseAllocatedBytes;
+    private long _acquireAllocationSamples;
+    private long _releaseAllocationSamples;
+
     internal HayatePoolBasic(
         IHayateObjectPolicy<T> policy,
         HayatePoolOptions options,
@@ -188,6 +196,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         }
 
         _waitForWarmup = _options.WaitForWarmup;
+        _enableAllocationTracking = _options.EnableAllocationTracking;
         if (_waitForWarmup)
         {
             var completion = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -290,6 +299,20 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _warmupCompletion.Task.GetAwaiter().GetResult();
     }
 
+    /// <summary>
+    /// M3：读取当前线程累计分配字节数。net48 / netstandard2.0 缺少
+    /// <c>GC.GetAllocatedBytesForCurrentThread()</c>，这些目标框架下返回 0
+    /// （分配追踪静默不可用，不影响任何池行为）。
+    /// </summary>
+    private static long GetAllocatedBytesForCurrentThread()
+    {
+#if NETFRAMEWORK || NETSTANDARD2_0
+        return 0;
+#else
+        return GC.GetAllocatedBytesForCurrentThread();
+#endif
+    }
+
     #endregion
 
     #region Core methods
@@ -299,7 +322,22 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         return Acquire(_options.DefaultAcquireTimeout);
     }
 
+    /// <summary>
+    /// 同步获取池化对象（带超时）。M3 分配追踪开启时，额外统计本次借出路径的线程分配增量。
+    /// </summary>
     public T Acquire(TimeSpan timeout)
+    {
+        // M3：分配追踪（默认关闭 → 常量分支，JIT 可消除；开启时不影响池行为）
+        if (!_enableAllocationTracking) return AcquireCore(timeout);
+
+        var allocatedBefore = GetAllocatedBytesForCurrentThread();
+        var acquired = AcquireCore(timeout);
+        Interlocked.Add(ref _acquireAllocatedBytes, GetAllocatedBytesForCurrentThread() - allocatedBefore);
+        Interlocked.Increment(ref _acquireAllocationSamples);
+        return acquired;
+    }
+
+    private T AcquireCore(TimeSpan timeout)
     {
         if (timeout < TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be non-negative");
@@ -651,7 +689,25 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         }
     }
 
+    /// <summary>
+    /// 归还对象到池。M3 分配追踪开启时，额外统计本次归还路径的线程分配增量。
+    /// </summary>
     public void Release(T item)
+    {
+        // M3：分配追踪（默认关闭 → 常量分支，JIT 可消除；开启时不影响池行为）
+        if (!_enableAllocationTracking)
+        {
+            ReleaseCore(item);
+            return;
+        }
+
+        var allocatedBefore = GetAllocatedBytesForCurrentThread();
+        ReleaseCore(item);
+        Interlocked.Add(ref _releaseAllocatedBytes, GetAllocatedBytesForCurrentThread() - allocatedBefore);
+        Interlocked.Increment(ref _releaseAllocationSamples);
+    }
+
+    private void ReleaseCore(T item)
     {
         if (item is null)
         {
@@ -1490,6 +1546,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             CurrentSize = totalObjects,
             LeakDetectedCount = Interlocked.Read(ref _leakDetectedCount),
             LeakSuspectedCount = Interlocked.Read(ref _leakSuspectedCount),
+            AllocationTrackingEnabled = _enableAllocationTracking,
+            AcquireAllocatedBytes = Interlocked.Read(ref _acquireAllocatedBytes),
+            ReleaseAllocatedBytes = Interlocked.Read(ref _releaseAllocatedBytes),
+            AcquireAllocationSamples = Interlocked.Read(ref _acquireAllocationSamples),
+            ReleaseAllocationSamples = Interlocked.Read(ref _releaseAllocationSamples),
             WaitTimeSum = waitSum,
             WaitTimeCount = waitCount,
             LeaseTimeSum = leaseSum,
@@ -1580,6 +1641,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             TotalAcquired = Interlocked.Read(ref _totalAcquired),
             LeakCount = Interlocked.Read(ref _leakDetectedCount),
             LeakSuspectedCount = Interlocked.Read(ref _leakSuspectedCount),
+            AllocationTrackingEnabled = _enableAllocationTracking,
+            AcquireAllocatedBytes = Interlocked.Read(ref _acquireAllocatedBytes),
+            ReleaseAllocatedBytes = Interlocked.Read(ref _releaseAllocatedBytes),
             LeakTraces = leakTraces.AsReadOnly(),
             ObjectDetails = details.AsReadOnly()
         };

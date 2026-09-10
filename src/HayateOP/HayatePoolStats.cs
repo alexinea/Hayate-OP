@@ -69,6 +69,43 @@ public class HayatePoolStats
     public long LeakSuspectedCount { get; set; }
 
     /// <summary>
+    /// 是否启用分配追踪（M3）。
+    /// </summary>
+    public bool AllocationTrackingEnabled { get; set; }
+
+    /// <summary>
+    /// 借出路径累计分配字节数（M3，仅同步 <c>Acquire</c>；分配追踪关闭时为 0）。
+    /// </summary>
+    public long AcquireAllocatedBytes { get; set; }
+
+    /// <summary>
+    /// 归还路径累计分配字节数（M3，仅同步 <c>Release</c>；分配追踪关闭时为 0）。
+    /// </summary>
+    public long ReleaseAllocatedBytes { get; set; }
+
+    /// <summary>
+    /// 借出分配采样次数（M3）。
+    /// </summary>
+    public long AcquireAllocationSamples { get; set; }
+
+    /// <summary>
+    /// 归还分配采样次数（M3）。
+    /// </summary>
+    public long ReleaseAllocationSamples { get; set; }
+
+    /// <summary>
+    /// 借出路径平均分配字节数（M3）。
+    /// </summary>
+    public double AverageAcquireAllocatedBytes
+        => AcquireAllocationSamples > 0 ? (double)AcquireAllocatedBytes / AcquireAllocationSamples : 0;
+
+    /// <summary>
+    /// 归还路径平均分配字节数（M3）。
+    /// </summary>
+    public double AverageReleaseAllocatedBytes
+        => ReleaseAllocationSamples > 0 ? (double)ReleaseAllocatedBytes / ReleaseAllocationSamples : 0;
+
+    /// <summary>
     /// 平均等待时间（毫秒）
     /// Average wait time in milliseconds
     /// </summary>
@@ -139,6 +176,11 @@ public class HayatePoolStats
   累计未命中次数(TotalMissed): {TotalMissed}
   检测到的泄漏次数(LeakDetectedCount): {LeakDetectedCount}
   疑似泄漏次数(LeakSuspectedCount): {LeakSuspectedCount}
+  分配追踪(AllocationTrackingEnabled): {AllocationTrackingEnabled}
+  借出平均分配字节(AverageAcquireAllocatedBytes): {AverageAcquireAllocatedBytes:F1}
+  归还平均分配字节(AverageReleaseAllocatedBytes): {AverageReleaseAllocatedBytes:F1}
+  借出分配样本数(AcquireAllocationSamples): {AcquireAllocationSamples}
+  归还分配样本数(ReleaseAllocationSamples): {ReleaseAllocationSamples}
 [等待时间统计(毫秒)]
   平均等待时间(AverageWaitTime): {AverageWaitTimeMs:F2}
   最大等待时间(MaxWaitTime): {MaxWaitTimeMs:F2}
