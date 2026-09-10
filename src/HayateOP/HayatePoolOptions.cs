@@ -104,6 +104,46 @@ public class HayatePoolOptions
 
     #endregion
 
+    #region Execution mode
+
+    /// <summary>
+    /// Whether to use the lean (wrapper-free) fast path.<br />
+    /// Default value: <c>false</c> (the general-purpose sharded engine).
+    /// </summary>
+    /// <remarks>
+    /// Purpose: for pure pooling workloads — objects that need no validation, eviction, leak
+    /// forensics, metrics or auto-scaling — the pool can store the pooled value directly in a
+    /// bounded array and borrow/return it through <c>Interlocked</c> operations. That removes the
+    /// per-object wrapper allocation, the per-shard free-list lock, the registry lookup on return
+    /// and every diagnostic call from the borrow/return path.<br />
+    /// Special case: lean is a <i>mode</i>, not a knob — enabling it forces
+    /// <see cref="EnableSharding"/>, <see cref="EnableAutoScaling"/>, <see cref="EnableValidation"/>,
+    /// <see cref="EnableEviction"/>, <see cref="EnableGenerationOptimization"/>,
+    /// <see cref="EnableLeakDetection"/>, <see cref="EnableMetrics"/> and
+    /// <see cref="EnableAllocationTracking"/> off and clears the capacity-alarm thresholds, because
+    /// each of them needs per-object bookkeeping or a background timer that the fast path does not
+    /// maintain. The normalized result is produced by <see cref="ApplyFeatureSwitches"/> (also
+    /// called from <see cref="IsValid"/>) and is visible through the pool's <c>GetOptions</c>.
+    /// Ordering is therefore irrelevant: <c>WithLean()</c> followed by <c>WithEnableMetrics(true)</c>
+    /// still ends up in lean mode.<br />
+    /// Consequences to be aware of: the lean path keeps no cumulative counters
+    /// (<see cref="HayatePoolStats.TotalCreated"/> and friends report 0), rejects
+    /// <see cref="HayateEvictReason"/>, cannot resize its retention buffer through
+    /// <c>ReloadConfig</c>, and trusts the caller of <c>Release</c> to hand back an object that
+    /// really came from this pool.<br />
+    /// Boundary: boolean switch.<br />
+    /// Recommended range: enable for high-frequency pooling of small, stateless objects; keep
+    /// disabled whenever validation, eviction, leak detection or metrics are required.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var options = new HayatePoolOptions { EnableLean = true, MinPoolSize = 16, MaxPoolSize = 64 };
+    /// </code>
+    /// </example>
+    public bool EnableLean { get; set; } = false;
+
+    #endregion
+
     #region Sharding strategy
 
     /// <summary>
@@ -621,6 +661,9 @@ public class HayatePoolOptions
         options.CreationRetryCount = this.CreationRetryCount;
         options.CreationRetryDelay = this.CreationRetryDelay;
 
+        // Execution mode
+        options.EnableLean = this.EnableLean;
+
         // Sharding
         options.EnableSharding = this.EnableSharding;
         options.ShardCount = this.ShardCount;
@@ -712,6 +755,32 @@ public class HayatePoolOptions
     /// </example>
     public void ApplyFeatureSwitches()
     {
+        // Lean fast-path normalization. Declared first so the sharding branch below collapses the
+        // pool to a single shard exactly as it would for an explicitly sharding-free pool.
+        // Lean stores the pooled value directly in a bounded array and moves it through Interlocked
+        // operations, so it structurally has nowhere to keep per-object timestamps, generations,
+        // leak forensics, metrics samples, capacity-alarm levels or shard free lists. Rather than
+        // rejecting such a combination (which would make builder call order significant), the mode
+        // simply wins and the conflicting features are switched off — the normalized configuration
+        // is then visible through GetOptions.
+        if (EnableLean)
+        {
+            EnableSharding = false;
+            EnableAutoScaling = false;
+            EnableValidation = false;
+            ValidateOnBorrow = false;
+            ValidateOnReturn = false;
+            ValidateWhileIdle = false;
+            EnableEviction = false;
+            EnableGenerationOptimization = false;
+            EnableLeakDetection = false;
+            EnableMetrics = false;
+            EnableAllocationTracking = false;
+            WarnAtRatio = 0;
+            CriticalAtRatio = 0;
+            ShardAffinityMode = HayateShardAffinityMode.None;
+        }
+
         // Sharding disabled: elastic single shard
         if (!EnableSharding)
         {

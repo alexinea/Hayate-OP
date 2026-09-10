@@ -34,6 +34,36 @@ public class HayatePoolBuilder<T> where T : class, new()
     #region Feature toggles
 
     /// <summary>
+    /// Enables or disables the lean (wrapper-free) fast path.
+    /// </summary>
+    /// <param name="enable">Whether to use the lean fast path; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <remarks>
+    /// Lean mode is the right choice for high-frequency pooling of small, stateless objects: the
+    /// pooled value is stored directly in a bounded array and moved through <c>Interlocked</c>
+    /// operations, so the borrow/return path allocates nothing and takes no lock.
+    /// Because lean is a mode rather than a knob, it takes precedence over the feature toggles:
+    /// sharding, auto-scaling, validation, eviction, generation optimization, leak detection,
+    /// metrics, allocation tracking and the capacity alarm are all switched off during
+    /// configuration normalization, whatever order the calls are made in. The normalized result is
+    /// visible through <see cref="IHayateObjectPool.GetOptions"/>.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithLean()
+    ///     .WithMinSize(16)
+    ///     .WithMaxSize(64)
+    ///     .Build();
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithLean(bool enable = true)
+    {
+        _options.EnableLean = enable;
+        return this;
+    }
+
+    /// <summary>
     /// Enables or disables sharding.
     /// </summary>
     /// <param name="enable">Whether to enable sharding; defaults to <c>true</c>.</param>

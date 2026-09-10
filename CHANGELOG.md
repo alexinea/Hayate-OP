@@ -17,6 +17,20 @@ See the release planning notes in the project workspace for the full breakdown.
 
 ### Added
 
+- **Lean (wrapper-free) fast path**: `HayatePoolOptions.EnableLean` — plus the
+  `HayatePoolBuilder.WithLean()` shortcut — stores the pooled value directly in a bounded array and
+  moves it through `Interlocked` compare-exchange, removing the per-object wrapper allocation, the
+  per-shard free-list lock, the registry lookup on return and every diagnostic write from the
+  borrow/return path. Pool sizing, pre-warming, the four reject policies, the object-policy hooks,
+  `Clear`/`Dispose` and the async path all behave as usual.
+  Lean is a *mode*, not a knob: enabling it switches sharding, auto-scaling, validation, eviction,
+  generation optimization, leak detection, metrics, allocation tracking and the capacity alarm off
+  during configuration normalization, whatever order the builder calls are made in. The normalized
+  configuration is observable through `GetOptions()`.
+  Trade-offs to be aware of: the lean path keeps no cumulative counters (`HayatePoolStats.TotalCreated`
+  and friends report `0`), `Evict` throws `InvalidOperationException`, `ReloadConfig` rejects a
+  `MaxPoolSize` change, and `Release` trusts the caller because there is no registry to verify
+  ownership against.
 - `CHANGELOG.md` and [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md): release
   notes and migration guidance now live in dedicated documents, and the README links
   to them instead of duplicating them.

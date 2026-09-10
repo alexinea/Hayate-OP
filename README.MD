@@ -550,15 +550,28 @@ paths, with `[MemoryDiagnoser]` / `[ThreadingDiagnoser]` and P50/P90/P95/P99 lat
 dotnet run -c Release --project tests/HayateOP.Benchmarks
 ```
 
-Archived reports and the machine-readable baseline used by the CI performance-regression gate live in
-[`docs/benchmarks/`](docs/benchmarks). Latest baseline (2026-09-10, .NET 10.0): a single-threaded
-`Acquire+Release` round-trip costs ~252 ns / 384 B for the lean configuration (all features off) and
-~364 ns for the full-feature configuration, versus ~16.5 ns / 0 B for MEOP's minimal `Get()/Return()`.
+Archived runs and the machine-readable baseline used by the CI performance-regression gate live in
+[`docs/benchmarks/`](docs/benchmarks); the full methodology, the percentile columns and the
+run-to-run variance are recorded in
+[`docs/benchmarks/2026-09-10-o1-lean.md`](docs/benchmarks/2026-09-10-o1-lean.md). Single-threaded
+`Acquire+Release` round-trip, every row below measured in one run on .NET 10.0 (2026-09-10):
 
-HayateOP's single acquire/release round-trip is currently slower than MEOP's minimal `Get()/Return()`
-(HayateOP tracks per-object state and a shard index, and supports validation/metrics hooks that MEOP
-does not). In exchange it provides sharding, eviction, leak detection, metrics and management
-endpoints. Closing this gap is the focus of the 2.6 performance work.
+| Configuration | Mean | Allocated |
+| :--- | ---: | ---: |
+| `Microsoft.Extensions.ObjectPool` (reference) | 27.0 ns | 0 B |
+| **HayateOP lean fast path** (`WithLean()`) | **27.1 ns** | **0 B** |
+| HayateOP general engine, every feature off | 286.8 ns | 384 B |
+| HayateOP general engine, 4 shards | 285.9 ns | 384 B |
+| HayateOP general engine, all features on | 415.0 ns | 0 B |
+
+The lean fast path (`HayatePoolOptions.EnableLean`) stores the pooled value in a bounded array and
+moves it through `Interlocked` compare-exchange, so an `Acquire+Release` round-trip allocates nothing
+at all and costs what MEOP's minimal `Get()/Return()` costs — measured at parity in the same run,
+while running roughly ten times faster than the general-purpose engine with every optional feature
+disabled. It is the right choice for high-frequency pooling of small, stateless objects; the
+general-purpose engine remains the choice whenever validation, eviction, leak detection, metrics,
+auto-scaling or sharding are required, and its per-operation cost stays above MEOP's because it
+tracks per-object state and a shard index that MEOP does not.
 
 ## Known limitations
 

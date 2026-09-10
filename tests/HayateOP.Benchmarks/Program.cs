@@ -1,7 +1,8 @@
 ﻿// HayateOP standard BenchmarkDotNet orchestration.
 //
 // Coverage matrix (full Acquire / Release / AcquireAsync paths):
-//   * implementations under test : HayateOP Lean (all features off) / Sharded4 (sharding only) / Full
+//   * implementations under test : HayateOP Lean (wrapper-free fast path) / AllOff (general engine, every
+//                                  optional feature off) / Sharded4 (sharding only) / Full
 //   * reference baselines        : Microsoft.Extensions.ObjectPool (MEOP, Baseline) + plain `new` (no pool, allocation lower bound)
 //   * async dimension            : MEOP and plain `new` expose no async API -> N/A (not present in the matrix)
 //   * concurrency dimension      : 100-thread Parallel.For borrow/return (throughput + contention)
@@ -46,10 +47,12 @@ public class HayateOpBenchmarks
         public void Reset() => Data = 0;
     }
 
-    // Capacity sizing (prevents GlobalSetup from stalling): the Hayate lean/sharded pools are built with
-    // auto-scaling disabled, so an empty pool does not create objects on demand. Min = 250 keeps at least
-    // 100 idle objects available for the concurrent suite (100 borrowing threads), so a blocking wait is
-    // never triggered. This matches the historical benchmark so results remain comparable.
+    // Capacity sizing (prevents GlobalSetup from stalling): the general-engine pools are built with
+    // auto-scaling disabled and warm up through a full borrow/return cycle, so the idle buffer is
+    // non-empty before a benchmark starts and the create path stays out of the measurement.
+    // Min = 250 keeps at least 100 idle objects available for the concurrent suite (100 borrowing
+    // threads), so a blocking wait is never triggered. This matches the historical benchmark so
+    // results remain comparable.
     private const int MinPoolSize = 250;
     private const int MaxPoolSize = 300;
     private const int ThreadCount = 100;
@@ -83,7 +86,8 @@ public class HayateOpBenchmarks
 
     // ── Pools under test ─────────────────────────────────────
     private ObjectPool<PooledObject> _meop = null!;                   // MEOP reference (Baseline)
-    private IHayateObjectPool<PooledObject> _lean = null!;            // all features off
+    private IHayateObjectPool<PooledObject> _allOff = null!;          // general engine, every optional feature off
+    private IHayateObjectPool<PooledObject> _lean = null!;            // lean (wrapper-free) fast path: EnableLean
     private IHayateObjectPool<PooledObject> _sharded4 = null!;        // 4 shards only
     private IHayateObjectPool<PooledObject> _full = null!;            // all features on
 
@@ -95,8 +99,10 @@ public class HayateOpBenchmarks
         _meop = new DefaultObjectPoolProvider { MaximumRetained = MaxPoolSize }
             .Create(new DefaultPooledObjectPolicy<PooledObject>());
 
-        _lean = new HayatePoolBuilder<PooledObject>()
-            .WithPoolName("bench-lean")
+        // General-purpose engine with every optional feature switched off. This is the closest the
+        // sharded/wrapping engine gets to a bare pool, and it is the config the "AllOff" rows measure.
+        _allOff = new HayatePoolBuilder<PooledObject>()
+            .WithPoolName("bench-alloff")
             .WithMinSize(MinPoolSize)
             .WithMaxSize(MaxPoolSize)
             .WithEnableSharding(false)
@@ -106,6 +112,16 @@ public class HayateOpBenchmarks
             .WithEnableGenerationOptimization(false)
             .WithEnableLeakDetection(false)
             .WithEnableMetrics(false)
+            .Build();
+
+        // Lean (wrapper-free) fast path. It stores the pooled value directly in a bounded array and
+        // borrows/returns through Interlocked, so it drops the wrapper allocation, the shard lock
+        // and every diagnostic write; feature toggles are normalized away by the builder.
+        _lean = new HayatePoolBuilder<PooledObject>()
+            .WithPoolName("bench-lean")
+            .WithLean()
+            .WithMinSize(MinPoolSize)
+            .WithMaxSize(MaxPoolSize)
             .Build();
 
         _sharded4 = new HayatePoolBuilder<PooledObject>()
@@ -136,8 +152,9 @@ public class HayateOpBenchmarks
             .WithEnableMetrics(true)
             .Build();
 
-        // Warm up to MaxPoolSize (borrow fully, then return) so the steady state never hits the create path.
+        // Warm up (borrow fully, then return) so the steady state never hits the create path.
         for (var i = 0; i < MaxPoolSize; i++) _meop.Return(_meop.Get());
+        for (var i = 0; i < MaxPoolSize; i++) _allOff.Release(_allOff.Acquire());
         for (var i = 0; i < MaxPoolSize; i++) _lean.Release(_lean.Acquire());
         for (var i = 0; i < MaxPoolSize; i++) _sharded4.Release(_sharded4.Acquire());
         for (var i = 0; i < MaxPoolSize; i++) _full.Release(_full.Acquire());
@@ -146,6 +163,7 @@ public class HayateOpBenchmarks
     [GlobalCleanup]
     public void Cleanup()
     {
+        _allOff.Dispose();
         _lean.Dispose();
         _sharded4.Dispose();
         _full.Dispose();
@@ -169,6 +187,15 @@ public class HayateOpBenchmarks
         var obj = new PooledObject();
         obj.Data++;
         return obj;
+    }
+
+    [Benchmark(Description = "Acquire+Release | Hayate AllOff")]
+    [BenchmarkCategory("hot")]
+    public void Hayate_AllOff_AcquireRelease()
+    {
+        var obj = _allOff.Acquire();
+        obj.Data++;
+        _allOff.Release(obj);
     }
 
     [Benchmark(Description = "Acquire+Release | Hayate Lean")]
@@ -208,6 +235,14 @@ public class HayateOpBenchmarks
         _meop.Return(obj);
     }
 
+    [Benchmark(Description = "Release | Hayate AllOff")]
+    [BenchmarkCategory("hot")]
+    public void Hayate_AllOff_Release()
+    {
+        var obj = _allOff.Acquire();
+        _allOff.Release(obj);
+    }
+
     [Benchmark(Description = "Release | Hayate Lean")]
     [BenchmarkCategory("hot")]
     public void Hayate_Lean_Release()
@@ -217,6 +252,15 @@ public class HayateOpBenchmarks
     }
 
     // ── Suite 3: full AcquireAsync path (MEOP / plain new have no async API -> N/A) ──
+
+    [Benchmark(Description = "AcquireAsync+Release | Hayate AllOff")]
+    [BenchmarkCategory("hot")]
+    public async Task Hayate_AllOff_AcquireReleaseAsync()
+    {
+        var obj = await _allOff.AcquireAsync();
+        obj.Data++;
+        _allOff.Release(obj);
+    }
 
     [Benchmark(Description = "AcquireAsync+Release | Hayate Lean")]
     [BenchmarkCategory("hot")]
@@ -247,6 +291,18 @@ public class HayateOpBenchmarks
             var obj = _meop.Get();
             obj.Data++;
             _meop.Return(obj);
+        });
+    }
+
+    [Benchmark(Description = "Concurrent-100 | Hayate AllOff")]
+    [BenchmarkCategory("concurrent")]
+    public void Hayate_AllOff_Concurrent100()
+    {
+        Parallel.For(0, ThreadCount, _ =>
+        {
+            var obj = _allOff.Acquire();
+            obj.Data++;
+            _allOff.Release(obj);
         });
     }
 

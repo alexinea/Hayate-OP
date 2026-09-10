@@ -197,6 +197,16 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             _shards[i] = new Shard(_options, i, shardMax, _logger);
         }
 
+        // Lean-mode storage. Allocated only when the mode is on; the general-purpose path keeps
+        // these fields at their defaults and never reads them, so all it pays for the feature is a
+        // single perfectly predicted branch at the top of Acquire / Release.
+        // The retention buffer is sized at construction and is immutable by design — see
+        // ReloadConfig, which rejects a MaxPoolSize change in lean mode for exactly that reason.
+        _enableLean = _options.EnableLean;
+        _leanCapacity = _enableLean ? _options.MaxPoolSize : 0;
+        _leanRetentionEnabled = _leanCapacity > 0;
+        _leanSlots = _leanRetentionEnabled ? new T[_leanCapacity - 1] : Array.Empty<T>();
+
         _waitForWarmup = _options.WaitForWarmup;
         _enableAllocationTracking = _options.EnableAllocationTracking;
         if (_waitForWarmup)
@@ -232,6 +242,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     private void PreWarm()
     {
+        if (_enableLean)
+        {
+            PreWarmLean();
+            return;
+        }
+
         try
         {
             // Compute the maximum capacity per shard
@@ -346,6 +362,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// </code></example>
     public T Acquire(TimeSpan timeout)
     {
+        // Lean fast path dispatch (off by default → constant branch, JIT-eliminable). Lean mode
+        // forces allocation tracking off during normalization, so the two branches cannot overlap.
+        if (_enableLean) return AcquireLean(timeout);
+
         // Allocation tracking (off by default → constant branch, JIT-eliminable; when on, does not affect pool behavior)
         if (!_enableAllocationTracking) return AcquireCore(timeout);
 
@@ -619,6 +639,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// </code></example>
     public async Task<T> AcquireAsync(CancellationToken cancellationToken = default)
     {
+        // Lean fast path dispatch (off by default → constant branch, JIT-eliminable for the caller).
+        if (_enableLean) return await AcquireLeanAsync(cancellationToken).ConfigureAwait(false);
+
         // Wait for pre-warm readiness if not yet done (off by default → constant branch, zero overhead)
         if (_waitForWarmup) await _warmupCompletion.Task.ConfigureAwait(false);
 
@@ -731,6 +754,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// </code></example>
     public void Release(T item)
     {
+        // Lean fast path dispatch (off by default → constant branch, JIT-eliminable).
+        if (_enableLean)
+        {
+            ReleaseLean(item);
+            return;
+        }
+
         // Allocation tracking (off by default → constant branch, JIT-eliminable; when on, does not affect pool behavior)
         if (!_enableAllocationTracking)
         {
@@ -937,6 +967,15 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// </code></example>
     public int Evict(HayateEvictReason reason)
     {
+        if (_enableLean)
+        {
+            // Lean mode keeps no per-object timestamps, lease counts or generations, so none of the
+            // three eviction criteria can be evaluated. Failing loudly is preferable to returning a
+            // silently meaningless 0.
+            throw new InvalidOperationException(
+                $"HayatePool [{_name}] uses the lean fast path, which keeps no per-object state and therefore cannot evict by {reason}. Use the general-purpose mode to enable eviction.");
+        }
+
         if (reason != HayateEvictReason.Touched &&
             reason != HayateEvictReason.Idle &&
             reason != HayateEvictReason.Expired)
@@ -1566,6 +1605,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// </code></example>
     public HayatePoolStats GetStats()
     {
+        if (_enableLean) return GetLeanStats();
+
         // No longer holds a global _statsLock — statistics fields are read atomically one by one (an eventually-consistent snapshot);
         // the shard-count read semantics are the same as the original (whose in-lock read also did not constitute shard-level consistency).
         int totalIdle = _shards.Sum(s => s.Count);
@@ -1614,6 +1655,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// </code></example>
     public HayatePoolSnapshot TakeSnapshot()
     {
+        if (_enableLean) return GetLeanSnapshot();
+
         var leakTraces = new List<string>();
         // Per-object lifecycle detail (the snapshot is a diagnostic path, so O(n) aggregation is acceptable)
         var details = new List<HayatePoolObjectDetail>();
@@ -1713,8 +1756,32 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         lock (_options)
         {
+            var previousMaxPoolSize = _options.MaxPoolSize;
+            var previousLease = _options.EnableLean;
+
             configure(_options);
             _options.ApplyFeatureSwitches(); // Force-correct the configuration
+
+            // Lean mode owns a retention buffer and a dispatch decision that are both fixed at
+            // construction time. Resizing or leaving the mode would silently desynchronize the pool
+            // from its configuration, so both are rejected with the original values restored.
+            if (_enableLean)
+            {
+                if (_options.MaxPoolSize != previousMaxPoolSize)
+                {
+                    _options.MaxPoolSize = previousMaxPoolSize;
+                    throw new InvalidOperationException(
+                        $"HayatePool [{_name}] uses the lean fast path, whose retention buffer is sized at construction and cannot be resized. Rebuild the pool to change MaxPoolSize.");
+                }
+
+                if (!_options.EnableLean)
+                {
+                    _options.EnableLean = previousLease;
+                    throw new InvalidOperationException(
+                        $"HayatePool [{_name}] uses the lean fast path and cannot switch back to the general-purpose engine at runtime. Rebuild the pool instead.");
+                }
+            }
+
             _logger.LogInformation("Pool configuration reloaded. Type: {Type} NewConfig: {@Config}", typeof(T).Name, _options);
         }
     }
@@ -1725,6 +1792,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     public void Clear()
     {
+        if (_enableLean)
+        {
+            ClearLean();
+            return;
+        }
+
         foreach (var shard in _shards)
         {
             shard.Clear();
