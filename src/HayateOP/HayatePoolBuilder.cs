@@ -16,6 +16,11 @@ public class HayatePoolBuilder<T> where T : class, new()
     private IHayateLogger _logger;
     private string _poolName;
 
+    // M19：池级日志工厂与「显式日志器」标记。默认无工厂 + 内建单例日志器，
+    // 与 2.4 及之前行为完全一致；显式 WithLogger 优先于工厂（见 ResolveLogger）。
+    private IHayateLoggerFactory _loggerFactory;
+    private bool _loggerExplicitlySet;
+
     public HayatePoolBuilder()
     {
         _policy = new DefaultHayateObjectPolicy<T>();
@@ -545,12 +550,37 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
-    /// 设置日志记录器
+    /// 设置日志记录器（显式实例，优先于 <see cref="WithLoggerFactory"/>）
     /// </summary>
     public HayatePoolBuilder<T> WithLogger(IHayateLogger logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _loggerExplicitlySet = true;
         return this;
+    }
+
+    /// <summary>
+    /// 设置池级日志工厂（M19）：构建时按池名调用一次
+    /// <see cref="IHayateLoggerFactory.CreateLogger"/>，为每个池创建独立日志器。
+    /// </summary>
+    /// <remarks>
+    /// 零破坏：未调用本方法时沿用内建单例日志器；与 <see cref="WithLogger"/> 同时使用时，
+    /// 显式 <see cref="WithLogger"/> 实例优先。
+    /// </remarks>
+    public HayatePoolBuilder<T> WithLoggerFactory(IHayateLoggerFactory loggerFactory)
+    {
+        _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
+        return this;
+    }
+
+    /// <summary>
+    /// M19：解析本次构建使用的日志器。显式 <see cref="WithLogger"/> 优先；
+    /// 否则按池名向工厂索取；无工厂时回落内建单例日志器（2.4 行为）。
+    /// </summary>
+    private IHayateLogger ResolveLogger()
+    {
+        if (_loggerExplicitlySet) return _logger;
+        return _loggerFactory?.CreateLogger(_poolName) ?? _logger;
     }
 
     #endregion
@@ -589,15 +619,18 @@ public class HayatePoolBuilder<T> where T : class, new()
             _metrics = EmptyHayateMetrics.Instance;
         }
 
+        // M19：按池名解析日志器（显式 WithLogger 优先 → 工厂 → 内建单例）
+        var logger = ResolveLogger();
+
         var pool = new HayatePoolBasic<T>(
             _policy,
             _options,
             _scalingStrategy,
             _metrics,
-            _logger,
+            logger,
             _poolName);
 
-        _logger.LogInformation("HayatePool [{PoolName}] initialized successfully", _poolName);
+        logger.LogInformation("HayatePool [{PoolName}] initialized successfully", _poolName);
 
         return pool;
     }
@@ -628,7 +661,8 @@ public class HayatePoolBuilder<T> where T : class, new()
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex,
+            // M19：失败日志同样走池级日志器（工厂优先），保证降级告警落到该池的日志通道
+            ResolveLogger().LogError(ex,
                 "HayatePool [{PoolName}] build failed (BuildOrThrow(false)); degrading to empty pool",
                 _poolName);
 
@@ -662,15 +696,18 @@ public class HayatePoolBuilder<T> where T : class, new()
             CreationRetryDelay = _options.CreationRetryDelay
         };
 
+        // M19：降级池同样按池名解析日志器（保持日志分流一致）
+        var logger = ResolveLogger();
+
         var pool = new HayatePoolBasic<T>(
             _policy,
             degraded,
             new ThresholdScalingStrategy(),
             EmptyHayateMetrics.Instance,
-            _logger,
+            logger,
             _poolName);
 
-        _logger.LogWarning(
+        logger.LogWarning(
             "HayatePool [{PoolName}] degraded to empty pool: Min=0/Max=0, all features off; " +
             "Acquire follows reject policy ({Policy}) until the pool is rebuilt with valid options",
             _poolName, degraded.RejectPolicy);
