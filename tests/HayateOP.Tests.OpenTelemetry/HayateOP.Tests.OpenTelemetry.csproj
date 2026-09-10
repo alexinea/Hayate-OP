@@ -24,6 +24,11 @@
     </ItemGroup>
 
     <ItemGroup>
+        <!-- M22：Prometheus 抓取端点（UseHayatePrometheusExporter）验收需要 ASP.NET Core 路由类型 -->
+        <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    </ItemGroup>
+
+    <ItemGroup>
         <PackageReference Include="xunit.v3" Version="4.0.0" />
         <!-- 消费端管线验证：InMemory Exporter 走的采集管线与 OTLP Collector 相同（仅末端不同）；
              版本锁定与 NU1902 压制理由见上方 PropertyGroup 注释 -->

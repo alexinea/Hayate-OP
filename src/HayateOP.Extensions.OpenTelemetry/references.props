@@ -5,4 +5,11 @@
       <ProjectReference Include="..\HayateOP\HayateOP.csproj" />
     </ItemGroup>
 
+    <!-- M22：Prometheus 抓取端点（UseHayatePrometheusExporter）仅在 net8.0+ 编译，
+         因此仅高版本目标框架引用 ASP.NET Core 框架程序集；net6/net7 使用者不受影响
+         （序列化器 HayatePrometheusSerializer 与 DI 注册在全部目标框架可用）。 -->
+    <ItemGroup Condition="'$(TargetFramework)' == 'net8.0' Or '$(TargetFramework)' == 'net9.0' Or '$(TargetFramework)' == 'net10.0'">
+        <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    </ItemGroup>
+
 </Project>
