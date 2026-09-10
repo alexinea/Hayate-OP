@@ -162,6 +162,29 @@
             </summary>
             <value>从启动到现在所经过的时间跨度。</value>
         </member>
+        <member name="T:DotNetCore.HayateOP.HayateEvictReason">
+            <summary>
+            M15（2.5）：<see cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.Evict(DotNetCore.HayateOP.HayateEvictReason)"/> 的分类驱逐依据。
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateEvictReason.Touched">
+            <summary>
+            曾被借出使用过的空闲对象（LeaseCount &gt; 0）——「用过即清」，适合对象内聚状态
+            难以可靠重置的场景。
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateEvictReason.Idle">
+            <summary>
+            空闲时长超过 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxIdleTime"/> 的对象（与后台驱逐的
+            idle-too-long 判定同口径）。
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateEvictReason.Expired">
+            <summary>
+            存活时长超过 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/> 的对象（与后台驱逐的
+            expired 判定同口径）。
+            </summary>
+        </member>
         <member name="T:DotNetCore.HayateOP.HayateLeakTraceCaptureMode">
             <summary>
              泄漏检测取证模式（PR-D L1：取证与检测解耦）。
@@ -187,6 +210,41 @@
              每次借出均抓取调用栈（2.0 及之前的旧行为）。
              仅诊断场景显式开启：调用链深时单次开销 10~40KB 分配、微秒级 CPU。
             </summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.HayateLeaseContext">
+            <summary>
+            M16（2.5，breaking）：借出租约上下文。
+            <para>
+            一次借出对应一个不可变租约上下文：租约 ID（进程级单调递增）+ 借出帧数组 +
+            借出时刻（Stopwatch ticks）。采集载体为 <see cref="T:System.Threading.AsyncLocal`1"/>（<see cref="P:DotNetCore.HayateOP.HayateLeaseContext.Current"/>）——
+            上下文随调用方的异步执行流（ExecutionContext）流动，<b>并发借还各自持有独立副本，
+            不再相互覆盖</b>（2.4 及之前包装对象上的 string 采集会被同对象复借覆盖，且跨异步
+            流共享时无法区分归属）。
+            </para>
+            <para>
+            生命周期：Acquire 取证采集时创建并写入当前异步流 + 包装对象；Release 结束租约时
+            清空当前异步流；Destroy 时清空包装对象上的引用。取证开关与频率仍由
+            <see cref="T:DotNetCore.HayateOP.HayateLeakTraceCaptureMode"/> 控制（Off 默认不采集，L1 语义不变）。
+            </para>
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateLeaseContext.LeaseId">
+            <summary>进程级唯一的租约 ID（单调递增）。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateLeaseContext.Frames">
+            <summary>借出时刻的调用栈帧（fNeedFileInfo:false 低开销采集；可能为空数组）。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateLeaseContext.BorrowedAt">
+            <summary>借出时刻（Stopwatch ticks，与池内时长判定同口径）。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateLeaseContext.Current">
+            <summary>当前异步流的租约上下文；未在租约期（未采集/已结束）为 null。</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateLeaseContext.AttachToFlow">
+            <summary>把本租约写入当前异步流（借出路径调用）。</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateLeaseContext.DetachFromFlow">
+            <summary>结束当前异步流的租约（Release 路径调用；写值有执行上下文复制成本，由调用方门控）。</summary>
         </member>
         <member name="T:DotNetCore.HayateOP.HayateObjectLocation">
             <summary>
@@ -223,6 +281,35 @@
         </member>
         <member name="P:DotNetCore.HayateOP.HayateObject`1.LastReleasedAt">
             <inheritdoc cref="P:DotNetCore.HayateOP.HayateObject`1.CreatedAt"/>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateObject`1.CreatedAtTick">
+            <summary>
+            M20（2.5）：创建时刻的挂钟时间戳（<see cref="!:DateTimeOffset.UtcNow.Ticks"/>）。
+            与 <see cref="P:DotNetCore.HayateOP.HayateObject`1.CreatedAt"/>（Stopwatch ticks，用于时长测量）互补——
+            本字段面向快照/日志输出的人类可读口径，不参与任何时长判定。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateObject`1.LeaseCount">
+            <summary>
+            M20（2.5）：累计借出次数。借出路径单调递增（借出瞬间包装对象由本线程独占，
+            驱逐/校验无法认领借出中对象，故普通自增即可，无需 Interlocked）。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateObject`1.OwnerPoolName">
+            <summary>
+            M20（2.5）：所属池的逻辑名（创建时由池写入，生命周期内不变）。
+            供跨池诊断 / 快照输出定位对象归属。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateObject`1.LeaseContext">
+            <summary>
+            M16（2.5，breaking）：借出租约上下文（租约 ID + 借出帧数组 + 借出时刻）。
+            采集载体为 <see cref="T:DotNetCore.HayateOP.HayateLeaseContext"/> 的 AsyncLocal 异步流 + 本属性（包装侧快照引用）；
+            并发借还各自持有独立上下文实例，不再相互覆盖。取证模式与采集频率仍由
+            <see cref="T:DotNetCore.HayateOP.HayateLeakTraceCaptureMode"/> 控制（L1 三模式语义不变）。
+            2.5 批次二 M10 曾短暂引入 <c>AcquireStackFrames: StackFrame[]</c>，本属性为其最终形态；
+            2.4 及之前的 <c>AcquireTrace: string</c> 已移除，文本形态经 <c>TakeSnapshot().LeakTraces</c> 获取。
+            </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayateObject`1.IsBorrowed">
             <summary>
@@ -270,6 +357,25 @@
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.UntrackKey(`0)">
             <summary>T09：仅有裸对象引用（无包装）时，全分片扫描摘除登记项。</summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.WaitForWarmupIfNeeded">
+            <summary>
+            M17：预热就绪门。默认配置（<see cref="P:DotNetCore.HayateOP.HayatePoolOptions.WaitForWarmup"/> = false）下
+            <c>_waitForWarmup</c> 为常量 false，热路径仅多一次可预测分支（JIT 可消除）；
+            开启时阻塞至预热结束——信号在成功与失败路径均会置位，不会永久挂起。
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.GetAllocatedBytesForCurrentThread">
+            <summary>
+            M3：读取当前线程累计分配字节数。net48 / netstandard2.0 缺少
+            <c>GC.GetAllocatedBytesForCurrentThread()</c>，这些目标框架下返回 0
+            （分配追踪静默不可用，不影响任何池行为）。
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Acquire(System.TimeSpan)">
+            <summary>
+            同步获取池化对象（带超时）。M3 分配追踪开启时，额外统计本次借出路径的线程分配增量。
+            </summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.AcquireAsync(System.TimeSpan,System.Threading.CancellationToken)">
             <summary>
             PR-E A3（=M5 统一 CT 传递）：异步获取池化对象，带超时边界。
@@ -277,6 +383,24 @@
             零新增池状态；超时语义与同步 <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Acquire(System.TimeSpan)"/> 对齐——
             超时抛 <see cref="T:System.TimeoutException"/>（含 missed 计数与强制扩容一步），
             外部取消传播 <see cref="T:System.Threading.Tasks.TaskCanceledException"/>，二者可通过取消源区分。
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Release(`0)">
+            <summary>
+            归还对象到池。M3 分配追踪开启时，额外统计本次归还路径的线程分配增量。
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Evict(DotNetCore.HayateOP.HayateEvictReason)">
+            <summary>
+            M15：按分类依据主动驱逐空闲对象（Touched/Idle/Expired，语义见 <see cref="T:DotNetCore.HayateOP.HayateEvictReason"/>）。
+            实现要点：
+            ① 仅作用于空闲对象——借出中的对象不在分片链表内（TryTake 已物理摘出），
+               <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.GetAll"/> 快照天然不含；即便时序竞态下链表项刚被借出，
+               <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.Remove(DotNetCore.HayateOP.HayateObject{`0})"/> 的原子认领也会失败并跳过，绝不销毁使用中的对象；
+            ② 销毁复用与后台驱逐完全相同的 <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Destroy(DotNetCore.HayateOP.HayateObject{`0})"/> 幂等 CAS——与后台驱逐 /
+               空闲校验 / 归还拒绝并发命中同一对象时只有一方真正销毁，不产生二次 Dispose；
+            ③ 默认后台驱逐行为不变，本 API 是叠加的主动运维出口（驱逐计数计入各自的
+               Destroy 路径，不额外记账）。
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryColdBootAcquire(System.Int64)">
@@ -289,6 +413,23 @@
             </summary>
             <returns>自举借出的对象；返回 <c>null</c> 表示本调用未认领自举（池非空 / 达上限 / 他线程正在创建），调用方应继续正常等待。</returns>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.SelectStartShardIndex">
+            <summary>
+            M18：计算本次借出的起始分片索引。
+            None 恒返 0（调用方以 <c>_affinityMode != None</c> 前置短路，保证默认路径零开销）；
+            Thread 按托管线程 ID 黄金比例散列稳定映射（同线程恒优先命中同一分片，且与分片数无公约数耦合）；
+            Custom 走用户委托，null/越界/异常一律回落 0（借出路径健壮性优先，绝不因策略缺失中断借出）。
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.CaptureLeaseContext(DotNetCore.HayateOP.HayateObject{`0})">
+            <summary>
+            M16：借出路径租约上下文采集。创建不可变租约（租约 ID + 帧数组 + 借出时刻），
+            同时写入包装对象（快照取证用）与当前异步流（AsyncLocal，调用方可经
+            <see cref="P:DotNetCore.HayateOP.HayateLeaseContext.Current"/> 读取；并发借还各自隔离，不相互覆盖）。
+            帧采集 fNeedFileInfo:false——不解析源文件/行号，避免 PDB I/O。
+            </summary>
+        </member>
+        <!-- Badly formed XML comment ignored for member "M:DotNetCore.HayateOP.HayatePoolBasic`1.FormatLeaseTrace(DotNetCore.HayateOP.HayateLeaseContext)" -->
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.InterlockedMax(System.Int64@,System.Int64)">
             <summary>
             L2：无锁 Max 归并（CAS 环）。并发下最终收敛到真实最大值。
@@ -297,6 +438,15 @@
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.InterlockedMin(System.Int64@,System.Int64)">
             <summary>
             L2：无锁 Min 归并（CAS 环）。并发下最终收敛到真实最小值。
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.CheckCapacityAlarm">
+            <summary>
+            M12：容量告警检查。使用率口径 = 借出数 / MaxPoolSize（借出数由
+            「真实存活总数 - 空闲数」派生，与 TakeSnapshot 同口径）。
+            状态翻转去抖：只有经 CAS 成功翻转状态的线程触发一次回调；
+            回落低水位静默复位（不触发回调），重新越线可再次触发。
+            禁用（WarnAtRatio=0 且 CriticalAtRatio=0）时由调用方的只读标志短路，零开销。
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TrackedCount">
@@ -345,6 +495,10 @@
             Default thread-safe <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/> backed by a
             <see cref="T:System.Collections.Concurrent.ConcurrentDictionary`2"/>. Pools self-register here as
             they are created; callers resolve by the same logical name.
+            <para>
+            M11+（2.5）：内部条目升级为 <see cref="T:DotNetCore.HayateOP.HayatePoolMetadata"/>（池 + 元数据），
+            对外暴露 GetAll / Remove / Count 完整版管理面；Register / TryGet / Names 原语义不变。
+            </para>
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayateObjectPoolRegistry.Register(System.String,DotNetCore.HayateOP.IHayateObjectPool)">
@@ -354,6 +508,15 @@
             <inheritdoc />
         </member>
         <member name="P:DotNetCore.HayateOP.HayateObjectPoolRegistry.Names">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateObjectPoolRegistry.GetAll">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateObjectPoolRegistry.Remove(System.String)">
+            <inheritdoc />
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateObjectPoolRegistry.Count">
             <inheritdoc />
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEnableSharding(System.Boolean)">
@@ -391,6 +554,35 @@
             启用/禁用指标统计
             </summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithWaitForWarmup(System.Boolean)">
+            <summary>
+            设置是否等待预热完成（M17）。<c>true</c> 时预热转后台执行，借出操作在预热完成前阻塞。
+            </summary>
+            <param name="wait">是否等待预热完成；默认 <c>false</c>（构造函数内同步预热，借出零额外等待）。</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEnableAllocationTracking(System.Boolean)">
+            <summary>
+            设置是否启用分配追踪（M3）。开启后 <c>GetStats()</c> / <c>TakeSnapshot()</c> 暴露
+            借出 / 归还路径的分配字节增量与样本数。
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithCapacityAlarm(System.Double,System.Double)">
+            <summary>
+            设置容量告警阈值（M12）。使用率口径为「借出数 / MaxPoolSize」。
+            </summary>
+            <param name="warnAtRatio">警告阈值（0~1；0 表示禁用警告档）。</param>
+            <param name="criticalAtRatio">危急阈值（0~1；0 表示禁用危急档；与警告同时启用时不得小于警告阈值，越界时自动修正）。</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithOnCapacityWarning(System.Action{DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs})">
+            <summary>
+            设置容量警告回调（使用率 ≥ WarnAtRatio 时状态翻转触发一次）
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithOnCapacityCritical(System.Action{DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs})">
+            <summary>
+            设置容量危急回调（使用率 ≥ CriticalAtRatio 时状态翻转触发一次）
+            </summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithPoolName(System.String)">
             <summary>
             设置池名称
@@ -409,6 +601,19 @@
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithShardCount(System.Int32)">
             <summary>
             设置分片数量
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithShardAffinity(DotNetCore.HayateOP.HayateShardAffinityMode)">
+            <summary>
+            M18：设置分片亲和模式（None=默认顺序扫描 / Thread=线程亲和 / Custom=自定义委托）。
+            传 <see cref="F:DotNetCore.HayateOP.HayateShardAffinityMode.Custom"/> 时须随后调用
+            <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithCustomShardAffinity(System.Func{System.Int32})"/>，否则 Build 时回落 None。
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithCustomShardAffinity(System.Func{System.Int32})">
+            <summary>
+            M18：设置自定义起始分片委托并切入 Custom 模式。
+            返回值建议落在 [0, ShardCount)；null/越界/异常时本次借出回落顺序扫描（不抛出）。
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithAcquireTimeout(System.TimeSpan)">
@@ -557,13 +762,147 @@
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLogger(DotNetCore.HayateOP.Logging.IHayateLogger)">
             <summary>
-            设置日志记录器
+            设置日志记录器（显式实例，优先于 <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLoggerFactory(DotNetCore.HayateOP.Logging.IHayateLoggerFactory)"/>）
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLoggerFactory(DotNetCore.HayateOP.Logging.IHayateLoggerFactory)">
+            <summary>
+            设置池级日志工厂（M19）：构建时按池名调用一次
+            <see cref="M:DotNetCore.HayateOP.Logging.IHayateLoggerFactory.CreateLogger(System.String)"/>，为每个池创建独立日志器。
+            </summary>
+            <remarks>
+            零破坏：未调用本方法时沿用内建单例日志器；与 <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLogger(DotNetCore.HayateOP.Logging.IHayateLogger)"/> 同时使用时，
+            显式 <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLogger(DotNetCore.HayateOP.Logging.IHayateLogger)"/> 实例优先。
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.ResolveLogger">
+            <summary>
+            M19：解析本次构建使用的日志器。显式 <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLogger(DotNetCore.HayateOP.Logging.IHayateLogger)"/> 优先；
+            否则按池名向工厂索取；无工厂时回落内建单例日志器（2.4 行为）。
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.Configure(System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
             <summary>
             全量配置（覆盖所有选项）
             </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.BuildOrThrow(System.Boolean)">
+            <summary>
+            容错构建入口（M13）。<br />
+            <paramref name="throwOnError"/> 为 <c>true</c>（默认）时与 <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.Build"/> 行为完全一致；
+            为 <c>false</c> 时构建失败（配置非法 / metrics 注册冲突等）不抛出，降级返回一个
+            「Min=0、Max=0、全部功能开关关闭」的可用空池并记录错误日志——后续 Acquire 走
+            拒绝策略语义（如 BlockTimeout 超时抛出），池本身可安全 Dispose 与观测。
+            </summary>
+            <param name="throwOnError">构建失败时是否抛出异常；<c>false</c> 降级为空池。</param>
+            <remarks>
+            典型场景：配置来自外部输入（Configuration / 远端下发），构建失败时业务需要
+            「可运行的降级池 + 告警日志」而非进程崩溃。注意：预热阶段的创建失败本就被池内
+            捕获（PreWarm 记录日志后继续），因此空池降级主要覆盖构建期配置校验失败。
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.BuildDegradedEmptyPool">
+            <summary>
+            M13：构建降级空池。Min=0 / Max=0 / 全部功能开关关闭，仅保留与拒绝策略相关的
+            语义配置（超时 / 拒绝策略 / 创建重试），保证 Acquire 行为可预期。
+            </summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.HayatePoolCapacityAlarmLevel">
+            <summary>
+            池容量告警级别（M12）。
+            </summary>
+            <remarks>
+            语义：按「借出对象数 / MaxPoolSize」的使用率与 <c>WarnAtRatio</c> / <c>CriticalAtRatio</c>
+            比较得出；仅在状态翻转时触发一次回调（回落静默复位、重新整备）。
+            </remarks>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolCapacityAlarmLevel.Normal">
+            <summary>正常水位（低于告警阈值）。</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolCapacityAlarmLevel.Warning">
+            <summary>警告水位（使用率 ≥ WarnAtRatio 且低于 CriticalAtRatio）。</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolCapacityAlarmLevel.Critical">
+            <summary>危急水位（使用率 ≥ CriticalAtRatio）。</summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs">
+            <summary>
+            池容量告警事件参数（M12）。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs.PoolName">
+            <summary>触发告警的池名称。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs.Level">
+            <summary>告警级别（Warning / Critical；Normal 不触发回调）。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs.UsageRatio">
+            <summary>触发时刻的使用率（借出数 / MaxPoolSize，0~1）。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs.BorrowedCount">
+            <summary>触发时刻的借出对象数。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs.MaxPoolSize">
+            <summary>池容量上限（MaxPoolSize）。</summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.HayatePoolMetadata">
+            <summary>
+            注册表中单个池的元数据条目（M11+，2.5）。
+            <para>
+            在「逻辑池名 → 池实例」的既有映射之上补充管理面信息：元素类型、池运行时类型、
+            注册（构建）时间。<see cref="P:DotNetCore.HayateOP.HayatePoolMetadata.RegisteredAt"/> 取注册瞬间——DI 流程中池构建后立即注册，
+            可视为池的构建时间；直接 Builder 场景若自行注册则同义。
+            </para>
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolMetadata.PoolName">
+            <summary>池注册名（逻辑名，注册表的键）。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolMetadata.ElementType">
+            <summary>池化元素的类型（<see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/> 的 T）；非泛型实现为 null。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolMetadata.PoolType">
+            <summary>池实例的运行时类型。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolMetadata.RegisteredAt">
+            <summary>注册（≈构建）时间。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolMetadata.Pool">
+            <summary>池实例（非泛型面）。注意：与注册表生命周期解耦，池可能已被外部 Dispose。</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolMetadata.ResolveElementType(DotNetCore.HayateOP.IHayateObjectPool)">
+            <summary>
+            从池实例反射解析 <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/> 的元素类型 T。
+            解析不到（非泛型自定义实现）时返回 null——元数据仍可用，只是缺类型信息。
+            </summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.HayatePoolObjectDetail">
+            <summary>
+            M20（2.5）：快照中的逐对象生命周期明细。
+            由 <see cref="P:DotNetCore.HayateOP.HayatePoolSnapshot.ObjectDetails"/> 携带，一次快照覆盖全部存活包装对象
+            （空闲 + 借出）。字段为快照瞬间取值，不构成任何一致性保证（诊断用途）。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolObjectDetail.ShardIndex">
+            <summary>对象归属分片索引。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolObjectDetail.IsBorrowed">
+            <summary>快照瞬间是否处于借出状态。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolObjectDetail.LeaseCount">
+            <summary>累计借出次数。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolObjectDetail.CreatedAtTick">
+            <summary>创建时刻的挂钟时间戳（<see cref="!:DateTimeOffset.UtcNow.Ticks"/> 口径）。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolObjectDetail.LeaseTimeMs">
+            <summary>最近一次租约时长（毫秒；未归还时为最近一次记录值或 0）。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolObjectDetail.Generation">
+            <summary>分代标记（0 年轻代 / 1 老年代，仅分代优化开启时升级）。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolObjectDetail.OwnerPoolName">
+            <summary>所属池的逻辑名。</summary>
         </member>
         <member name="T:DotNetCore.HayateOP.HayatePoolOptions">
             <summary>
@@ -661,6 +1000,25 @@
             边界：建议大于等于 1。<br />
             推荐值区间：2~16。
             </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.ShardAffinityMode">
+            <summary>
+            M18（2.5）：借出路径的分片亲和模式。默认 <see cref="F:DotNetCore.HayateOP.HayateShardAffinityMode.None"/>（顺序扫描，现状语义）。
+            </summary>
+            <remarks>
+            None：从 0 号分片开始顺序扫描（与 2.4 及之前一致，零额外开销）。<br />
+            Thread：按托管线程 ID 稳定映射起始分片（同线程始终优先命中同一分片，提升缓存/句柄局部性；
+            起始分片忙时仍按环形继续扫描其余分片，不损失可用性）。<br />
+            Custom：使用 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.CustomShardAffinity"/> 委托返回的起始分片索引；委托返回 null 或越界时回落 None。
+            注意：Close 关闭分片（单分片）时本配置无实际效果。
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.CustomShardAffinity">
+            <summary>
+            M18：<see cref="F:DotNetCore.HayateOP.HayateShardAffinityMode.Custom"/> 模式下的起始分片索引委托。
+            返回值建议落在 [0, ShardCount)；返回越界值或 null 时本次借出回落顺序扫描。
+            仅在 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ShardAffinityMode"/> = Custom 时被调用（每次借出至多一次）。
+            </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableAutoScaling">
             <summary>
@@ -912,6 +1270,45 @@
             边界：≤ 0 时构建/运行期自动修正为默认值 1024（见 <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/>）。
             </remarks>
         </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.WarnAtRatio">
+            <summary>
+            容量告警阈值（使用率，借出数 / MaxPoolSize）。<br />
+            默认值：<c>0</c>（0 表示不启用容量告警，零热路径开销）。
+            </summary>
+            <remarks>
+            用途：借出水位越过该比例时触发一次 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.OnCapacityWarning"/> 回调。<br />
+            特例：状态翻转去抖——越线只触发一次，回落到阈值下方静默复位后可再次触发。<br />
+            边界：0（禁用）或 (0, 1]；大于 1 会被 <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/> 钳制为 1。
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.CriticalAtRatio">
+            <summary>
+            容量危急阈值（使用率，借出数 / MaxPoolSize）。<br />
+            默认值：<c>0</c>（0 表示不启用危急告警）。
+            </summary>
+            <remarks>
+            用途：借出水位越过该比例时触发一次 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.OnCapacityCritical"/> 回调。<br />
+            特例：与 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.WarnAtRatio"/> 同时启用时不得小于后者（规范化时自动抬升至 WarnAtRatio）；<br />
+            从 Normal 直接越线到 Critical 时仅触发 Critical 回调，不补发 Warning。<br />
+            边界：0（禁用）或 (0, 1]；大于 1 会被 <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/> 钳制为 1。
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.OnCapacityWarning">
+            <summary>
+            容量告警回调（使用率 ≥ <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.WarnAtRatio"/> 时状态翻转触发一次）。默认 <c>null</c>。
+            </summary>
+            <remarks>
+            回调在借/还路径内联执行，应保持轻量（毫秒级返回）；回调内抛出的异常会被池捕获并记录日志，不影响借还主流程。
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.OnCapacityCritical">
+            <summary>
+            容量危急回调（使用率 ≥ <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.CriticalAtRatio"/> 时状态翻转触发一次）。默认 <c>null</c>。
+            </summary>
+            <remarks>
+            回调在借/还路径内联执行，应保持轻量（毫秒级返回）；回调内抛出的异常会被池捕获并记录日志，不影响借还主流程。
+            </remarks>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableMetrics">
             <summary>
             是否启用指标采集。<br />
@@ -922,6 +1319,35 @@
             特例：高频路径下开启会增加少量开销。<br />
             边界：布尔开关。<br />
             推荐值区间：测试/生产建议开启，极限性能压测可关闭。
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableAllocationTracking">
+            <summary>
+            是否启用分配追踪（M3）。<br />
+            默认值：<c>false</c>。
+            </summary>
+            <remarks>
+            用途：统计借出 / 归还路径的线程分配增量（字节），用于定位热路径上的隐藏分配，
+            与基准测试的 <c>B/Op</c> 口径互为印证。<br />
+            特例：每次借还额外调用一次分配查询 API（近似零分配），仍有少量开销；
+            <c>net48</c> / <c>netstandard2.0</c> 目标框架缺少该 API，追踪在这些框架下静默不可用（计数恒 0）。<br />
+            边界：布尔开关。<br />
+            推荐值区间：诊断 / 调优期开启，生产热路径建议关闭。
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.WaitForWarmup">
+            <summary>
+            是否让预热在后台进行、并令借出操作等待预热完成。<br />
+            默认值：<c>false</c>（与 2.4 及之前一致——构造期同步预热，借出不做额外等待）。
+            </summary>
+            <remarks>
+            用途：<c>true</c> 时构造立即返回，<see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MinPoolSize"/> 的预热在后台线程完成；
+            预热完成前所有 <c>Acquire</c> / <c>AcquireAsync</c> 阻塞在就绪信号上，保证调用方
+            拿到对象时池已就绪（避免冷启动期大量创建开销落在首个业务请求上）。<br />
+            特例：与 L5 冷池自举互斥——等待期内不会触发「池空同步创建」自举，自举让位于就绪信号；
+            预热若失败，信号仍会置位（不永久阻塞），失败原因记录到日志。<br />
+            边界：布尔开关。<br />
+            推荐值区间：启动期可容忍少量延迟、且希望首请求零创建开销的服务建议开启。
             </remarks>
         </member>
         <member name="T:DotNetCore.HayateOP.HayatePoolRejectPolicy">
@@ -948,6 +1374,31 @@
             <summary>
              先等待归还、等满 acquire timeout 后才创建新对象（并非名字暗示的「立即绕过池建新」）。
              创建的对象会登记进池、归还时可回池复用（T15）；空池冷启动首次调用最多付出一个完整超时延迟。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.LeakSuspectedCount">
+            <summary>
+            疑似泄漏次数（M4，泄漏检测关闭时的回查告警计数）。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.AllocationTrackingEnabled">
+            <summary>
+            是否启用分配追踪（M3）。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.AcquireAllocatedBytes">
+            <summary>
+            借出路径累计分配字节数（M3，仅同步 <c>Acquire</c>）。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.ReleaseAllocatedBytes">
+            <summary>
+            归还路径累计分配字节数（M3，仅同步 <c>Release</c>）。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.ObjectDetails">
+            <summary>
+            M20（2.5）：逐对象生命周期明细（覆盖全部存活包装对象：空闲 + 借出）。
             </summary>
         </member>
         <member name="T:DotNetCore.HayateOP.HayatePoolStats">
@@ -1009,6 +1460,48 @@
             Number of detected object leaks
             </summary>
         </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.LeakSuspectedCount">
+            <summary>
+            疑似泄漏次数（M4，泄漏检测关闭时的回查告警计数）。<br />
+            EnableLeakDetection=false 时，TakeSnapshot 按同一 LeakDetectionThreshold 统计
+            「借出超阈值未归还」的对象次数；仅计数、不取证、不回收。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.AllocationTrackingEnabled">
+            <summary>
+            是否启用分配追踪（M3）。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.AcquireAllocatedBytes">
+            <summary>
+            借出路径累计分配字节数（M3，仅同步 <c>Acquire</c>；分配追踪关闭时为 0）。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.ReleaseAllocatedBytes">
+            <summary>
+            归还路径累计分配字节数（M3，仅同步 <c>Release</c>；分配追踪关闭时为 0）。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.AcquireAllocationSamples">
+            <summary>
+            借出分配采样次数（M3）。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.ReleaseAllocationSamples">
+            <summary>
+            归还分配采样次数（M3）。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.AverageAcquireAllocatedBytes">
+            <summary>
+            借出路径平均分配字节数（M3）。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.AverageReleaseAllocatedBytes">
+            <summary>
+            归还路径平均分配字节数（M3）。
+            </summary>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.AverageWaitTimeMs">
             <summary>
             平均等待时间（毫秒）
@@ -1057,6 +1550,30 @@
             Number of lease time records
             </summary>
         </member>
+        <member name="T:DotNetCore.HayateOP.HayateShardAffinityMode">
+            <summary>
+            M18（2.5）：借出路径的分片亲和模式。
+            决定 Acquire / AcquireAsync 扫描分片时的起始位置——命中起始分片后仍按环形
+            继续扫描其余分片，因此任何模式都不损失可用性，只影响命中优先级与局部性。
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateShardAffinityMode.None">
+            <summary>
+            顺序扫描（默认）：从 0 号分片开始按索引顺序扫描，与 2.4 及之前行为完全一致，零额外开销。
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateShardAffinityMode.Thread">
+            <summary>
+            线程亲和：按托管线程 ID 稳定映射起始分片（同一线程始终优先命中同一分片，
+            利于对象在 CPU 缓存 / NUMA 节点 / 线程本地资源上的复用）。
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateShardAffinityMode.Custom">
+            <summary>
+            自定义委托：由 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.CustomShardAffinity"/> 决定起始分片。
+            委托返回 null 或越界时本次借出回落顺序扫描（不抛异常，保证借出路径健壮性）。
+            </summary>
+        </member>
         <member name="T:DotNetCore.HayateOP.IHayateObjectPool`1">
             <summary>
             对象池通用接口
@@ -1071,6 +1588,15 @@
             <param name="timeout">等待上限。</param>
             <param name="cancellationToken">外部取消令牌，可随时中断等待。</param>
         </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPool`1.Evict(DotNetCore.HayateOP.HayateEvictReason)">
+            <summary>
+            M15（2.5）：按分类依据主动驱逐空闲对象，返回实际驱逐数量。
+            仅作用于<b>空闲</b>对象（借出中的对象一律不碰）；驱逐复用与后台驱逐相同的
+            分片原子认领 + 销毁幂等 CAS，可与其他驱逐/借还路径并发调用。
+            默认后台驱逐（<c>EvictionCallback</c>）行为不变——本 API 是叠加的主动运维出口。
+            </summary>
+            <param name="reason">驱逐依据（Touched=用过即清 / Idle=超 MaxIdleTime / Expired=超 MaxLifeTime）。</param>
+        </member>
         <member name="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry">
             <summary>
             A registry that maps a logical pool name (e.g. <c>typeof(T).Name</c>) to its
@@ -1080,6 +1606,11 @@
             (<c>Type.GetType(poolName)</c> cannot resolve a plain type-name like "MyObj").
             Registrations are populated as pools are created; lookups are by the same
             name used to register the pool.
+            </para>
+            <para>
+            M11+（2.5）：在按名寻址之上补充完整版管理面——<see cref="M:DotNetCore.HayateOP.IHayateObjectPoolRegistry.GetAll"/> 枚举全部注册项
+            （含池元数据：元素类型 / 运行时类型 / 注册时间）、<see cref="M:DotNetCore.HayateOP.IHayateObjectPoolRegistry.Remove(System.String)"/> 反注册、
+            <see cref="P:DotNetCore.HayateOP.IHayateObjectPoolRegistry.Count"/> 存量计数。键控池（O-A）与共享实例（O-C）等后续设施复用本骨架。
             </para>
             </summary>
         </member>
@@ -1091,6 +1622,20 @@
         </member>
         <member name="P:DotNetCore.HayateOP.IHayateObjectPoolRegistry.Names">
             <summary>All currently registered pool names.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPoolRegistry.GetAll">
+            <summary>
+            M11+：枚举全部注册项（池实例 + 元数据）。返回快照，枚举期间的其他注册/移除不影响结果。
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPoolRegistry.Remove(System.String)">
+            <summary>
+            M11+：按名称反注册。<paramref name="poolName"/> 为 null/空白或名称不存在时返回 <c>false</c>。
+            注意：仅从注册表摘除条目，<b>不</b> Dispose 池——生命周期归注册方所有。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.IHayateObjectPoolRegistry.Count">
+            <summary>M11+：当前注册的池数量。</summary>
         </member>
         <member name="T:DotNetCore.HayateOP.IHayateResettable">
             <summary>
@@ -1105,6 +1650,51 @@
             生产结构化日志请使用 HayateMicrosoftLoggerAdapter{T}（MEL 原生支持命名模板）。
             无正则、单趟扫描，消除每次日志调用的 Regex 开销。
             </summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Logging.DefaultHayateLoggerFactory">
+            <summary>
+            默认日志工厂（M19）：忽略分类名，返回与 2.4 及之前等价的内建日志器。
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Logging.DefaultHayateLoggerFactory.Instance">
+            <summary>共享实例（无状态，可安全复用）。</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.DefaultHayateLoggerFactory.CreateLogger(System.String)">
+            <inheritdoc />
+        </member>
+        <member name="T:DotNetCore.HayateOP.Logging.DelegateHayateLoggerFactory">
+            <summary>
+            委托式日志工厂（M19）：把分类名交给用户提供的委托，便于把池日志桥接到
+            MEL <c>ILoggerFactory</c>、Serilog、NLog 等任意后端。
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.DelegateHayateLoggerFactory.#ctor(System.Func{System.String,DotNetCore.HayateOP.Logging.IHayateLogger})">
+            <summary>
+            创建委托式工厂。
+            </summary>
+            <param name="factory">分类名 → 日志器 的映射委托。</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.DelegateHayateLoggerFactory.CreateLogger(System.String)">
+            <inheritdoc />
+        </member>
+        <member name="T:DotNetCore.HayateOP.Logging.IHayateLoggerFactory">
+            <summary>
+            池级日志工厂（M19）。<br />
+            用途：为每个对象池按「池名（category）」创建独立日志器，替代全局单例日志；
+            典型场景为多池共存时把日志按池名分流（如输出到不同的 MEL category / 文件）。
+            </summary>
+            <remarks>
+            零破坏约定：未通过 <c>HayatePoolBuilder&lt;T&gt;.WithLoggerFactory</c> 指定工厂时，
+            行为与 2.4 及之前完全一致——沿用 Builder 内建的单例 <see cref="T:DotNetCore.HayateOP.Logging.IHayateLogger"/>。
+            若同时显式调用 <c>WithLogger</c>，则显式实例优先于工厂。
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.IHayateLoggerFactory.CreateLogger(System.String)">
+            <summary>
+            为指定逻辑池创建日志器。
+            </summary>
+            <param name="categoryName">日志分类名（默认为池名 <c>HayatePoolBuilder&lt;T&gt;.WithPoolName</c> 的值，缺省为元素类型名）。</param>
+            <returns>日志器实例；不可返回 <c>null</c>。</returns>
         </member>
         <member name="T:DotNetCore.HayateOP.Metrics.IHayateMetrics">
             <summary>
