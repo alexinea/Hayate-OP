@@ -186,6 +186,41 @@
         <member name="P:DotNetCore.HayateOP.Prometheus.HayatePrometheusSample.Value">
             <summary>The sample value.</summary>
         </member>
+        <member name="T:Microsoft.AspNetCore.Builder.HayatePrometheusEndpointExtensions">
+            <summary>
+            ASP.NET Core mapping extension for the Prometheus scrape endpoint (compiled only for the net8.0+ target framework).
+            <para>
+            The package containing this file (<c>DotNetCore.HayateOP.Extensions.OpenTelemetry</c>) references
+            <c>Microsoft.AspNetCore.App</c> only on the net8.0+ target framework; the net6.0 / net7.0 targets
+            do not include this extension (the serializer and DI registration are available on all targets).
+            </para>
+            </summary>
+        </member>
+        <member name="F:Microsoft.AspNetCore.Builder.HayatePrometheusEndpointExtensions.DefaultPattern">
+            <summary>The default scrape path.</summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.Builder.HayatePrometheusEndpointExtensions.UseHayatePrometheusExporter(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder,System.String)">
+            <summary>
+            Maps the Prometheus text scrape endpoint: GET returns the Prometheus text format of each
+            pool's metrics (Content-Type <c>text/plain; version=0.0.4</c>).
+            </summary>
+            <param name="endpoints">The endpoint route builder.</param>
+            <param name="pattern">The scrape path; defaults to <see cref="F:Microsoft.AspNetCore.Builder.HayatePrometheusEndpointExtensions.DefaultPattern"/>.</param>
+            <returns>The endpoint convention builder (further chained calls such as <c>RequireAuthorization</c> are allowed).</returns>
+            <remarks>
+            Requires registering the exporter via <c>AddHayatePrometheusExporter()</c> first; if not
+            registered, an exporter is built on the fly from the container's
+            <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/> (still usable).
+            </remarks>
+            <exception cref="T:System.ArgumentNullException"><paramref name="endpoints"/> or <paramref name="pattern"/> is null.</exception>
+            <example>
+            <code>
+            app.UseHayatePrometheusExporter();   // exposes GET /hayateop/metrics
+            // or with a custom path:
+            app.UseHayatePrometheusExporter("/metrics");
+            </code>
+            </example>
+        </member>
         <member name="T:Microsoft.Extensions.DependencyInjection.HayateOpenTelemetryServiceCollectionExtensions">
             <summary>
             DI registration extension for <see cref="T:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics"/>.

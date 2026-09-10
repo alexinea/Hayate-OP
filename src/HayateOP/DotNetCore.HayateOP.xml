@@ -547,6 +547,125 @@
             pool.ReloadConfig(o =&gt; o.MaxPoolSize = 64);
             </code></example>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.CreateLeanObject">
+            <summary>
+            Creates a pooled value without a wrapper and without a registry entry.
+            Mirrors the retry policy of the wrapping creation path so a flaky factory behaves
+            identically in both modes.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryGrowLean(`0@)">
+            <summary>
+            Reserves one slot against the <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/> ceiling and creates
+            the object for it.
+            </summary>
+            <param name="item">The newly created object, or <c>null</c> when the ceiling is reached.</param>
+            <returns><c>true</c> when an object was created; <c>false</c> when the pool is at capacity.</returns>
+            <remarks>
+            The reservation is a compare-exchange loop rather than a bare increment, so concurrent
+            borrowers can never overshoot the ceiling; a creation failure rolls the reservation back.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryTakeLean(`0@)">
+            <summary>
+            Takes an idle object out of the lean buffer: the single-slot fast lane first (the
+            steady-state hit), then the bounded slot array. Pure <see cref="T:System.Threading.Interlocked"/> — no lock,
+            no allocation, no bookkeeping.
+            </summary>
+            <param name="item">The object taken, or <c>null</c> when the buffer holds nothing idle.</param>
+            <returns><c>true</c> when an object was taken.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryReturnLean(`0)">
+            <summary>
+            Puts an object back into the lean buffer, filling the fast lane first and then the first
+            empty slot.
+            </summary>
+            <param name="item">The object to retain; must not be <c>null</c>.</param>
+            <returns>
+            <c>true</c> when the object was retained; <c>false</c> when the buffer already holds
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/> idle objects — the caller then drops it, which
+            is the lean analogue of the reference pool's discard-on-full behaviour.
+            </returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.CountLeanIdle">
+            <summary>
+            Counts the idle objects currently retained in the lean buffer. Diagnostic path only — the
+            steady-state borrow/return path never needs the count, which is exactly why the lean buffer
+            can avoid maintaining one.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.DestroyLean(`0)">
+            <summary>
+            Destroys a lean-mode object: runs the policy hook, disposes the value and releases its slot
+            reservation. Every object reachable from the lean buffer was created by this pool, so the
+            reservation always exists — except when a caller returns an object the pool never created,
+            which lean mode cannot detect (there is no registry to check against) and which the
+            counter guard below keeps from corrupting the live count.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.PreWarmLean">
+            <summary>
+            Pre-creates <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MinPoolSize"/> objects into the lean buffer.
+            Never creates more than <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/>.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.ClearLean">
+            <summary>
+            Destroys every idle object retained by the lean buffer. Borrowed objects are untouched, so
+            their reservations stay accounted for and they re-enter the buffer normally on return.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.AcquireLean(System.TimeSpan)">
+            <summary>
+            Synchronous lean acquire. An empty buffer is grown up to the ceiling before the reject
+            policy is consulted, which is what makes an empty lean pool non-blocking instead of waiting
+            for a timeout to elapse.
+            </summary>
+            <exception cref="T:System.ArgumentOutOfRangeException">Thrown if <paramref name="timeout"/> is negative.</exception>
+            <exception cref="T:System.InvalidOperationException">Thrown by the Abort policy when the pool is at capacity and holds nothing idle.</exception>
+            <exception cref="T:System.TimeoutException">Thrown by the BlockTimeout (or CreateNew) policy when acquisition exceeds <paramref name="timeout"/>.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.AcquireLeanSlow(System.TimeSpan)">
+            <summary>
+            The lean acquire path once the buffer came back empty: grow up to the ceiling first, and
+            only then fall back to the configured reject policy. The elapsed-time measurement starts
+            here, because a timeout can only be exceeded after at least one miss.
+            </summary>
+            <exception cref="T:System.InvalidOperationException">Thrown by the Abort policy when the pool is at capacity and holds nothing idle.</exception>
+            <exception cref="T:System.TimeoutException">Thrown by the BlockTimeout (or CreateNew) policy when acquisition exceeds <paramref name="timeout"/>.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.AcquireLeanAsync(System.Threading.CancellationToken)">
+            <summary>
+            Asynchronous lean acquire. Shares the storage with the synchronous path, so a pool serves
+            both call styles from one buffer.
+            </summary>
+            <exception cref="T:System.Threading.Tasks.TaskCanceledException">Thrown if <paramref name="cancellationToken"/> is cancelled while waiting.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.ReleaseLean(`0)">
+            <summary>
+            Returns an object to the lean buffer.
+            </summary>
+            <remarks>
+            Lean mode keeps no registry, so it cannot verify that <paramref name="item"/> came from this
+            pool — an object from elsewhere is accepted and pooled. That is the same contract the
+            reference zero-wrapper pool offers, and it is the deliberate price of removing the reverse
+            lookup from the return path.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.GetLeanStats">
+            <summary>
+            Lean-mode statistics. Instantaneous state is measured from the buffer; the cumulative
+            counters stay at 0 because maintaining them would require an atomic write on every
+            borrow and return — precisely the overhead the fast path exists to remove.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.GetLeanSnapshot">
+            <summary>
+            Lean-mode snapshot. There is no per-object wrapper to describe, so the object-detail and
+            leak-trace collections come back empty; the pooled and borrowed counts are derived from the
+            buffer and the live reservation counter.
+            </summary>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TrackedCount">
             <summary>The number of live objects registered in this shard (idle + borrowed).</summary>
         </member>
@@ -618,6 +737,32 @@
         </member>
         <member name="P:DotNetCore.HayateOP.HayateObjectPoolRegistry.Count">
             <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLean(System.Boolean)">
+            <summary>
+            Enables or disables the lean (wrapper-free) fast path.
+            </summary>
+            <param name="enable">Whether to use the lean fast path; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <remarks>
+            Lean mode is the right choice for high-frequency pooling of small, stateless objects: the
+            pooled value is stored directly in a bounded array and moved through <c>Interlocked</c>
+            operations, so the borrow/return path allocates nothing and takes no lock.
+            Because lean is a mode rather than a knob, it takes precedence over the feature toggles:
+            sharding, auto-scaling, validation, eviction, generation optimization, leak detection,
+            metrics, allocation tracking and the capacity alarm are all switched off during
+            configuration normalization, whatever order the calls are made in. The normalized result is
+            visible through <see cref="M:DotNetCore.HayateOP.IHayateObjectPool.GetOptions"/>.
+            </remarks>
+            <example>
+            <code>
+            var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithLean()
+                .WithMinSize(16)
+                .WithMaxSize(64)
+                .Build();
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEnableSharding(System.Boolean)">
             <summary>
@@ -1558,6 +1703,42 @@
             Boundary: should be &gt;= <see cref="F:System.TimeSpan.Zero"/>.<br />
             Recommended range: 50~1000ms.
             </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLean">
+            <summary>
+            Whether to use the lean (wrapper-free) fast path.<br />
+            Default value: <c>false</c> (the general-purpose sharded engine).
+            </summary>
+            <remarks>
+            Purpose: for pure pooling workloads — objects that need no validation, eviction, leak
+            forensics, metrics or auto-scaling — the pool can store the pooled value directly in a
+            bounded array and borrow/return it through <c>Interlocked</c> operations. That removes the
+            per-object wrapper allocation, the per-shard free-list lock, the registry lookup on return
+            and every diagnostic call from the borrow/return path.<br />
+            Special case: lean is a <i>mode</i>, not a knob — enabling it forces
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableSharding"/>, <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableAutoScaling"/>, <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableValidation"/>,
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableEviction"/>, <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableGenerationOptimization"/>,
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLeakDetection"/>, <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableMetrics"/> and
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableAllocationTracking"/> off and clears the capacity-alarm thresholds, because
+            each of them needs per-object bookkeeping or a background timer that the fast path does not
+            maintain. The normalized result is produced by <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/> (also
+            called from <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.IsValid"/>) and is visible through the pool's <c>GetOptions</c>.
+            Ordering is therefore irrelevant: <c>WithLean()</c> followed by <c>WithEnableMetrics(true)</c>
+            still ends up in lean mode.<br />
+            Consequences to be aware of: the lean path keeps no cumulative counters
+            (<see cref="P:DotNetCore.HayateOP.HayatePoolStats.TotalCreated"/> and friends report 0), rejects
+            <see cref="T:DotNetCore.HayateOP.HayateEvictReason"/>, cannot resize its retention buffer through
+            <c>ReloadConfig</c>, and trusts the caller of <c>Release</c> to hand back an object that
+            really came from this pool.<br />
+            Boundary: boolean switch.<br />
+            Recommended range: enable for high-frequency pooling of small, stateless objects; keep
+            disabled whenever validation, eviction, leak detection or metrics are required.
+            </remarks>
+            <example>
+            <code>
+            var options = new HayatePoolOptions { EnableLean = true, MinPoolSize = 16, MaxPoolSize = 64 };
+            </code>
+            </example>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableSharding">
             <summary>
