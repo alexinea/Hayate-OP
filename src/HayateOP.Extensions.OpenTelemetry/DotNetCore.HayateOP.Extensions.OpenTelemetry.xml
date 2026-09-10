@@ -75,6 +75,133 @@
         <member name="M:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics.Dispose">
             <summary>释放 Meter（注销全部指标；幂等）。</summary>
         </member>
+        <member name="T:DotNetCore.HayateOP.Prometheus.HayatePrometheusOptions">
+            <summary>
+            M22：Prometheus 导出器配置。
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Prometheus.HayatePrometheusOptions.Namespace">
+            <summary>指标名前缀（命名空间）。默认 <c>hayateop</c>。</summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Prometheus.HayatePrometheusExporter">
+            <summary>
+            M22：把各池的 <see cref="T:DotNetCore.HayateOP.HayatePoolStats"/> 序列化为 Prometheus 文本格式。
+            <para>
+            数据源为公开的 <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/> + <see cref="M:DotNetCore.HayateOP.IHayateObjectPool.GetStats"/>，
+            不触碰池内部状态；单个池取数失败不影响整体输出（跳过该池）。
+            </para>
+            <para>
+            暴露的指标族（前缀可经 <see cref="P:DotNetCore.HayateOP.Prometheus.HayatePrometheusOptions.Namespace"/> 配置）：
+            <list type="bullet">
+            <item><description><c>hayateop_pool_size</c>（gauge）—— 各池存活对象数（空闲 + 借出）</description></item>
+            <item><description><c>hayateop_pool_available</c>（gauge）—— 各池当前空闲对象数</description></item>
+            <item><description><c>hayateop_pool_created_total</c> / <c>_released_total</c> / <c>_acquired_total</c> / <c>_missed_total</c>（counter）</description></item>
+            <item><description><c>hayateop_pool_leak_detected_total</c> / <c>_leak_suspected_total</c>（counter）</description></item>
+            <item><description><c>hayateop_pool_wait_average_milliseconds</c> / <c>_lease_average_milliseconds</c>（gauge）</description></item>
+            <item><description><c>hayateop_pool_acquire_allocated_bytes_average</c> / <c>_release_allocated_bytes_average</c>（gauge，仅在启用 M3 分配追踪的池上出现）</description></item>
+            </list>
+            </para>
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Prometheus.HayatePrometheusExporter.#ctor(DotNetCore.HayateOP.IHayateObjectPoolRegistry,DotNetCore.HayateOP.Prometheus.HayatePrometheusOptions)">
+            <summary>
+            创建导出器。
+            </summary>
+            <param name="registry">池注册表（数据源）。可为 <c>null</c>——此时输出空文本。</param>
+            <param name="options">可选配置（命名空间前缀）。</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Prometheus.HayatePrometheusExporter.Scrape">
+            <summary>
+            采集并序列化为 Prometheus 文本（每次调用即时取数，无缓存）。
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Prometheus.HayatePrometheusExporter.WriteAsync(System.IO.TextWriter)">
+            <summary>
+            异步把 Prometheus 文本写入指定 writer（供端点直接回写响应流）。
+            </summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Prometheus.HayatePrometheusSerializer">
+            <summary>
+            M22：Prometheus 文本格式（exposition format 0.0.4）序列化器。
+            <para>
+            零外部依赖——不引入 <c>prometheus-net</c> 或 OTel Prometheus exporter 包，
+            仅按 Prometheus 文本协议输出 <c># HELP</c> / <c># TYPE</c> / <c>metric{label="v"} value</c>。
+            使用方既可通过端点直接暴露，也可自行把文本写入任意采集通道。
+            </para>
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Prometheus.HayatePrometheusSerializer.ContentType">
+            <summary>Prometheus 文本响应 Content-Type（协议版本 0.0.4）。</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Prometheus.HayatePrometheusSerializer.PoolLabel">
+            <summary>池名标签键（与 OTel 桥接的 <c>pool.name</c> 语义一致，命名遵循 Prometheus 惯例）。</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Prometheus.HayatePrometheusSerializer.EscapeLabelValue(System.String)">
+            <summary>
+            转义标签值：反斜杠、双引号、换行按 Prometheus 文本协议要求转义。
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Prometheus.HayatePrometheusSerializer.FormatValue(System.Double)">
+            <summary>
+            数值格式化（不变文化）：整数不带小数点，浮点用往返精度；NaN / ±Inf 按协议字面量输出。
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Prometheus.HayatePrometheusSerializer.WriteGauge(System.Text.StringBuilder,System.String,System.String,System.Collections.Generic.IReadOnlyList{DotNetCore.HayateOP.Prometheus.HayatePrometheusSample})">
+            <summary>
+            写入一个 gauge 指标族（含 HELP / TYPE 头与逐池样本行）。
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Prometheus.HayatePrometheusSerializer.WriteCounter(System.Text.StringBuilder,System.String,System.String,System.Collections.Generic.IReadOnlyList{DotNetCore.HayateOP.Prometheus.HayatePrometheusSample})">
+            <summary>
+            写入一个 counter 指标族（含 HELP / TYPE 头与逐池样本行）。
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Prometheus.HayatePrometheusSerializer.WriteMetricFamily(System.Text.StringBuilder,System.String,System.String,System.String,System.Collections.Generic.IReadOnlyList{DotNetCore.HayateOP.Prometheus.HayatePrometheusSample})">
+            <summary>
+            写入指标族：<c># HELP</c>、<c># TYPE</c>，随后每个样本一行。
+            样本为空时不输出任何内容（避免暴露空指标族）。
+            </summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Prometheus.HayatePrometheusSample">
+            <summary>
+            M22：单条 Prometheus 样本（池名标签 + 数值）。
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Prometheus.HayatePrometheusSample.#ctor(System.String,System.Double)">
+            <summary>创建带池名标签的样本。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Prometheus.HayatePrometheusSample.LabelValue">
+            <summary>池名标签值（<c>null</c> 表示无标签的全局样本）。</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Prometheus.HayatePrometheusSample.Value">
+            <summary>样本数值。</summary>
+        </member>
+        <member name="T:Microsoft.AspNetCore.Builder.HayatePrometheusEndpointExtensions">
+            <summary>
+            M22：Prometheus 抓取端点的 ASP.NET Core 映射扩展（仅 net8.0+ 目标框架编译）。
+            <para>
+            本文件所在包（<c>DotNetCore.HayateOP.Extensions.OpenTelemetry</c>）仅在 net8.0 及以上目标框架
+            引用 <c>Microsoft.AspNetCore.App</c>；net6.0 / net7.0 目标框架不包含本扩展（序列化器与
+            DI 注册在全部目标框架可用）。
+            </para>
+            </summary>
+        </member>
+        <member name="F:Microsoft.AspNetCore.Builder.HayatePrometheusEndpointExtensions.DefaultPattern">
+            <summary>默认抓取路径。</summary>
+        </member>
+        <member name="M:Microsoft.AspNetCore.Builder.HayatePrometheusEndpointExtensions.UseHayatePrometheusExporter(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder,System.String)">
+            <summary>
+            映射 Prometheus 文本抓取端点：GET 返回各池指标的 Prometheus 文本格式
+            （Content-Type <c>text/plain; version=0.0.4</c>）。
+            </summary>
+            <param name="endpoints">端点路由构建器。</param>
+            <param name="pattern">抓取路径，默认 <see cref="F:Microsoft.AspNetCore.Builder.HayatePrometheusEndpointExtensions.DefaultPattern"/>。</param>
+            <returns>端点约定构建器（可继续追加 <c>RequireAuthorization</c> 等）。</returns>
+            <remarks>
+            需先通过 <c>AddHayatePrometheusExporter()</c> 注册导出器；未注册时会按容器中的
+            <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/> 即时构建一个导出器（仍可用）。
+            </remarks>
+        </member>
         <member name="T:Microsoft.Extensions.DependencyInjection.HayateOpenTelemetryServiceCollectionExtensions">
             <summary>
             T14：<see cref="T:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics"/> 的 DI 注册扩展。
@@ -94,6 +221,24 @@
             </summary>
             <param name="services">服务容器。</param>
             <param name="configure">可选的桥接配置（Meter 名等）。</param>
+            <returns>服务容器（链式）。</returns>
+        </member>
+        <member name="T:Microsoft.Extensions.DependencyInjection.HayatePrometheusServiceCollectionExtensions">
+            <summary>
+            M22：Prometheus 导出器的 DI 注册扩展。
+            </summary>
+        </member>
+        <member name="M:Microsoft.Extensions.DependencyInjection.HayatePrometheusServiceCollectionExtensions.AddHayatePrometheusExporter(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Action{DotNetCore.HayateOP.Prometheus.HayatePrometheusOptions})">
+            <summary>
+            注册 <see cref="T:DotNetCore.HayateOP.Prometheus.HayatePrometheusExporter"/> 单例（数据源为容器中的
+            <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/>，由 <c>RegisterHayatePool&lt;T&gt;</c> 填充）。
+            <para>
+            若使用 ASP.NET Core，可在注册后调用
+            <c>app.UseHayatePrometheusExporter()</c> 暴露 <c>/hayateop/metrics</c> 抓取端点（net8+）。
+            </para>
+            </summary>
+            <param name="services">服务容器。</param>
+            <param name="configure">可选配置（指标命名空间前缀等）。</param>
             <returns>服务容器（链式）。</returns>
         </member>
     </members>
