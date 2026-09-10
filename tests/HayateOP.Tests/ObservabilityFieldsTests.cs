@@ -35,7 +35,10 @@ public class ObservabilityFieldsTests
         var frames = ctx.Frames;
         Assert.NotEmpty(frames);
         var methodNames = frames.Select(f => f.GetMethod()?.Name).ToList();
-        Assert.Contains("Acquire", methodNames);
+        // 借出调用链须留有方法帧。M3 后 Acquire()/Acquire(TimeSpan) 均为极薄转发
+        // （`return AcquireCore(...)`），高版本 JIT 的分层编译/PGO 可能将其内联，
+        // 栈帧中仅剩 AcquireCore —— 断言本意为「含借出链方法帧」，二者皆满足。
+        Assert.Contains(methodNames, n => n == "Acquire" || n == "AcquireCore");
         Assert.Contains("EveryAcquireMode_ShouldCaptureLeaseContext", methodNames);
         // 低开销口径：不解析源文件行号
         Assert.All(frames, f => Assert.Null(f.GetFileName()));

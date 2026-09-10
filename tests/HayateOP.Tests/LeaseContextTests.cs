@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using DotNetCore.HayateOP.Policies;
@@ -125,6 +126,12 @@ public class LeaseContextTests
     }
 
     /// <summary>带独立调用帧标记的借出（帧数组应含本方法名，证明流隔离）。</summary>
+    /// <remarks>
+    /// 必须 <see cref="MethodImplOptions.NoInlining"/>：本方法仅一次转发调用，
+    /// net48 的 JIT 会将其内联进调用方（async 状态机 <c>MoveNext</c>），导致
+    /// 栈帧中不再出现本方法名，令「帧含标记方法」断言随 JIT 行为漂移而误报。
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private static TestObject BorrowMarked(IHayateObjectPool<TestObject> pool, int marker)
         => pool.Acquire();
 
