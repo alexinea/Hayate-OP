@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 1,
+  "environment": "local-windows",
+  "calibration": true,
+  "capturedAt": "2026-09-10",
+  "runtime": ".NET 10.0",
+  "job": "Short (Warmup 3 / Iteration 10, Server GC + Concurrent GC)",
+  "source": "docs/benchmarks/2026-09-10-m1-bdn-baseline.csv",
+  "notes": [
+    "Seeded from the 2.5 M1 baseline captured on the maintainer's local Windows machine.",
+    "Absolute values are machine dependent: comparing a GitHub runner against this file is a cross-environment",
+    "comparison. Until a CI-captured baseline is committed (see docs/benchmarks/baseline/README.md), treat results",
+    "as advisory (calibration = true) and prefer the ratio-based reference rows over absolute thresholds.",
+    "Only entries with gated = true participate in the pass/fail gate; reference rows are reported for context.",
+    "The Concurrent-100 suite is recorded but never gated (observed run-to-run variance is far above the thresholds).",
+    "The recorded allocatedBytes of 'Acquire+Release | Hayate Full' (0 B) is inconsistent with a replay on the same",
+    "machine (416 B) and is treated as a measurement artifact: while calibration = true, allocation deltas are",
+    "reported as advisory notices instead of warnings."
+  ],
+  "thresholds": {
+    "warnMeanPercent": 15.0,
+    "failMeanPercent": 30.0,
+    "allocWarnBytes": 0,
+    "allocFailBytes": 64
+  },
+  "targets": [
+    {
+      "method": "Acquire+Release | Hayate Lean",
+      "gated": true,
+      "meanNs": 251.797,
+      "stdDevNs": 9.6799,
+      "p50Ns": 248.6,
+      "p90Ns": 264.1,
+      "p95Ns": 264.8,
+      "p99Ns": 264.8,
+      "allocatedBytes": 384
+    },
+    {
+      "method": "Acquire+Release | Hayate Sharded4",
+      "gated": true,
+      "meanNs": 254.981,
+      "stdDevNs": 11.0232,
+      "p50Ns": 249.8,
+      "p90Ns": 268.6,
+      "p95Ns": 272.8,
+      "p99Ns": 272.8,
+      "allocatedBytes": 384
+    },
+    {
+      "method": "Acquire+Release | Hayate Full",
+      "gated": true,
+      "meanNs": 363.850,
+      "stdDevNs": 14.6118,
+      "p50Ns": 369.2,
+      "p90Ns": 376.4,
+      "p95Ns": 379.9,
+      "p99Ns": 379.9,
+      "allocatedBytes": 0
+    },
+    {
+      "method": "Release | Hayate Lean",
+      "gated": true,
+      "meanNs": 272.020,
+      "stdDevNs": 10.9882,
+      "p50Ns": 272.1,
+      "p90Ns": 278.1,
+      "p95Ns": 293.4,
+      "p99Ns": 293.4,
+      "allocatedBytes": 384
+    },
+    {
+      "method": "AcquireAsync+Release | Hayate Lean",
+      "gated": true,
+      "meanNs": 254.023,
+      "stdDevNs": 16.0821,
+      "p50Ns": 249.2,
+      "p90Ns": 274.3,
+      "p95Ns": 276.7,
+      "p99Ns": 276.7,
+      "allocatedBytes": 392
+    },
+    {
+      "method": "AcquireAsync+Release | Hayate Full",
+      "gated": true,
+      "meanNs": 265.730,
+      "stdDevNs": 11.6112,
+      "p50Ns": 269.2,
+      "p90Ns": 277.1,
+      "p95Ns": 281.1,
+      "p99Ns": 281.1,
+      "allocatedBytes": 392
+    },
+    {
+      "method": "Acquire+Release | MEOP (baseline)",
+      "gated": false,
+      "meanNs": 16.486,
+      "stdDevNs": 0.5101,
+      "p50Ns": 16.3,
+      "p90Ns": 17.3,
+      "p95Ns": 17.3,
+      "p99Ns": 17.3,
+      "allocatedBytes": 0
+    },
+    {
+      "method": "Acquire+Release | plain new (no-pool lower bound)",
+      "gated": false,
+      "meanNs": 7.899,
+      "stdDevNs": 0.6558,
+      "p50Ns": 7.7,
+      "p90Ns": 8.5,
+      "p95Ns": 8.9,
+      "p99Ns": 8.9,
+      "allocatedBytes": 0
+    },
+    {
+      "method": "Release | MEOP Return",
+      "gated": false,
+      "meanNs": 16.826,
+      "stdDevNs": 0.4756,
+      "p50Ns": 16.6,
+      "p90Ns": 17.4,
+      "p95Ns": 17.7,
+      "p99Ns": 17.7,
+      "allocatedBytes": 0
+    },
+    {
+      "method": "Concurrent-100 | MEOP",
+      "gated": false,
+      "excluded": true,
+      "exclusionReason": "High run-to-run variance; recorded for context only.",
+      "meanNs": 23678.670,
+      "stdDevNs": 739.7300,
+      "p50Ns": 23478.3,
+      "p90Ns": 25236.4,
+      "p95Ns": 25236.4,
+      "p99Ns": 25236.4,
+      "allocatedBytes": 4434
+    },
+    {
+      "method": "Concurrent-100 | Hayate Lean",
+      "gated": false,
+      "excluded": true,
+      "exclusionReason": "High run-to-run variance; recorded for context only.",
+      "meanNs": 1356132.930,
+      "stdDevNs": 734397.5494,
+      "allocatedBytes": 46786
+    },
+    {
+      "method": "Concurrent-100 | Hayate Sharded4",
+      "gated": false,
+      "excluded": true,
+      "exclusionReason": "High run-to-run variance; recorded for context only.",
+      "meanNs": 287206.348,
+      "stdDevNs": 220332.9960,
+      "allocatedBytes": 46529
+    }
+  ]
+}

@@ -1,0 +1,136 @@
+name: Publish to NuGet
+
+# Publishes every package under src/ to nuget.org.
+#
+# Trigger : push a tag such as `v2.6.0`, or run manually (workflow_dispatch).
+# Auth    : repository secret NUGET_API_KEY (nuget.org API key).
+#           The nuget.org profile / package owner is `AlexLEWIS`.
+#           The key is stored only in GitHub Secrets and never committed.
+#
+# The local `scripts/Release.bat` is kept as an offline fallback; CI is the
+# primary publishing channel from 2.6 onward.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+-*'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g. 2.6). Must match asset/version.props.'
+        required: true
+        type: string
+
+concurrency:
+  group: nuget-publish
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  CONFIGURATION: Release
+  NUGET_SOURCE: https://api.nuget.org/v3/index.json
+  PACKAGE_OUTPUT: nuget_packages
+
+jobs:
+  publish:
+    name: Pack and push
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          props_major=$(grep -oP '(?<=<VersionMajor>)[^<]+' asset/version.props)
+          props_minor=$(grep -oP '(?<=<VersionMinor>)[^<]+' asset/version.props)
+          props_patch=$(grep -oP '(?<=<VersionPatch>)[^<]+' asset/version.props)
+          props_full="${props_major}.${props_minor}.${props_patch}"
+          props_short="${props_major}.${props_minor}"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            requested="${{ github.event.inputs.version }}"
+          else
+            requested="${GITHUB_REF_NAME#v}"
+          fi
+
+          echo "asset/version.props = ${props_full}"
+          echo "requested           = ${requested}"
+
+          # Tag convention in this repository is two-part (v2.1, v2.2, ...); accept both
+          # `2.6` and `2.6.0`, and require the patch component to match when supplied.
+          case "${requested}" in
+            "${props_full}") ;;
+            "${props_short}") ;;
+            *)
+              echo "::error::Requested version '${requested}' does not match asset/version.props '${props_full}'."
+              exit 1
+              ;;
+          esac
+
+          echo "value=${props_full}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore
+        run: dotnet restore HayateOP.slnx --source ${{ env.NUGET_SOURCE }}
+
+      - name: Build (Release)
+        run: dotnet build HayateOP.slnx -c ${{ env.CONFIGURATION }} --no-restore
+
+      - name: Run main test suite (gate)
+        shell: bash
+        run: ./tests/HayateOP.Tests/bin/Release/net10.0/HayateOP.Tests.exe
+
+      - name: Pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ env.PACKAGE_OUTPUT }}"
+          for proj in src/*/*.csproj; do
+            echo "::group::pack ${proj}"
+            dotnet pack "${proj}" -c ${{ env.CONFIGURATION }} -o "${{ env.PACKAGE_OUTPUT }}" --no-restore
+            echo "::endgroup::"
+          done
+          echo "Produced:"
+          ls -1 "${{ env.PACKAGE_OUTPUT }}"
+
+      - name: Push to nuget.org
+        shell: bash
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NUGET_API_KEY:-}" ]; then
+            echo "::error::Secret NUGET_API_KEY is not configured."
+            exit 1
+          fi
+          find "${{ env.PACKAGE_OUTPUT }}" -name '*.nupkg' -o -name '*.snupkg' | while read -r pkg; do
+            echo "::group::push ${pkg}"
+            dotnet nuget push "${pkg}" \
+              --source "${{ env.NUGET_SOURCE }}" \
+              --api-key "${NUGET_API_KEY}" \
+              --skip-duplicate
+            echo "::endgroup::"
+          done
+
+      - name: Upload packages as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg-${{ steps.version.outputs.value }}
+          path: ${{ env.PACKAGE_OUTPUT }}/*.*nupkg
+          if-no-files-found: warn
+          retention-days: 30

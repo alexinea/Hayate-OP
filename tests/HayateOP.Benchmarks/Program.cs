@@ -1,15 +1,18 @@
-﻿// M1 — HayateOP 标准 BenchmarkDotNet 编排（2.5 / P3）
+﻿// HayateOP standard BenchmarkDotNet orchestration.
 //
-// 覆盖矩阵（Acquire / Release / AcquireAsync 全路径）：
-//   · 被测实现：HayateOP Lean（全功能关闭）/ Sharded4（仅分片）/ Full（全功能）
-//   · 对照基线：Microsoft.Extensions.ObjectPool（MEOP，Baseline）+ 原生 `new`（无池，分配口径下界）
-//   · 异步维度：MEOP / 原生无异步 API，标注 N/A（不在编排内出现）
-//   · 并发维度：100 线程 Parallel.For 借还（吞吐 + 争用）
+// Coverage matrix (full Acquire / Release / AcquireAsync paths):
+//   * implementations under test : HayateOP Lean (all features off) / Sharded4 (sharding only) / Full
+//   * reference baselines        : Microsoft.Extensions.ObjectPool (MEOP, Baseline) + plain `new` (no pool, allocation lower bound)
+//   * async dimension            : MEOP and plain `new` expose no async API -> N/A (not present in the matrix)
+//   * concurrency dimension      : 100-thread Parallel.For borrow/return (throughput + contention)
 //
-// 统计口径：BDN 内置统计列（Mean/Median/StdDev/Min/Max）+ 自定义 P50/P90/P95/P99 分位列
-//   （由各迭代平均耗时计算，规避 BDN 无 P99 内置列的缺口）；MemoryDiagnoser 提供 B/Op 分配口径。
-// 运行：dotnet run -c Release -- --filter '*'   （不带 filter 时运行本类全部基准）
-// 报告：BenchmarkDotNet.Artifacts/results/*-report-github.md（MarkdownExporter）
+// Statistics: built-in BenchmarkDotNet columns (Mean / Median / StdDev / Min / Max) plus custom
+//   P50 / P90 / P95 / P99 percentile columns (computed from the per-iteration mean time), because
+//   BenchmarkDotNet ships no built-in P99 column. MemoryDiagnoser supplies the bytes-per-operation column.
+//
+// Run     : dotnet run -c Release -- --filter '*'
+// Report  : BenchmarkDotNet.Artifacts/results/*-report-github.md (MarkdownExporter)
+//           BenchmarkDotNet.Artifacts/results/*-report.csv         (CsvExporter, consumed by scripts/bench-compare.py)
 
 using System.Globalization;
 using BenchmarkDotNet.Attributes;
@@ -17,6 +20,8 @@ using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Exporters;
+using BenchmarkDotNet.Exporters.Csv;
+using BenchmarkDotNet.Exporters.Json;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Mathematics;
 using BenchmarkDotNet.Reports;
@@ -27,33 +32,34 @@ using Microsoft.Extensions.ObjectPool;
 BenchmarkRunner.Run<HayateOpBenchmarks>(args: args);
 
 /// <summary>
-/// M1：HayateOP 头对头基准编排。
+/// Head-to-head benchmark matrix for HayateOP.
 /// </summary>
 [Config(typeof(BenchConfig))]
 [MemoryDiagnoser]
 [ThreadingDiagnoser]
 public class HayateOpBenchmarks
 {
-    /// <summary>被池化对象（与既有 T11 基准同构，保证历史数据可比较）。</summary>
+    /// <summary>Pooled object, kept structurally identical to the historical benchmark so data stays comparable.</summary>
     public class PooledObject
     {
         public int Data { get; set; }
         public void Reset() => Data = 0;
     }
 
-    // 容量配比说明（防 GlobalSetup 卡死）：Hayate 极简/分片池 autoScaling=false，
-    // 池空不自动创建。Min=250 保证并发套（100 线程借还）仍有 ≥100 空闲对象可用，
-    // 绝不触发 Block 等待（对齐 T11 既有口径，保证与历史基线可比）。
+    // Capacity sizing (prevents GlobalSetup from stalling): the Hayate lean/sharded pools are built with
+    // auto-scaling disabled, so an empty pool does not create objects on demand. Min = 250 keeps at least
+    // 100 idle objects available for the concurrent suite (100 borrowing threads), so a blocking wait is
+    // never triggered. This matches the historical benchmark so results remain comparable.
     private const int MinPoolSize = 250;
     private const int MaxPoolSize = 300;
     private const int ThreadCount = 100;
-    private const int ReleaseSlots = 32;      // Release 套的借出槽位（2 的幂，取模免分支）
+    private const int ReleaseSlots = 32;      // borrow slots of the release suite (power of two, branch-free modulo)
 
     private class BenchConfig : ManualConfig
     {
         public BenchConfig()
         {
-            // 短迭代 Job：3 预热 + 10 迭代，防长跑挂起
+            // Short job: 3 warmup + 10 iterations, keeps a full run bounded.
             AddJob(Job.Default
                 .WithWarmupCount(3)
                 .WithIterationCount(10)
@@ -70,14 +76,16 @@ public class HayateOpBenchmarks
             AddColumn(RankColumn.Arabic);
             AddColumn(BaselineRatioColumn.RatioMean);
             AddExporter(MarkdownExporter.GitHub);
+            AddExporter(CsvExporter.Default);
+            AddExporter(JsonExporter.Full);
         }
     }
 
-    // ── 被测池 ──────────────────────────────────────────────
-    private ObjectPool<PooledObject> _meop = null!;                   // MEOP 对照（Baseline）
-    private IHayateObjectPool<PooledObject> _lean = null!;            // 全功能关闭
-    private IHayateObjectPool<PooledObject> _sharded4 = null!;        // 仅 4 分片
-    private IHayateObjectPool<PooledObject> _full = null!;            // 全功能开启
+    // ── Pools under test ─────────────────────────────────────
+    private ObjectPool<PooledObject> _meop = null!;                   // MEOP reference (Baseline)
+    private IHayateObjectPool<PooledObject> _lean = null!;            // all features off
+    private IHayateObjectPool<PooledObject> _sharded4 = null!;        // 4 shards only
+    private IHayateObjectPool<PooledObject> _full = null!;            // all features on
 
     private int _releaseCursor;
 
@@ -128,7 +136,7 @@ public class HayateOpBenchmarks
             .WithEnableMetrics(true)
             .Build();
 
-        // 预热到 MaxPoolSize（借满再归还，触达登记 / 扩容路径），保证稳态取还不触发创建
+        // Warm up to MaxPoolSize (borrow fully, then return) so the steady state never hits the create path.
         for (var i = 0; i < MaxPoolSize; i++) _meop.Return(_meop.Get());
         for (var i = 0; i < MaxPoolSize; i++) _lean.Release(_lean.Acquire());
         for (var i = 0; i < MaxPoolSize; i++) _sharded4.Release(_sharded4.Acquire());
@@ -143,9 +151,10 @@ public class HayateOpBenchmarks
         _full.Dispose();
     }
 
-    // ── 套 1：Acquire+Release 单线程（全部实现并列对照） ──────
+    // ── Suite 1: single-threaded Acquire+Release (all implementations side by side) ──
 
-    [Benchmark(Baseline = true, Description = "Acquire+Release | MEOP（基线）")]
+    [Benchmark(Baseline = true, Description = "Acquire+Release | MEOP (baseline)")]
+    [BenchmarkCategory("reference")]
     public void Meop_AcquireRelease()
     {
         var obj = _meop.Get();
@@ -153,7 +162,8 @@ public class HayateOpBenchmarks
         _meop.Return(obj);
     }
 
-    [Benchmark(Description = "Acquire+Release | 原生 new（无池下界）")]
+    [Benchmark(Description = "Acquire+Release | plain new (no-pool lower bound)")]
+    [BenchmarkCategory("reference")]
     public PooledObject Native_New()
     {
         var obj = new PooledObject();
@@ -162,6 +172,7 @@ public class HayateOpBenchmarks
     }
 
     [Benchmark(Description = "Acquire+Release | Hayate Lean")]
+    [BenchmarkCategory("hot")]
     public void Hayate_Lean_AcquireRelease()
     {
         var obj = _lean.Acquire();
@@ -170,6 +181,7 @@ public class HayateOpBenchmarks
     }
 
     [Benchmark(Description = "Acquire+Release | Hayate Sharded4")]
+    [BenchmarkCategory("hot")]
     public void Hayate_Sharded_AcquireRelease()
     {
         var obj = _sharded4.Acquire();
@@ -178,6 +190,7 @@ public class HayateOpBenchmarks
     }
 
     [Benchmark(Description = "Acquire+Release | Hayate Full")]
+    [BenchmarkCategory("hot")]
     public void Hayate_Full_AcquireRelease()
     {
         var obj = _full.Acquire();
@@ -185,9 +198,10 @@ public class HayateOpBenchmarks
         _full.Release(obj);
     }
 
-    // ── 套 2：Release 路径（归还 + 立即补位，借出集恒定） ──────
+    // ── Suite 2: Release path (return + immediate re-borrow, borrow set held constant) ──
 
     [Benchmark(Description = "Release | MEOP Return")]
+    [BenchmarkCategory("reference")]
     public void Meop_Release()
     {
         var obj = _meop.Get();
@@ -195,15 +209,17 @@ public class HayateOpBenchmarks
     }
 
     [Benchmark(Description = "Release | Hayate Lean")]
+    [BenchmarkCategory("hot")]
     public void Hayate_Lean_Release()
     {
         var obj = _lean.Acquire();
         _lean.Release(obj);
     }
 
-    // ── 套 3：AcquireAsync 全路径（MEOP / 原生无异步 API → N/A） ──
+    // ── Suite 3: full AcquireAsync path (MEOP / plain new have no async API -> N/A) ──
 
     [Benchmark(Description = "AcquireAsync+Release | Hayate Lean")]
+    [BenchmarkCategory("hot")]
     public async Task Hayate_Lean_AcquireReleaseAsync()
     {
         var obj = await _lean.AcquireAsync();
@@ -212,6 +228,7 @@ public class HayateOpBenchmarks
     }
 
     [Benchmark(Description = "AcquireAsync+Release | Hayate Full")]
+    [BenchmarkCategory("hot")]
     public async Task Hayate_Full_AcquireReleaseAsync()
     {
         var obj = await _full.AcquireAsync();
@@ -219,9 +236,10 @@ public class HayateOpBenchmarks
         _full.Release(obj);
     }
 
-    // ── 套 4：并发 100 线程借还（争用口径） ────────────────────
+    // ── Suite 4: 100-thread concurrent borrow/return (contention profile) ──
 
     [Benchmark(Description = "Concurrent-100 | MEOP")]
+    [BenchmarkCategory("concurrent")]
     public void Meop_Concurrent100()
     {
         Parallel.For(0, ThreadCount, _ =>
@@ -233,6 +251,7 @@ public class HayateOpBenchmarks
     }
 
     [Benchmark(Description = "Concurrent-100 | Hayate Lean")]
+    [BenchmarkCategory("concurrent")]
     public void Hayate_Lean_Concurrent100()
     {
         Parallel.For(0, ThreadCount, _ =>
@@ -244,6 +263,7 @@ public class HayateOpBenchmarks
     }
 
     [Benchmark(Description = "Concurrent-100 | Hayate Sharded4")]
+    [BenchmarkCategory("concurrent")]
     public void Hayate_Sharded_Concurrent100()
     {
         Parallel.For(0, ThreadCount, _ =>
@@ -254,11 +274,12 @@ public class HayateOpBenchmarks
         });
     }
 
-    // ── 自定义分位列（BDN 无内置 P99 列；由各迭代平均耗时计算） ──
+    // ── Custom percentile column (BenchmarkDotNet ships no built-in P99 column) ──
 
     /// <summary>
-    /// M1：分位延迟列。数据源为 <see cref="BenchmarkReport.GetResultRuns"/>（正式迭代，排除预热与
-    /// 工作负载试验），按迭代平均耗时升序取分位点；无数据时输出 "NA"。
+    /// Percentile latency column. Values are taken from <see cref="BenchmarkReport.GetResultRuns"/>
+    /// (actual iterations only, excluding warmup and pilot runs), sorted ascending by per-iteration
+    /// mean time; emits "NA" when no runs are available.
     /// </summary>
     private sealed class PercentileColumn : IColumn
     {
@@ -272,7 +293,7 @@ public class HayateOpBenchmarks
 
         public string Id { get; }
         public string ColumnName => Id;
-        public string Legend => $"{Id} 分位延迟（各迭代平均耗时）";
+        public string Legend => $"{Id} percentile latency (per-iteration mean time)";
         public UnitType UnitType => UnitType.Time;
         public bool AlwaysShow => true;
         public ColumnCategory Category => ColumnCategory.Statistics;
@@ -294,7 +315,8 @@ public class HayateOpBenchmarks
             var runs = summary[benchmarkCase].GetResultRuns()?.ToList();
             if (runs is null || runs.Count == 0) return "NA";
 
-            // Measurement.Nanoseconds 为「单次迭代总耗时」，需除以迭代内操作数还原单操作口径
+            // Measurement.Nanoseconds is the total time of one iteration; divide by the operation count
+            // to restore the per-operation figure.
             var ordered = runs
                 .Select(r => r.Operations > 0 ? r.Nanoseconds / r.Operations : r.Nanoseconds)
                 .OrderBy(v => v)

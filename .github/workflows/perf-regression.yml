@@ -1,0 +1,78 @@
+name: Performance regression
+
+# Guards the hot path against silent performance regressions.
+#
+# Compares a fresh BenchmarkDotNet run of the `hot` category against the committed
+# baseline in docs/benchmarks/baseline/baseline.json (see that folder's README).
+#
+# Advisory by default: the job does not block regular pull requests
+# (continue-on-error). While the committed baseline is cross-environment
+# ("calibration": true) the results are indicative; once a CI-native baseline is
+# captured the gate can be tightened and promoted to a required check.
+
+on:
+  pull_request:
+    paths:
+      - 'src/HayateOP/**'
+      - 'tests/HayateOP.Benchmarks/**'
+      - 'docs/benchmarks/baseline/**'
+      - 'scripts/bench-compare.py'
+      - '.github/workflows/perf-regression.yml'
+  schedule:
+    - cron: '0 3 * * *'     # nightly, 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      update_baseline:
+        description: 'Emit a fresh CI baseline instead of gating'
+        type: boolean
+        default: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  NUGET_SOURCE: https://api.nuget.org/v3/index.json
+
+jobs:
+  perf:
+    name: Hot-path benchmark gate
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore tests/HayateOP.Benchmarks/HayateOP.Benchmarks.csproj --source ${{ env.NUGET_SOURCE }}
+
+      - name: Build benchmarks (Release)
+        run: dotnet build tests/HayateOP.Benchmarks/HayateOP.Benchmarks.csproj -c Release --no-restore
+
+      - name: Run hot-path benchmarks
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./tests/HayateOP.Benchmarks/bin/Release/net10.0/HayateOP.Benchmarks.exe --anyCategories hot
+
+      - name: Compare against baseline
+        if: ${{ github.event.inputs.update_baseline != 'true' }}
+        shell: bash
+        run: python scripts/bench-compare.py
+
+      - name: Emit fresh baseline (manual only)
+        if: ${{ github.event.inputs.update_baseline == 'true' }}
+        shell: bash
+        run: python scripts/bench-compare.py --emit-baseline
+
+      - name: Upload BenchmarkDotNet artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: BenchmarkDotNet.Artifacts/results/**
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,138 @@
+name: CI
+
+# Build + test on every push / pull request.
+# Mirrors the local verification matrix:
+#   - future suites  : tests/HayateOP.Tests        (net10.0 / net8.0, xunit v3 + Microsoft.Testing.Platform)
+#   - legacy suites  : tests/legacy/HayateOP.Tests.Legacy (net48 / net6.0 / net7.0, xunit v2 + VSTest)
+#   - extension suites: Compat / OpenTelemetry / DI / Configuration / Endpoints
+# The pressure suite is intentionally excluded (long-running, load sensitive).
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  CONFIGURATION: Release
+  # Restore from nuget.org only: the checked-in NuGet.config also lists private
+  # (author-hosted / myget) feeds that are not reachable from GitHub runners.
+  NUGET_SOURCE: https://api.nuget.org/v3/index.json
+
+jobs:
+  build:
+    name: Build (all TFMs)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore HayateOP.slnx --source ${{ env.NUGET_SOURCE }}
+
+      - name: Build (Release)
+        run: dotnet build HayateOP.slnx -c ${{ env.CONFIGURATION }} --no-restore
+
+  test-future:
+    name: Test future (net10.0 / net8.0)
+    runs-on: windows-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore tests/HayateOP.Tests/HayateOP.Tests.csproj --source ${{ env.NUGET_SOURCE }}
+
+      - name: Build
+        run: dotnet build tests/HayateOP.Tests/HayateOP.Tests.csproj -c ${{ env.CONFIGURATION }} --no-restore
+
+      # The future suite is a self-contained Microsoft.Testing.Platform executable;
+      # run the produced executable directly (do not rely on `dotnet test`).
+      - name: Run net10.0
+        shell: bash
+        run: ./tests/HayateOP.Tests/bin/Release/net10.0/HayateOP.Tests.exe
+
+      - name: Run net8.0
+        shell: bash
+        run: ./tests/HayateOP.Tests/bin/Release/net8.0/HayateOP.Tests.exe
+
+  test-legacy:
+    name: Test legacy (net48 / net6.0 / net7.0)
+    runs-on: windows-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            6.0.x
+            7.0.x
+
+      - name: Restore
+        run: dotnet restore tests/legacy/HayateOP.Tests.Legacy/HayateOP.Tests.Legacy.csproj --source ${{ env.NUGET_SOURCE }}
+
+      - name: Build
+        run: dotnet build tests/legacy/HayateOP.Tests.Legacy/HayateOP.Tests.Legacy.csproj -c ${{ env.CONFIGURATION }} --no-restore
+
+      # Legacy suite is xunit v2 + VSTest -> driven through `dotnet test`.
+      - name: Run net48
+        run: dotnet test tests/legacy/HayateOP.Tests.Legacy/HayateOP.Tests.Legacy.csproj -c ${{ env.CONFIGURATION }} --no-build -f net48 -v minimal
+
+      - name: Run net6.0
+        run: dotnet test tests/legacy/HayateOP.Tests.Legacy/HayateOP.Tests.Legacy.csproj -c ${{ env.CONFIGURATION }} --no-build -f net6.0 -v minimal
+
+      - name: Run net7.0
+        run: dotnet test tests/legacy/HayateOP.Tests.Legacy/HayateOP.Tests.Legacy.csproj -c ${{ env.CONFIGURATION }} --no-build -f net7.0 -v minimal
+
+  test-extensions:
+    name: Test extensions (${{ matrix.project }} / ${{ matrix.tfm }})
+    runs-on: windows-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { project: Compat,        tfm: net10.0 }
+          - { project: OpenTelemetry, tfm: net10.0 }
+          - { project: DI,            tfm: net10.0 }
+          - { project: Configuration, tfm: net10.0 }
+          - { project: Endpoints,     tfm: net10.0 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore tests/HayateOP.Tests.${{ matrix.project }}/HayateOP.Tests.${{ matrix.project }}.csproj --source ${{ env.NUGET_SOURCE }}
+
+      - name: Build
+        run: dotnet build tests/HayateOP.Tests.${{ matrix.project }}/HayateOP.Tests.${{ matrix.project }}.csproj -c ${{ env.CONFIGURATION }} --no-restore
+
+      - name: Run
+        shell: bash
+        run: ./tests/HayateOP.Tests.${{ matrix.project }}/bin/Release/${{ matrix.tfm }}/HayateOP.Tests.${{ matrix.project }}.exe
