@@ -1,26 +1,26 @@
-# HayateOP 2.5 / M1 — BenchmarkDotNet 基线报告（2026-09-10）
+# HayateOP 2.5  — BenchmarkDotNet baseline report (2026-09-10)
 
-> 目的：为 2.5 建立**可复现的头对头基线**，覆盖 Acquire / Release / AcquireAsync 全路径，
-> 对照 `Microsoft.Extensions.ObjectPool`（MEOP）与**原生 `new`**（无池下界），输出 P50/P90/P95/P99
-> 与分配口径（`B/Op`），供后续批次（M3 分配追踪、第四批 O1/O2 lean 存储重构）作回归对照。
+> Purpose: establish a **reproducible head-to-head baseline** for 2.5 covering the full Acquire / Release / AcquireAsync paths,
+> against `Microsoft.Extensions.ObjectPool` (MEOP) and **raw `new`** (no pool lower bound), reporting P50/P90/P95/P99
+> and allocation metrics (`B/Op`) for regression comparison with later work (allocation tracking and the lean-storage rework).
 
-## 一、运行环境与配置
+## 1. Runtime environment and configuration
 
-| 项 | 值 |
+| Item | Value |
 | :--- | :--- |
 | BenchmarkDotNet | 0.15.8 |
-| 运行时 | .NET 10.0.11（SDK 10.0.400），X64 RyuJIT x86-64-v3 |
-| 硬件 | 12th Gen Intel Core i7-1260P 2.10GHz，1 CPU / 16 逻辑核（12 物理核） |
-| Job | `Short`：WarmupCount=3、IterationCount=10、Server GC、Concurrent GC |
-| 诊断器 | `MemoryDiagnoser`（B/Op、Gen0/1/2）+ `ThreadingDiagnoser`（Completed Work Items、Lock Contentions） |
-| 分位列 | 自定义 `P50/P90/P95/P99`（按各迭代平均单操作耗时取分位；BDN 内置无 P99 列） |
-| 容量口径 | Min=250 / Max=300，预热至 MaxPoolSize（对齐历史 T11 基线，保证可比） |
-| 命令 | `dotnet run -c Release -- --filter '*'`（或直跑 `HayateOP.Benchmarks.exe --filter '*'`） |
+| Runtime | .NET 10.0.11(SDK 10.0.400), X64 RyuJIT x86-64-v3 |
+| Hardware | 12th Gen Intel Core i7-1260P 2.10GHz, 1 CPU / 16 logical cores (12 physical cores) |
+| Job | `Short`: WarmupCount=3, IterationCount=10, Server GC, Concurrent GC |
+| Diagnosers | `MemoryDiagnoser`(B/Op, Gen0/1/2) + `ThreadingDiagnoser` (Completed Work Items, Lock Contentions) |
+| Percentile columns | custom `P50/P90/P95/P99` (percentiles taken over each iteration's average per-op time; BDN has no built-in P99 column) |
+| Capacity basis | Min=250 / Max=300, warmed up to MaxPoolSize (aligned with the historical baseline for comparability) |
+| Command | `dotnet run -c Release -- --filter '*'` (or run `HayateOP.Benchmarks.exe --filter '*'` directly) |
 
-> **关于 `--join`**：BDN 0.15.8 **不存在** `--join` 开关（已核对 BenchmarkDotNet.dll 字面量）；
-> 计划书中该项为口径记录误差。分位数以自定义统计列直接输出，等价达成"输出 P50/P95/P99"的验收目标。
+> **On `--join`**: BDN 0.15.8 **has no** `--join` switch (verified against the BenchmarkDotNet.dll literals);
+> this item in the plan was a documentation error. Percentiles are emitted directly via the custom statistics columns, equivalently satisfying the "output P50/P95/P99" acceptance goal.
 
-## 二、结果（BDN MarkdownExporter 原文）
+## 2. Results (verbatim BDN MarkdownExporter output)
 
 ```
 BenchmarkDotNet v0.15.8, Windows 11 (10.0.28120.2824)
@@ -35,8 +35,8 @@ IterationCount=10  WarmupCount=3
 
 | Method | Mean | Error | StdDev | P50 | P90 | P95 | P99 | Median | Ratio | Rank | Gen0 | Completed Work Items | Lock Contentions | Allocated |
 |------------------------------------- |-----------------:|------------------:|----------------:|------------:|------------:|------------:|------------:|-----------------:|----------:|-----:|-------:|---------------------:|-----------------:|----------:|
-| 'Acquire+Release \| MEOP（基线）' | 16.486 ns | 0.8571 ns | 0.5101 ns | 16.3 | 17.3 | 17.3 | 17.3 | 16.266 ns | 1.00 | 2 | - | - | - | - |
-| 'Acquire+Release \| 原生 new（无池下界）' | 7.899 ns | 0.9915 ns | 0.6558 ns | 7.7 | 8.5 | 8.9 | 8.9 | 7.840 ns | 0.48 | 1 | 0.0007 | - | - | - |
+| 'Acquire+Release \| MEOP (baseline)' | 16.486 ns | 0.8571 ns | 0.5101 ns | 16.3 | 17.3 | 17.3 | 17.3 | 16.266 ns | 1.00 | 2 | - | - | - | - |
+| 'Acquire+Release \| raw new (no pool lower bound)' | 7.899 ns | 0.9915 ns | 0.6558 ns | 7.7 | 8.5 | 8.9 | 8.9 | 7.840 ns | 0.48 | 1 | 0.0007 | - | - | - |
 | 'Acquire+Release \| Hayate Lean' | 251.797 ns | 14.6346 ns | 9.6799 ns | 248.6 | 264.1 | 264.8 | 264.8 | 251.302 ns | 15.29 | 3 | 0.0100 | - | - | 384 B |
 | 'Acquire+Release \| Hayate Sharded4' | 254.981 ns | 16.6655 ns | 11.0232 ns | 249.8 | 268.6 | 272.8 | 272.8 | 252.719 ns | 15.48 | 3 | 0.0100 | - | - | 384 B |
 | 'Acquire+Release \| Hayate Full' | 363.850 ns | 22.0910 ns | 14.6118 ns | 369.2 | 376.4 | 379.9 | 379.9 | 371.371 ns | 22.09 | 4 | 0.0153 | - | - | - |
@@ -48,33 +48,33 @@ IterationCount=10  WarmupCount=3
 | 'Concurrent-100 \| Hayate Lean' | 1,356,132.930 ns | 1,110,304.3007 ns | 734,397.5494 ns | 1,123,691.0 | 2,171,564.5 | 2,521,680.5 | 2,521,680.5 | 1,242,241.406 ns | 82,329.74 | 7 | - | 31.6758 | - | 46,786 B |
 | 'Concurrent-100 \| Hayate Sharded4' | 287,206.348 ns | 333,112.0497 ns | 220,332.9960 ns | 127,663.2 | 533,381.3 | 700,995.2 | 700,995.2 | 128,472.070 ns | 17,436.07 | 6 | - | 30.5313 | 0.0977 | 46,529 B |
 
-> 原始 CSV 见同目录 `2026-09-10-m1-bdn-baseline.csv`。
-> 控制台输出中中文方法名在 GBK 控制台下会显示为乱码（既有环境问题）；Markdown/CSV 产物中的名称为 UTF-8 正常。
+> The raw CSV is in the same directory: `2026-09-10-m1-bdn-baseline.csv`.
+> Chinese method names in console output render as mojibake under a GBK console (a pre-existing environment issue); the names in the Markdown/CSV artifacts are normal UTF-8.
 
-## 三、关键结论
+## 3. Key conclusions
 
-1. **单操作（低争用）**：MEOP 16.5 ns / 0 B，原生 `new` 7.9 ns；Hayate Lean **251.8 ns / 384 B**（≈15.3× MEOP）。
-   与 2026-09-09 T11 基线（Hayate 极简 188.8 ns、全功能 304.7 ns）**同量级**，
-   证明 2.5 的 P1/P2 变更（M12/M13/M4/M11+/M18/M10+M20/M16/M15）**未引入单操作回归**。
-   该 15× 差距是**既有已知缺口**，正是第四批 **O1（无锁快路径）+ O2（包装对象去分配）** 的目标（P0）。
-2. **每操作 384 B 分配**：Lean 路径每 `Acquire+Release` 产生 384 B 托管分配（`HayateObject<T>` 包装器 +
-   分片链表节点 + 预约对象），对照 MEOP 的 0 B —— 即 O2 的核心动因。
-3. **异步开销可忽略**：`AcquireAsync+Release` Lean 254.0 ns，与同步 251.8 ns 基本持平
-   （392 B vs 384 B，差异为 async 状态机；对象已就绪时走同步快路径不产生额外等待）。
-4. **全功能成本**：Lean → Full 单操作 251.8 ns → 363.9 ns（+44%），来自校验/指标/泄漏检测/驱逐埋点；
-   对照 MEOP 仍为 22×。可作为 O6/O7「热路径成本标注」的量化依据。
-5. **并发（100 线程）**：MEOP 23.7 µs vs Hayate Sharded4 287 µs / Lean 1356 µs。
-   **本组数据方差极大**（Sharded4 StdDev 220 µs ≈ 均值 77%，Lean StdDev 734 µs），
-   并触发 BDN `MinIterationTime` 警告（迭代时长仅 38–56 ms，低于建议的 100 ms）。
-   结论：**短迭代 Job 不足以测定并发口径**，需以更长迭代（≥100 ms/迭代）单独复跑；
-   同时下一轮应评估 `Parallel.For` 的线程池抖动。**当前不建议引用并发列的绝对值**。
+1. **Single operation (low contention)**: MEOP 16.5 ns / 0 B, raw `new` 7.9 ns; Hayate Lean **251.8 ns / 384 B** (~15.3x MEOP).
+   Matching the 2026-09-09 baseline (Hayate minimal 188.8 ns, full-featured 304.7 ns) in the same order of magnitude,
+   this confirms the 2.5 changes introduced no single-operation regression.
+   This 15x gap is a known existing shortfall, and is precisely the goal of the fourth batch's lock-free fast path and wrapper-object allocation removal work (highest priority).
+2. **384 B allocation per operation**: the Lean path allocates 384 B of managed memory per `Acquire+Release` (`HayateObject<T>` wrapper +
+   sharded linked-list node + reserved object), compared with MEOP's 0 B - the core motivation for removing wrapper-object allocation.
+3. **Async overhead is negligible**: `AcquireAsync+Release` Lean 254.0 ns, essentially on par with the synchronous 251.8 ns
+   (392 B vs 384 B, the difference being the async state machine; when the object is ready the synchronous fast path is taken with no extra wait).
+4. **Full-feature cost**: Lean -> Full single operation 251.8 ns -> 363.9 ns (+44%), from validation/metrics/leak-detection/eviction instrumentation;
+   still ~22x versus MEOP. This quantifies the "hot-path cost annotation" work.
+5. **Concurrency (100 threads)**: MEOP 23.7 µs vs Hayate Sharded4 287 µs / Lean 1356 µs.
+   **This group has extremely high variance** (Sharded4 StdDev 220 µs ~= 77% of the mean, Lean StdDev 734 µs),
+   and triggers the BDN `MinIterationTime` warning (iteration time only 38-56 ms, below the recommended 100 ms).
+   Conclusion: a short-iteration Job is insufficient to measure the concurrency scope; a re-run with longer iterations (>=100 ms/iteration) is needed;
+   and the next round should evaluate `Parallel.For` thread-pool jitter. **Absolute values in the concurrency columns are not recommended for citation at this time**.
 
-## 四、复现与后续
+## 4. Reproduction and follow-up
 
-- 复现：`dotnet run -c Release --project tests/HayateOP.Benchmarks -- --filter '*'`，
-  产物在 `BenchmarkDotNet.Artifacts/results/`。
-- 后续（第四批）：
-  - O1/O2 落地后以本报告为基线对照，验收口径 = Lean 单操作延迟 / 分配对齐 MEOP 量级；
-  - O5（已并入 M1）/ N5 / O8 / T8 / C-B 需在本编排追加 MEOP 之外的对照列（marklauter / CHOPIN / POP / TP / CPL）；
-  - 并发列须改用长迭代 Job（或 `RunStrategy.Monitoring`）后重新建立基线。
-- M3（分配追踪）以本报告的 `B/Op` 列为权威口径，池侧 `EnableAllocationTracking` 仅作运行时抽样参考。
+- Reproduce: `dotnet run -c Release --project tests/HayateOP.Benchmarks -- --filter '*'`,
+  artifacts are in `BenchmarkDotNet.Artifacts/results/`.
+- Follow-up (fourth batch):
+  - After the lean-storage rework lands, use this report as the baseline; acceptance = Lean single-op latency / allocation aligned with MEOP's order of magnitude;
+  - Additional comparison columns beyond MEOP (marklauter / CHOPIN / POP / TP / CPL) must be added to this run for the other targets;
+  - The concurrency columns require a long-iteration Job (or `RunStrategy.Monitoring`) before re-establishing a baseline.
+- Allocation tracking uses this report's `B/Op` column as the authoritative scope; the pool's `EnableAllocationTracking` is only a runtime sampling reference.

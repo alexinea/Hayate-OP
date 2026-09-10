@@ -12,11 +12,11 @@ Console.InputEncoding = Encoding.UTF8;
 // HayateOP registration
 //   * AddHayatePoolSupport         -> core services (scaling strategy, metrics)
 //   * RegisterGlobalConfig         -> bind "HayatePool:Global" from config
-//   * RegisterHayatePool<T>(config)-> bind "HayatePool:Pools:MyBizObj" + DI注册
+//   * RegisterHayatePool<T>(config)-> bind "HayatePool:Pools:MyBizObj" + DI registration
 //   * RegisterHealthChecks<T>      -> ASP.NET Core health check integration
 //   * AddSingleton<IHayateMetrics, HayateDiagnostics>
 //                                  -> System.Diagnostics metrics bridge
-//                                     (T13 removed the RegisterDiagnostics<T> helper;
+//                                     (The RegisterDiagnostics<T> helper was removed;
 //                                      the later registration replaces the default
 //                                      EmptyHayateMetrics registered via TryAdd)
 // ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ app.UseHttpsRedirection();
 //   * POST /hayateop/{type}                -> update config
 //   * POST /hayateop/{type}/clear          -> clear pool
 // NOTE: the per-pool endpoints currently resolve {type} via reflection
-// (Type.GetType) and have a known limitation (tracked as T05). For reliable,
+// (Type.GetType) and have a known limitation. For reliable,
 // programmatic per-pool access prefer the DI-resolved IHayateObjectPool<T>
 // shown in the /test-hayateop endpoint below.
 app.MapHayatePoolEndpoints();

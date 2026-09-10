@@ -15,6 +15,6 @@ public class MyPooledObject : IHayateResettable, IDisposable
 
     public void Dispose()
     {
-        // 释放资源
+        // Release resources
     }
 }

@@ -18,7 +18,7 @@ public class CustomPolicy : IHayateObjectPolicy<MyPooledObject>
         item.Id = 0;
         item.Data = string.Empty;
 
-        // 通过 true 表示可以放回池，false 表示直接销毁
+        // Return true to return the object to the pool; return false to destroy it immediately.
         return true;
     }
 

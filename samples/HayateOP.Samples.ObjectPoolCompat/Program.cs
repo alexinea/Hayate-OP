@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // HayateOP.Extensions.ObjectPoolCompat sample
-// 演示 Microsoft.Extensions.ObjectPool（MEOP）调用方「一行切换」HayateOP 后端，
-// 以及 HayateCompatOptions 调优、DI 集成与反向适配（HayateObjectPoolAdapter）。
+// Demonstrates how Microsoft.Extensions.ObjectPool (MEOP) callers can switch to the HayateOP backend with a single line of code,
+// and how to tune HayateCompatOptions, integrate via DI, and the reverse adapter (HayateObjectPoolAdapter).
 // Build & run:  dotnet run --project samples/HayateOP.Samples.ObjectPoolCompat
 // ---------------------------------------------------------------------------
 using System.Text;
@@ -13,53 +13,53 @@ using Microsoft.Extensions.ObjectPool;
 Console.OutputEncoding = Encoding.UTF8;
 
 // ---------------------------------------------------------------------------
-// 0. 策略：直接复用 MEOP 内置的 StringBuilderPooledObjectPolicy（官方文档同款：
-//    Create 指定初始容量；Return 清空重置、超大对象拒绝回池）。
-//    自定义 IPooledObjectPolicy<T> 同样零改动可用——兼容池经
-//    HayateCompatPooledObjectPolicy<T> 把 Create/Return 钩子映射到 HayateOP 的
-//    Create/OnRelease 语义。
+// 0. Strategy: reuse the built-in MEOP StringBuilderPooledObjectPolicy (the same one from the official docs:
+//    Create sets the initial capacity; Return clears and resets the object, and oversized objects are rejected from the pool).
+//    Custom IPooledObjectPolicy<T> implementations also work unchanged — the compat pool
+//    uses HayateCompatPooledObjectPolicy<T> to map the Create/Return hooks to HayateOP's
+//    Create/OnRelease semantics.
 // ---------------------------------------------------------------------------
-Console.WriteLine("=== 0. MEOP 风格策略（IPooledObjectPolicy<T>） ===");
+Console.WriteLine("=== 0. MEOP-style policy (IPooledObjectPolicy<T>) ===");
 var sbPolicy = new StringBuilderPooledObjectPolicy();
-Console.WriteLine($"   策略：StringBuilderPooledObjectPolicy（InitialCapacity={sbPolicy.InitialCapacity}, MaximumRetainedCapacity={sbPolicy.MaximumRetainedCapacity}）");
+Console.WriteLine($"   Policy: StringBuilderPooledObjectPolicy (InitialCapacity={sbPolicy.InitialCapacity}, MaximumRetainedCapacity={sbPolicy.MaximumRetainedCapacity})");
 
 // ---------------------------------------------------------------------------
-// 1. 切换前基线：DefaultObjectPoolProvider（原生 MEOP 行为）
+// 1. Baseline before switching: DefaultObjectPoolProvider (native MEOP behavior)
 // ---------------------------------------------------------------------------
-Console.WriteLine("=== 1. 切换前：DefaultObjectPoolProvider（MEOP 基线） ===");
+Console.WriteLine("=== 1. Before switching: DefaultObjectPoolProvider (MEOP baseline) ===");
 DemoPool("MEOP", new DefaultObjectPoolProvider().Create(sbPolicy));
 
 // ---------------------------------------------------------------------------
-// 2. 一行切换：new DefaultObjectPoolProvider() -> new HayateObjectPoolCompatProvider()
-//    Get/Return 调用方代码零改动，池后端变为 HayateOP（分片、统计、可观测等能力随包携带）。
+// 2. One-line switch: new DefaultObjectPoolProvider() -> new HayateObjectPoolCompatProvider()
+//    The Get/Return caller code is unchanged; the pool backend becomes HayateOP (sharding, statistics, observability, etc. ship with the package).
 // ---------------------------------------------------------------------------
-Console.WriteLine("=== 2. 一行切换：HayateObjectPoolCompatProvider ===");
+Console.WriteLine("=== 2. One-line switch: HayateObjectPoolCompatProvider ===");
 DemoPool("HayateOP", new HayateObjectPoolCompatProvider().Create(sbPolicy));
-Console.WriteLine("   ↑ 冷池首次借出 ≈ AcquireTimeout（默认 1s）——HayateOP 的 CreateNew 语义是" +
-                  "「等满超时后创建」（与 MEOP 空池立即创建不同，详见 HayateCompatOptions 注释）。" +
-                  "用 §3 的 MinSize 预热或缩短 AcquireTimeout 消除。");
+Console.WriteLine("   - On a cold pool, the first borrow can wait up to AcquireTimeout (default 1s); HayateOP's CreateNew semantics are: " +
+                  "create-after-timeout (unlike MEOP, which creates immediately on an empty pool; see the HayateCompatOptions comments). " +
+                  "Use the MinSize warm-up from section 3, or shorten AcquireTimeout, to eliminate this wait.");
 
 // ---------------------------------------------------------------------------
-// 3. 参数调优：HayateCompatOptions
-//    - MinSize 预热：规避冷池首次借出的 AcquireTimeout 等待（HayateOP 的
-//      CreateNew 语义是「等满超时后创建」，与 MEOP「空池立即创建」存在差异）；
-//    - AcquireTimeout 缩短：降低冷启动延迟上限；
-//    - PoolNamePrefix：池名前缀，便于观测与运维辨识来源。
+// 3. Tuning parameters: HayateCompatOptions
+//    - MinSize warm-up: avoids the AcquireTimeout wait on the cold pool's first borrow (HayateOP's
+//      CreateNew semantics are create-after-timeout, which differs from MEOP's create-immediately-on-empty-pool);
+//    - Shorten AcquireTimeout: lowers the cold-start latency cap;
+//    - PoolNamePrefix: a prefix for pool names, making them easier to identify for observability and operations.
 // ---------------------------------------------------------------------------
-Console.WriteLine("=== 3. HayateCompatOptions 调优（MinSize=2 预热 + AcquireTimeout=100ms） ===");
+Console.WriteLine("=== 3. HayateCompatOptions tuning (MinSize=2 warm-up + AcquireTimeout=100ms) ===");
 var tunedProvider = new HayateObjectPoolCompatProvider(new HayateCompatOptions
 {
     PoolNamePrefix = "MyBiz.HayateCompat.",
-    MinSize = 2,                                   // 预热 2 个对象，消除冷启动延迟
+    MinSize = 2,                                   // Warm up 2 objects to eliminate cold-start latency
     AcquireTimeout = TimeSpan.FromMilliseconds(100)
 });
 DemoPool("Tuned", tunedProvider.Create(sbPolicy));
 
 // ---------------------------------------------------------------------------
-// 4. DI 集成：注册 ObjectPoolProvider 单例，消费者注入 ObjectPool<T>。
-//    业务代码与 MEOP 下的注册方式完全一致，仅替换 provider 实例这一处。
+// 4. DI integration: register ObjectPoolProvider as a singleton, inject ObjectPool<T> into consumers.
+//    The registration in business code is identical to MEOP; only the provider instance is swapped here.
 // ---------------------------------------------------------------------------
-Console.WriteLine("=== 4. DI 集成（ServiceCollection） ===");
+Console.WriteLine("=== 4. DI integration (ServiceCollection) ===");
 var services = new ServiceCollection();
 services.AddSingleton<ObjectPoolProvider>(new HayateObjectPoolCompatProvider(new HayateCompatOptions
 {
@@ -74,20 +74,20 @@ var diSb = diPool.Get();
 try
 {
     diSb.Append("from DI");
-    Console.WriteLine($"   DI 注入池借出 -> \"{diSb}\"");
+    Console.WriteLine($"   DI-injected pool borrow -> \"{diSb}\"");
 }
 finally
 {
-    diPool.Return(diSb);   // 重置后回池
+    diPool.Return(diSb);   // Reset and return to the pool
 }
-Console.WriteLine("   消费者仅依赖 ObjectPool<StringBuilder>，后端可随时在 DI 注册处切换。");
+Console.WriteLine("   Consumers depend only on ObjectPool<StringBuilder>; the backend can be switched at any time in the DI registration.");
 
 // ---------------------------------------------------------------------------
-// 5. 反向适配：HayateObjectPoolAdapter<T>
-//    已有原生 HayateOP 池（分片/自动扩缩容/泄漏检测等全功能）时，
-//    可包装为 MEOP 的 ObjectPool<T>，供 MEOP 风格消费者使用。
+// 5. Reverse adapter: HayateObjectPoolAdapter<T>
+//    When you already have a native HayateOP pool (with full features like sharding, auto scaling, leak detection, etc.),
+//    you can wrap it as MEOP's ObjectPool<T> for use by MEOP-style consumers.
 // ---------------------------------------------------------------------------
-Console.WriteLine("=== 5. 反向适配：原生 HayateOP 池 -> ObjectPool<T> ===");
+Console.WriteLine("=== 5. Reverse adapter: native HayateOP pool -> ObjectPool<T> ===");
 using var nativePool = new HayatePoolBuilder<StringBuilder>()
     .WithPoolName("NativeHayateOP.SB")
     .WithMinSize(1)
@@ -102,7 +102,7 @@ var sb2 = adapted.Get();
 try
 {
     sb2.Append("adapted");
-    Console.WriteLine($"   经适配器借出 -> \"{sb2}\"（池内当前存活 {nativePool.GetStats().CurrentSize} 个对象）");
+    Console.WriteLine($"   Borrowed via adapter -> \"{sb2}\" (current live objects in pool: {nativePool.GetStats().CurrentSize})");
 }
 finally
 {
@@ -110,29 +110,29 @@ finally
 }
 
 Console.WriteLine();
-Console.WriteLine("全部演示完成。");
+Console.WriteLine("All demos completed.");
 
 // ---------------------------------------------------------------------------
-// 共用演示：同一套 Get/Return 代码路径跑在任意 ObjectPool<StringBuilder> 上。
+// Shared demo: the same Get/Return code path runs against any ObjectPool<StringBuilder>.
 // ---------------------------------------------------------------------------
 static void DemoPool(string label, ObjectPool<StringBuilder> pool)
 {
     var sw = System.Diagnostics.Stopwatch.StartNew();
-    var sb = pool.Get();            // 冷池首次借出：HayateOP 兼容池受 AcquireTimeout 影响
+    var sb = pool.Get();            // First borrow from a cold pool: the HayateOP compat pool is subject to AcquireTimeout
     try
     {
         sb.Append("hello from ").Append(label);
-        Console.WriteLine($"   借出（{sw.ElapsedMilliseconds}ms） -> \"{sb}\"");
+        Console.WriteLine($"   Borrowed ({sw.ElapsedMilliseconds}ms) -> \"{sb}\"");
     }
     finally
     {
-        pool.Return(sb);            // 策略 Return 钩子重置后回池
+        pool.Return(sb);            // The policy's Return hook resets it before returning to the pool
     }
 
-    var sb2 = pool.Get();           // 二次借出：命中池内空闲对象，无冷启动延迟
+    var sb2 = pool.Get();           // Second borrow: hits an idle object already in the pool, no cold-start latency
     try
     {
-        Console.WriteLine($"   二次借出（{sw.ElapsedMilliseconds}ms，已回池复用） -> \"{sb2}\"（容量已重置）");
+        Console.WriteLine($"   Second borrow ({sw.ElapsedMilliseconds}ms, reused from pool) -> \"{sb2}\"(capacity reset)");
     }
     finally
     {

@@ -172,9 +172,9 @@ cfgServices.AddHayatePoolSupport()
           .RegisterGlobalConfig(configuration)
           .RegisterHayatePool<MyPooledObject>(configuration);
 
-// T13 后：RegisterDiagnostics<T> 扩展已删除。System.Diagnostics 桥接改为直接注册
-// HayateDiagnostics（AddHayatePoolSupport 内部以 TryAddSingleton 注册默认 EmptyHayateMetrics，
-// 后注册者即成为生效的 IHayateMetrics）。
+// The RegisterDiagnostics<T> extension has been removed. The System.Diagnostics bridge is now registered directly as
+// HayateDiagnostics (AddHayatePoolSupport registers a default EmptyHayateMetrics via TryAddSingleton internally;
+// the later registration becomes the effective IHayateMetrics).
 cfgServices.AddSingleton<IHayateMetrics, HayateDiagnostics>();
 
 using var cfgProvider = cfgServices.BuildServiceProvider();
