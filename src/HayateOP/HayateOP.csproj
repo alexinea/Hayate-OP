@@ -13,9 +13,11 @@
 
     <Import Project="..\..\common.props" />
 
-    <!-- net48 兼容（S2）：仅本库追加，不动 common.props 以免波及测试与全部扩展 -->
+    <!-- net48 兼容（S2）+ netstandard2.0 轻量签名（M7）：
+         仅本库追加 TFM，不动 common.props 以免波及测试与全部扩展包。
+         netstandard2.0 缺失 API 按 #if 分叉约定处理（见 HayateObjectPool.cs）。 -->
     <PropertyGroup>
-        <TargetFrameworks>net48;$(TargetFrameworks)</TargetFrameworks>
+        <TargetFrameworks>netstandard2.0;net48;$(TargetFrameworks)</TargetFrameworks>
     </PropertyGroup>
 
     <PropertyGroup>
