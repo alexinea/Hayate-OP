@@ -128,6 +128,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private readonly HayateShardAffinityMode _affinityMode;
     private readonly Func<int> _customShardAffinity;
 
+    // M17：预热就绪信号。默认 false（构造期同步预热，借出零额外等待，与 2.4 一致）；
+    // true 时预热转后台执行，借出路径阻塞在 _warmupCompletion 上直到预热结束
+    // （含失败——信号必置位，不出现永久阻塞）。等待期内 L5 冷池自举让位。
+    private readonly bool _waitForWarmup;
+    private readonly TaskCompletionSource<object> _warmupCompletion;
+
     internal HayatePoolBasic(
         IHayateObjectPolicy<T> policy,
         HayatePoolOptions options,
@@ -181,7 +187,32 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             _shards[i] = new Shard(_options, i, shardMax, _logger);
         }
 
-        PreWarm();
+        _waitForWarmup = _options.WaitForWarmup;
+        if (_waitForWarmup)
+        {
+            var completion = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _warmupCompletion = completion;
+            // M17：预热转后台，构造立即返回；完成（含失败）后置位就绪信号。
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    PreWarm();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error during pool [{PoolName}] background pre-warming", _name);
+                }
+                finally
+                {
+                    completion.TrySetResult(null);
+                }
+            });
+        }
+        else
+        {
+            PreWarm();
+        }
 
         StartBackgroundTasks();
     }
@@ -248,6 +279,17 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         }
     }
 
+    /// <summary>
+    /// M17：预热就绪门。默认配置（<see cref="HayatePoolOptions.WaitForWarmup"/> = false）下
+    /// <c>_waitForWarmup</c> 为常量 false，热路径仅多一次可预测分支（JIT 可消除）；
+    /// 开启时阻塞至预热结束——信号在成功与失败路径均会置位，不会永久挂起。
+    /// </summary>
+    private void WaitForWarmupIfNeeded()
+    {
+        if (!_waitForWarmup) return;
+        _warmupCompletion.Task.GetAwaiter().GetResult();
+    }
+
     #endregion
 
     #region Core methods
@@ -261,6 +303,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     {
         if (timeout < TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be non-negative");
+
+        // M17：预热未完成时先等就绪（默认关闭 → 常量分支，零开销）
+        WaitForWarmupIfNeeded();
 
         var sw = ValueStopwatch.StartNew();
 
@@ -510,6 +555,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     public async Task<T> AcquireAsync(CancellationToken cancellationToken = default)
     {
+        // M17：预热未完成时先等就绪（默认关闭 → 常量分支，零开销）
+        if (_waitForWarmup) await _warmupCompletion.Task.ConfigureAwait(false);
+
         // M18：affinity 起始分片每次 AcquireAsync 仅求值一次（None 恒 0，零额外开销）。
         var affinityStart = _affinityMode == HayateShardAffinityMode.None ? 0 : SelectStartShardIndex();
 

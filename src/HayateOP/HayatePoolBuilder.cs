@@ -102,6 +102,16 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
+    /// 设置是否等待预热完成（M17）。<c>true</c> 时预热转后台执行，借出操作在预热完成前阻塞。
+    /// </summary>
+    /// <param name="wait">是否等待预热完成；默认 <c>false</c>（构造函数内同步预热，借出零额外等待）。</param>
+    public HayatePoolBuilder<T> WithWaitForWarmup(bool wait = true)
+    {
+        _options.WaitForWarmup = wait;
+        return this;
+    }
+
+    /// <summary>
     /// 设置容量告警阈值（M12）。使用率口径为「借出数 / MaxPoolSize」。
     /// </summary>
     /// <param name="warnAtRatio">警告阈值（0~1；0 表示禁用警告档）。</param>

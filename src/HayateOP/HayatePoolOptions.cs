@@ -474,6 +474,25 @@ public class HayatePoolOptions
 
     #endregion
 
+    #region 预热就绪（M17）
+
+    /// <summary>
+    /// 是否让预热在后台进行、并令借出操作等待预热完成。<br />
+    /// 默认值：<c>false</c>（与 2.4 及之前一致——构造期同步预热，借出不做额外等待）。
+    /// </summary>
+    /// <remarks>
+    /// 用途：<c>true</c> 时构造立即返回，<see cref="MinPoolSize"/> 的预热在后台线程完成；
+    /// 预热完成前所有 <c>Acquire</c> / <c>AcquireAsync</c> 阻塞在就绪信号上，保证调用方
+    /// 拿到对象时池已就绪（避免冷启动期大量创建开销落在首个业务请求上）。<br />
+    /// 特例：与 L5 冷池自举互斥——等待期内不会触发「池空同步创建」自举，自举让位于就绪信号；
+    /// 预热若失败，信号仍会置位（不永久阻塞），失败原因记录到日志。<br />
+    /// 边界：布尔开关。<br />
+    /// 推荐值区间：启动期可容忍少量延迟、且希望首请求零创建开销的服务建议开启。
+    /// </remarks>
+    public bool WaitForWarmup { get; set; } = false;
+
+    #endregion
+
     public HayatePoolOptions CopyTo()
     {
         var options = new HayatePoolOptions();
@@ -552,6 +571,9 @@ public class HayatePoolOptions
 
         // 统计指标
         options.EnableMetrics = this.EnableMetrics;
+
+        // 预热就绪（M17）
+        options.WaitForWarmup = this.WaitForWarmup;
 
         return options;
     }
