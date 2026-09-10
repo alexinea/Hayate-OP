@@ -4,5 +4,23 @@
         <name>DotNetCore.HayateOP.Extensions.Configuration</name>
     </assembly>
     <members>
+        <member name="M:Microsoft.Extensions.DependencyInjection.ConfigurationExtensions.RegisterHayatePool``1(DotNetCore.HayateOP.IHayateServiceCollection,Microsoft.Extensions.Configuration.IConfiguration,System.String,System.String)">
+            <summary>
+            Registers a HayateOP pool driven by configuration.
+            </summary>
+            <param name="services">The Hayate service collection.</param>
+            <param name="configuration">The configuration root used to read pool options.</param>
+            <param name="poolName">Optional logical pool name; defaults to the type name of <typeparamref name="T"/>.</param>
+            <param name="configSectionPath">Configuration section path; defaults to "HayatePool".</param>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <exception cref="T:System.InvalidOperationException">Thrown when the merged pool configuration is invalid.</exception>
+            <example>
+            <code>
+            services.RegisterHayatePool&lt;MyConnection&gt;(configuration);
+            // or with an explicit name and section:
+            services.RegisterHayatePool&lt;MyConnection&gt;(configuration, poolName: "db", configSectionPath: "Pools");
+            </code>
+            </example>
+        </member>
     </members>
 </doc>

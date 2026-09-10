@@ -4,5 +4,33 @@
         <name>DotNetCore.HayateOP.Extensions.DependencyInjection</name>
     </assembly>
     <members>
+        <member name="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.AddHayatePoolSupport(Microsoft.Extensions.DependencyInjection.IServiceCollection)">
+            <summary>
+            Adds the core HayateOP services (scaling strategy and an empty metrics sink) so pools can be registered.
+            </summary>
+            <param name="services">The service collection.</param>
+            <returns>The Hayate service collection for further configuration.</returns>
+            <example>
+            <code>
+            services.AddHayatePoolSupport();
+            services.RegisterHayatePool&lt;MyConnection&gt;();
+            </code>
+            </example>
+        </member>
+        <member name="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.RegisterHayatePool``1(DotNetCore.HayateOP.IHayateServiceCollection,System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <summary>
+            Registers a HayateOP pool of type <typeparamref name="T"/> with the DI container.
+            </summary>
+            <param name="services">The Hayate service collection.</param>
+            <param name="configure">Optional callback to configure the pool options.</param>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <returns>The Hayate service collection for chaining.</returns>
+            <example>
+            <code>
+            services.AddHayatePoolSupport();
+            services.RegisterHayatePool&lt;MyConnection&gt;(opt =&gt; opt.MaxPoolSize = 64);
+            </code>
+            </example>
+        </member>
     </members>
 </doc>

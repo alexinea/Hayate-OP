@@ -6,245 +6,255 @@
     <members>
         <member name="T:DotNetCore.HayateOP.Common.HayateConstant">
             <summary>
-            Hayate 对象池的默认常量定义。
-            这些常量用于 <see cref="T:DotNetCore.HayateOP.HayatePoolOptions"/> 的默认配置值。
+            Default constant values for the Hayate object pool.
+            These constants provide the default configuration values used by <see cref="T:DotNetCore.HayateOP.HayatePoolOptions"/>.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_MIN_POOL_SIZE">
             <summary>
-            默认最小池容量（对应 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MinPoolSize"/>）。
+            Default minimum pool capacity (corresponds to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MinPoolSize"/>).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_MAX_POOL_SIZE">
             <summary>
-            默认最大池容量（对应 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/>）。
+            Default maximum pool capacity (corresponds to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/>).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_ACQUIRE_TIMEOUT_SECONDS">
             <summary>
-            默认获取超时时间，单位：秒（对应 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.DefaultAcquireTimeout"/>）。
+            Default acquire timeout, in seconds (corresponds to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.DefaultAcquireTimeout"/>).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_CREATION_RETRY_COUNT">
             <summary>
-            默认创建失败重试次数（对应 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.CreationRetryCount"/>）。
+            Default number of creation-retry attempts on failure (corresponds to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.CreationRetryCount"/>).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_CREATION_RETRY_DELAY_MILLISECONDS">
             <summary>
-            默认创建重试延迟，单位：毫秒（建议用于 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.CreationRetryDelay"/>）。
+            Default creation-retry delay, in milliseconds (recommended for <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.CreationRetryDelay"/>).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_SHARD_COUNT">
             <summary>
-            默认分片数量（对应 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ShardCount"/>）。
+            Default shard count (corresponds to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ShardCount"/>).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_SCALING_INTERVAL_MILLISECONDS">
             <summary>
-            默认伸缩检查间隔，单位：毫秒（对应 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ScalingIntervalMs"/>）。
+            Default scaling-check interval, in milliseconds (corresponds to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ScalingIntervalMs"/>).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_SCALE_UP_THRESHOLD">
             <summary>
-            默认扩容阈值，范围 0~1（对应 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ScaleUpThreshold"/>）。
+            Default scale-up threshold, range 0~1 (corresponds to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ScaleUpThreshold"/>).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_SCALE_DOWN_THRESHOLD">
             <summary>
-            默认缩容阈值，范围 0~1（对应 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ScaleDownThreshold"/>）。
+            Default scale-down threshold, range 0~1 (corresponds to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ScaleDownThreshold"/>).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_SCALE_DOWN_STEP">
             <summary>
-            默认缩容步长（每次缩容时减少的对象数）。默认与 <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_SCALE_UP_STEP"/> 保持一致，
-            业务侧可根据缩容保守度自行调小。
+            Default scale-down step (number of objects removed per scale-down). Defaults to the same value as
+            <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_SCALE_UP_STEP"/>; callers may lower it to make scale-down more conservative.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_VALIDATE_INTERVAL_MILLISECONDS">
             <summary>
-            默认校验扫描间隔，单位：毫秒（对应 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ValidateIntervalMs"/>）。
+            Default validation-scan interval, in milliseconds (corresponds to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ValidateIntervalMs"/>).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_MAX_LIFE_TIME_MINUTES">
             <summary>
-            默认对象最大存活时间，单位：分钟（对应 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/>）。
+            Default maximum object lifetime, in minutes (corresponds to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/>).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_MAX_IDLE_TIME_MINUTES">
             <summary>
-            默认对象最大空闲时间，单位：分钟（对应 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxIdleTime"/>）。
+            Default maximum object idle time, in minutes (corresponds to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxIdleTime"/>).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_MIN_EVICTION_IDLE_TIME_MINUTES">
             <summary>
-            默认软最小可驱逐空闲时间，单位：分钟（对应 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.SoftMinEvictableIdleTime"/>）。
+            Default soft-minimum evictable idle time, in minutes (corresponds to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.SoftMinEvictableIdleTime"/>).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_EVICTION_INTERVAL_MILLISECONDS">
             <summary>
-            默认驱逐检查间隔，单位：毫秒（对应 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EvictionIntervalMs"/>）。
+            Default eviction-check interval, in milliseconds (corresponds to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EvictionIntervalMs"/>).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_EVICTION_RUNS_PER_EVICTION">
             <summary>
-            默认每次驱逐检查的样本数量（对应 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.NumTestsPerEvictionRun"/>）。
+            Default number of samples tested per eviction run (corresponds to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.NumTestsPerEvictionRun"/>).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_GEN_THRESHOLD_MILLISECONDS">
             <summary>
-            默认代际升级阈值，单位：毫秒（对应 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.GenerationThresholdMs"/>）。
+            Default generation-promotion threshold, in milliseconds (corresponds to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.GenerationThresholdMs"/>).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_OLD_GEN_VALIDATION_INTERVAL">
             <summary>
-             默认老年代校验间隔，单位：次（对应 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.OldGenerationValidationInterval"/>）。
+            Default old-generation validation interval, in occurrences (corresponds to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.OldGenerationValidationInterval"/>).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_LEAK_DETECTION_THRESHOLD_SECONDS">
             <summary>
-            默认泄漏检测阈值常量，单位：秒（用于 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.LeakDetectionThreshold"/>）。
+            Default leak-detection threshold constant, in seconds (used by <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.LeakDetectionThreshold"/>).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_LEAK_TRACE_SAMPLE_RATE">
             <summary>
-            默认泄漏取证采样分母（用于 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.LeakTraceSampleRate"/>，仅 Sampled 模式生效）。
+            The default leak-trace sampling denominator (used by <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.LeakTraceSampleRate"/>; only effective in Sampled mode).
             </summary>
         </member>
         <member name="T:DotNetCore.HayateOP.Common.ValueStopwatch">
             <summary>
-            高性能的值类型秒表，用于精确测量时间间隔。
-            相比 <see cref="T:System.Diagnostics.Stopwatch"/> 类，<see cref="T:DotNetCore.HayateOP.Common.ValueStopwatch"/> 为值类型，
-            避免了堆分配，适合在高性能场景中频繁创建和使用。
+            High-performance value-type stopwatch for accurately measuring elapsed time intervals.
+            Unlike the <see cref="T:System.Diagnostics.Stopwatch"/> class, <see cref="T:DotNetCore.HayateOP.Common.ValueStopwatch"/> is a value type,
+            so it avoids heap allocation and is suitable for frequent creation and use in high-performance scenarios.
             </summary>
             <remarks>
-            该结构体不支持暂停和继续操作，只能用于测量从创建到现在的经过时间。
-            由于是值类型，应避免频繁的装箱操作。
+            This struct does not support pause or resume; it only measures the time elapsed from creation to the current moment.
+            Being a value type, frequent boxing should be avoided.
             </remarks>
             <example>
             <code>
-            // 基本用法：测量某个操作的执行时间
+            // Basic usage: measure the execution time of an operation.
             var sw = ValueStopwatch.StartNew();
             Thread.Sleep(100);
             var elapsed = sw.Elapsed;
-            Console.WriteLine($"执行时间: {elapsed.TotalMilliseconds} ms");
+            Console.WriteLine($"Elapsed: {elapsed.TotalMilliseconds} ms");
             
-            // 在性能关键路径中使用
+            // Use on performance-critical paths.
             var stopwatch = ValueStopwatch.StartNew();
             PerformanceTestOperation();
             if (stopwatch.Elapsed.TotalMilliseconds > 1000)
             {
-                Console.WriteLine("操作超时");
+                Console.WriteLine("Operation timed out");
             }
             </code>
             </example>
         </member>
         <member name="F:DotNetCore.HayateOP.Common.ValueStopwatch._start">
             <summary>
-            秒表启动时的时间戳。
+            The timestamp captured when the stopwatch started.
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.Common.ValueStopwatch.StartNew">
             <summary>
-            创建并启动一个新的 <see cref="T:DotNetCore.HayateOP.Common.ValueStopwatch"/> 实例。
+            Creates and starts a new <see cref="T:DotNetCore.HayateOP.Common.ValueStopwatch"/> instance.
             </summary>
-            <returns>已启动的 <see cref="T:DotNetCore.HayateOP.Common.ValueStopwatch"/> 实例。</returns>
+            <returns>The started <see cref="T:DotNetCore.HayateOP.Common.ValueStopwatch"/> instance.</returns>
         </member>
         <member name="M:DotNetCore.HayateOP.Common.ValueStopwatch.#ctor(System.Int64)">
             <summary>
-            使用指定的启动时间戳初始化 <see cref="T:DotNetCore.HayateOP.Common.ValueStopwatch"/> 实例。
+            Initializes a <see cref="T:DotNetCore.HayateOP.Common.ValueStopwatch"/> instance with the specified start timestamp.
             </summary>
-            <param name="start">启动时的时间戳。</param>
+            <param name="start">The start timestamp.</param>
         </member>
         <member name="P:DotNetCore.HayateOP.Common.ValueStopwatch.Elapsed">
             <summary>
-            获取从秒表启动到现在的经过时间。
+            Gets the time elapsed from when the stopwatch started to now.
             </summary>
-            <value>从启动到现在所经过的时间跨度。</value>
+            <value>The time span elapsed from start to now.</value>
         </member>
         <member name="T:DotNetCore.HayateOP.HayateEvictReason">
             <summary>
-            M15（2.5）：<see cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.Evict(DotNetCore.HayateOP.HayateEvictReason)"/> 的分类驱逐依据。
+            The categorization basis for <see cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.Evict(DotNetCore.HayateOP.HayateEvictReason)"/>.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayateEvictReason.Touched">
             <summary>
-            曾被借出使用过的空闲对象（LeaseCount &gt; 0）——「用过即清」，适合对象内聚状态
-            难以可靠重置的场景。
+            An idle object that has been borrowed before (LeaseCount &gt; 0) -- "used once, then cleared", suited to objects whose cohesive state
+            is hard to reset reliably.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayateEvictReason.Idle">
             <summary>
-            空闲时长超过 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxIdleTime"/> 的对象（与后台驱逐的
-            idle-too-long 判定同口径）。
+            An object whose idle time exceeds <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxIdleTime"/> (same criterion as the background eviction's
+            idle-too-long check).
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayateEvictReason.Expired">
             <summary>
-            存活时长超过 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/> 的对象（与后台驱逐的
-            expired 判定同口径）。
+            An object whose lifetime exceeds <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/> (same criterion as the background eviction's
+            expired check).
             </summary>
         </member>
         <member name="T:DotNetCore.HayateOP.HayateLeakTraceCaptureMode">
             <summary>
-             泄漏检测取证模式（PR-D L1：取证与检测解耦）。
-             泄漏检测本身（阈值判定 + LeakCount 计数）只依赖借出时间戳，零取证开销；
-             调用栈捕获由本模式独立控制，默认关闭。
+            The leak-detection capture mode (decoupling evidence capture from leak detection itself).
+            Leak detection (threshold check + LeakCount counter) relies only on the borrow timestamp and
+            incurs no capture overhead; stack-frame capture is controlled independently by this mode and is
+            off by default.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.Off">
             <summary>
-             不抓取调用栈（2.1 起默认）。
-             借出热路径零取证开销；LeakTraces 中对应条目为占位文案。
-             2.0 及之前默认每次借出抓取全栈（数十微秒 CPU / 10~40KB 分配），如需旧行为请显式选择 <see cref="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.EveryAcquire"/>。
+            Do not capture the call stack (default since 2.1).
+            Zero capture overhead on the borrow hot path; the corresponding entry in LeakTraces is a placeholder.
+            Before 2.0 the default was to capture the full stack on every borrow (tens of microseconds CPU / 10~40KB allocation); opt in explicitly via <see cref="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.EveryAcquire"/> for the old behavior.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.Sampled">
             <summary>
-             采样抓栈：每 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.LeakTraceSampleRate"/> 次借出抓取 1 次调用栈（第 1 次必抓）。
-             适合"既要发现泄漏、又要大概率定位"的场景，开销约为 <see cref="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.EveryAcquire"/> 的 1/N。
+            Sampled capture: capture the call stack on 1 of every <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.LeakTraceSampleRate"/> borrows (the first borrow is always captured).
+            Suits scenarios that want both leak discovery and high-probability localization; the overhead is roughly 1/N of <see cref="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.EveryAcquire"/>.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.EveryAcquire">
             <summary>
-             每次借出均抓取调用栈（2.0 及之前的旧行为）。
-             仅诊断场景显式开启：调用链深时单次开销 10~40KB 分配、微秒级 CPU。
+            Capture the call stack on every borrow (the old behavior before 2.0).
+            Enable only for diagnostics: when the call chain is deep, a single capture costs 10~40KB allocation and microseconds of CPU.
             </summary>
         </member>
         <member name="T:DotNetCore.HayateOP.HayateLeaseContext">
             <summary>
-            M16（2.5，breaking）：借出租约上下文。
+            Borrow lease context (2.5, breaking change).
             <para>
-            一次借出对应一个不可变租约上下文：租约 ID（进程级单调递增）+ 借出帧数组 +
-            借出时刻（Stopwatch ticks）。采集载体为 <see cref="T:System.Threading.AsyncLocal`1"/>（<see cref="P:DotNetCore.HayateOP.HayateLeaseContext.Current"/>）——
-            上下文随调用方的异步执行流（ExecutionContext）流动，<b>并发借还各自持有独立副本，
-            不再相互覆盖</b>（2.4 及之前包装对象上的 string 采集会被同对象复借覆盖，且跨异步
-            流共享时无法区分归属）。
+            One borrow corresponds to one immutable lease context: a process-wide monotonically increasing lease id,
+            a borrow-time timestamp (Stopwatch ticks), and a borrow-frame array. The carrier is <see cref="T:System.Threading.AsyncLocal`1"/>
+            (<see cref="P:DotNetCore.HayateOP.HayateLeaseContext.Current"/>): the context flows with the caller's asynchronous execution flow (ExecutionContext), and <b>concurrent borrows and returns each hold an independent copy,
+            so they no longer overwrite each other</b> (in 2.4 and earlier, string-based capture on the wrapper object was overwritten by re-borrows of the same object, and could not be attributed correctly across asynchronous
+            flows when shared).
             </para>
             <para>
-            生命周期：Acquire 取证采集时创建并写入当前异步流 + 包装对象；Release 结束租约时
-            清空当前异步流；Destroy 时清空包装对象上的引用。取证开关与频率仍由
-            <see cref="T:DotNetCore.HayateOP.HayateLeakTraceCaptureMode"/> 控制（Off 默认不采集，L1 语义不变）。
+            Lifecycle: created and written to the current async flow and the wrapper object when Acquire captures evidence; when Release ends the lease,
+            the current async flow is cleared; when Destroy runs, the reference on the wrapper object is cleared. The capture switch and frequency remain controlled by
+            <see cref="T:DotNetCore.HayateOP.HayateLeakTraceCaptureMode"/> (Off disables capture by default; the semantics are unchanged).
             </para>
             </summary>
+            <example>
+            <code>
+            var ctx = HayateLeaseContext.Current;
+            if (ctx is not null)
+            {
+                Console.WriteLine($"Lease {ctx.LeaseId} borrowed at tick {ctx.BorrowedAt}");
+            }
+            </code>
+            </example>
         </member>
         <member name="P:DotNetCore.HayateOP.HayateLeaseContext.LeaseId">
-            <summary>进程级唯一的租约 ID（单调递增）。</summary>
+            <summary>The process-wide unique lease id (monotonically increasing).</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayateLeaseContext.Frames">
-            <summary>借出时刻的调用栈帧（fNeedFileInfo:false 低开销采集；可能为空数组）。</summary>
+            <summary>The call-stack frames captured at borrow time (low-overhead capture with fNeedFileInfo:false; may be an empty array).</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayateLeaseContext.BorrowedAt">
-            <summary>借出时刻（Stopwatch ticks，与池内时长判定同口径）。</summary>
+            <summary>The borrow timestamp (Stopwatch ticks, same basis as the pool's duration checks).</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayateLeaseContext.Current">
-            <summary>当前异步流的租约上下文；未在租约期（未采集/已结束）为 null。</summary>
+            <summary>The lease context for the current async flow; null when not within a lease period (not captured, or already ended).</summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayateLeaseContext.AttachToFlow">
-            <summary>把本租约写入当前异步流（借出路径调用）。</summary>
+            <summary>Writes this lease into the current async flow (called on the borrow path).</summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayateLeaseContext.DetachFromFlow">
-            <summary>结束当前异步流的租约（Release 路径调用；写值有执行上下文复制成本，由调用方门控）。</summary>
+            <summary>Ends the lease for the current async flow (called on the Release path; the write has an execution-context copy cost and is gated by the caller).</summary>
         </member>
         <member name="T:DotNetCore.HayateOP.HayateObjectLocation">
             <summary>
@@ -271,9 +281,11 @@
         </member>
         <member name="P:DotNetCore.HayateOP.HayateObject`1.CreatedAt">
             <summary>
-            PR-D A1（2.3 行为变更）：时间戳由 <c>DateTime</c> 改为 <see cref="M:System.Diagnostics.Stopwatch.GetTimestamp"/> 值，
-            消除热路径（创建/借出/归还/驱逐判定）上 <see cref="P:System.DateTime.UtcNow"/> 的 5–10× 系统调用开销。
-            时长换算：<c>(end - start) / Stopwatch.Frequency</c>（秒）或 <c>(end - start) * 1000.0 / Stopwatch.Frequency</c>（毫秒）。
+            Timestamp sourced from <see cref="M:System.Diagnostics.Stopwatch.GetTimestamp"/> instead of <c>DateTime</c>,
+            eliminating the 5–10× syscall overhead of <see cref="P:System.DateTime.UtcNow"/> on hot paths
+            (creation / borrow / return / eviction checks).
+            To convert to a duration: <c>(end - start) / Stopwatch.Frequency</c> (seconds) or
+            <c>(end - start) * 1000.0 / Stopwatch.Frequency</c> (milliseconds).
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayateObject`1.LastBorrowedAt">
@@ -284,176 +296,262 @@
         </member>
         <member name="P:DotNetCore.HayateOP.HayateObject`1.CreatedAtTick">
             <summary>
-            M20（2.5）：创建时刻的挂钟时间戳（<see cref="!:DateTimeOffset.UtcNow.Ticks"/>）。
-            与 <see cref="P:DotNetCore.HayateOP.HayateObject`1.CreatedAt"/>（Stopwatch ticks，用于时长测量）互补——
-            本字段面向快照/日志输出的人类可读口径，不参与任何时长判定。
+            Wall-clock timestamp captured at creation time (<c>DateTimeOffset.UtcNow.Ticks</c>).
+            It complements <see cref="P:DotNetCore.HayateOP.HayateObject`1.CreatedAt"/> (Stopwatch ticks, used for duration measurement); this
+            field is for human-readable snapshot / log output and never participates in any duration calculation.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayateObject`1.LeaseCount">
             <summary>
-            M20（2.5）：累计借出次数。借出路径单调递增（借出瞬间包装对象由本线程独占，
-            驱逐/校验无法认领借出中对象，故普通自增即可，无需 Interlocked）。
+            Total number of times this object has been leased (borrowed). Monotonically increasing on the
+            borrow path (the wrapper is exclusively owned by the borrowing thread at that instant, so eviction /
+            validation cannot claim a borrowed object -- a plain increment suffices, no Interlocked needed).
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayateObject`1.OwnerPoolName">
             <summary>
-            M20（2.5）：所属池的逻辑名（创建时由池写入，生命周期内不变）。
-            供跨池诊断 / 快照输出定位对象归属。
+            The logical name of the owning pool (written by the pool at creation, immutable for the object's
+            lifetime). Used by cross-pool diagnostics / snapshot output to locate object ownership.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayateObject`1.LeaseContext">
             <summary>
-            M16（2.5，breaking）：借出租约上下文（租约 ID + 借出帧数组 + 借出时刻）。
-            采集载体为 <see cref="T:DotNetCore.HayateOP.HayateLeaseContext"/> 的 AsyncLocal 异步流 + 本属性（包装侧快照引用）；
-            并发借还各自持有独立上下文实例，不再相互覆盖。取证模式与采集频率仍由
-            <see cref="T:DotNetCore.HayateOP.HayateLeakTraceCaptureMode"/> 控制（L1 三模式语义不变）。
-            2.5 批次二 M10 曾短暂引入 <c>AcquireStackFrames: StackFrame[]</c>，本属性为其最终形态；
-            2.4 及之前的 <c>AcquireTrace: string</c> 已移除，文本形态经 <c>TakeSnapshot().LeakTraces</c> 获取。
+            Borrow lease context (lease id + borrow-call stack frames + borrow timestamp).
+            Captured via the AsyncLocal async flow of <see cref="T:DotNetCore.HayateOP.HayateLeaseContext"/> plus this property
+            (wrapper-side snapshot reference). Concurrent borrow/return each hold independent context instances
+            and no longer overwrite each other. The capture mode and sampling frequency are still controlled by
+            <see cref="T:DotNetCore.HayateOP.HayateLeakTraceCaptureMode"/>.
+            An earlier revision briefly introduced <c>AcquireStackFrames: StackFrame[]</c>; this property is its
+            final form. The pre-2.5 <c>AcquireTrace: string</c> has been removed; obtain the text form via
+            <c>TakeSnapshot().LeakTraces</c>.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayateObject`1.IsBorrowed">
             <summary>
-            P2-新-1：借出状态改为 <see cref="F:DotNetCore.HayateOP.HayateObject`1.Location"/> 的计算属性，消除双源不一致窗口。
-            原独立 bool 字段与 Location（Borrowed 状态）由两条路径分别维护，
-            弱内存模型下存在 stale 读风险；Location 为 volatile 且全部迁移在 Shard 自旋锁内完成，
-            以它为唯一事实源。Removing（驱逐认领）/Destroyed 均不属于 Borrowed，语义与原字段一致。
+            Whether the object is currently borrowed, derived as a computed property of <see cref="F:DotNetCore.HayateOP.HayateObject`1.Location"/>
+            to eliminate the dual-source inconsistency window. The original separate bool field and Location
+            (Borrowed state) were maintained by two paths, risking stale reads under the weak memory model;
+            Location is volatile and all transitions happen inside the Shard spin lock, so it is the single
+            source of truth. Removing (eviction claim) / Destroyed are not Borrowed, consistent with the
+            original field's semantics.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayateObject`1.ShardIndex">
             <summary>
-            对象被借出时所属的分片索引。
-            由 <see cref="T:DotNetCore.HayateOP.HayatePoolBasic`1"/> 在 Acquire 命中时记录，Release 时按此 round-trip，
-            避免使用 <c>Thread.GetCurrentProcessorId() % ShardCount</c> 落到 max=0 的分片而静默 dispose 对象。
-            默认值 0 是 PreWarm 单对象的合法归宿。
+            The shard index the object belonged to when borrowed.
+            Recorded by <see cref="T:DotNetCore.HayateOP.HayatePoolBasic`1"/> when Acquire hits, and used by Release to round-trip
+            back to the same shard, avoiding the bug where <c>Thread.GetCurrentProcessorId() % ShardCount</c>
+            could land on the max=0 shard and silently dispose the object.
+            The default value 0 is the legitimate home for a single PreWarm object.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayateObject`1.Location">
             <summary>
-            对象当前所处位置，驱动分片端的原子认领协议。
-            所有状态迁移都在 Shard 的自旋锁内完成，因此这里只需要 volatile 保证跨锁可见性。
+            The object's current location, driving the shard-side atomic claim protocol.
+            All state transitions happen inside the Shard spin lock, so here only <c>volatile</c> is needed
+            to guarantee cross-lock visibility.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayateObject`1.Node">
             <summary>
-            对象在所属分片空闲链表中的节点引用；为 null 表示不在任何分片链表内。
-            仅允许在 Shard 自旋锁内读写，用于把 Remove 从 O(n) 重建队列降级为 O(1) 摘除。
+            The node reference of the object within its shard's free list; <c>null</c> means it is not in any
+            shard list. May only be read/written inside the Shard spin lock; it downgrades Remove from an O(n)
+            queue rebuild to an O(1) unlink.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayateObject`1.Destroyed">
             <summary>
-            销毁幂等标记（0 = 未销毁，1 = 已销毁）。
-            驱逐、空闲校验、归还拒绝三条路径可能并发命中同一个对象，用 CAS 保证只销毁一次。
+            Destruction idempotency flag (0 = not destroyed, 1 = destroyed). Eviction, idle validation, and
+            return-rejection may concurrently hit the same object, so a CAS guarantees it is destroyed only once.
             </summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayateObject`1.#ctor(`0)">
+            <summary>
+            Initializes a new wrapper around the supplied pooled value.
+            </summary>
+            <param name="value">The pooled object to wrap; must not be <c>null</c>.</param>
+            <exception cref="T:System.ArgumentNullException"><paramref name="value"/> is <c>null</c>.</exception>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.TrackedObjectCount">
-            <summary>真实存活对象总数（空闲 + 借出），由各分片登记表求和派生。</summary>
+            <summary>Total number of live objects (idle + borrowed), derived by summing each shard's registry.</summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.UntrackObject(DotNetCore.HayateOP.HayateObject{`0})">
             <summary>
-            T09：按包装对象的归属分片摘除登记项；ShardIndex 异常时兜底全分片扫描（理论不可达，
-            登记项在 CreateWrappedObject 即写入目标分片并同步 ShardIndex）。
+            Removes the registry entry from the wrapper's owning shard; if ShardIndex is invalid, falls back to a full-shard scan (theoretically unreachable,
+            since the entry is written to the target shard and its ShardIndex synced in CreateWrappedObject).
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.UntrackKey(`0)">
-            <summary>T09：仅有裸对象引用（无包装）时，全分片扫描摘除登记项。</summary>
+            <summary>When only a bare object reference (no wrapper) is available, scans all shards to remove the registry entry.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.#ctor(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0},DotNetCore.HayateOP.HayatePoolOptions,DotNetCore.HayateOP.Scaling.IHayateScalingStrategy,DotNetCore.HayateOP.Metrics.IHayateMetrics,DotNetCore.HayateOP.Logging.IHayateLogger,System.String)">
+            <exception cref="T:System.ArgumentNullException">Thrown if policy, options, scalingStrategy, metrics, logger, or poolName is null.</exception>
+            <exception cref="T:System.InvalidOperationException">Thrown if the configured options are invalid.</exception>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.WaitForWarmupIfNeeded">
             <summary>
-            M17：预热就绪门。默认配置（<see cref="P:DotNetCore.HayateOP.HayatePoolOptions.WaitForWarmup"/> = false）下
-            <c>_waitForWarmup</c> 为常量 false，热路径仅多一次可预测分支（JIT 可消除）；
-            开启时阻塞至预热结束——信号在成功与失败路径均会置位，不会永久挂起。
+            Pre-warm readiness gate. Under the default configuration (<see cref="P:DotNetCore.HayateOP.HayatePoolOptions.WaitForWarmup"/> = false)
+            <c>_waitForWarmup</c> is the constant false, so the hot path only adds one predictable branch (JIT-eliminable);
+            when enabled it blocks until pre-warm completes — the signal is set on both success and failure paths, so it never hangs permanently.
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.GetAllocatedBytesForCurrentThread">
             <summary>
-            M3：读取当前线程累计分配字节数。net48 / netstandard2.0 缺少
-            <c>GC.GetAllocatedBytesForCurrentThread()</c>，这些目标框架下返回 0
-            （分配追踪静默不可用，不影响任何池行为）。
+            Reads the current thread's cumulative allocated bytes. net48 / netstandard2.0 lack
+            <c>GC.GetAllocatedBytesForCurrentThread()</c>; under those target frameworks it returns 0
+            (allocation tracking is silently unavailable and does not affect any pool behavior).
             </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Acquire">
+            <summary>Synchronously acquires a pooled object using the default timeout.</summary>
+            <exception cref="T:System.ArgumentOutOfRangeException">Thrown if the configured default timeout is negative.</exception>
+            <exception cref="T:System.InvalidOperationException">Thrown by the Abort policy when no object is available.</exception>
+            <exception cref="T:System.TimeoutException">Thrown by the BlockTimeout policy when acquisition exceeds the timeout.</exception>
+            <example><code>
+            var obj = pool.Acquire();
+            try { /* use obj */ }
+            finally { pool.Release(obj); }
+            </code></example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Acquire(System.TimeSpan)">
             <summary>
-            同步获取池化对象（带超时）。M3 分配追踪开启时，额外统计本次借出路径的线程分配增量。
+            Synchronously acquires a pooled object (with timeout). When allocation tracking is enabled, also counts the thread allocation delta on this borrow path.
             </summary>
+            <exception cref="T:System.ArgumentOutOfRangeException">Thrown if <paramref name="timeout"/> is negative.</exception>
+            <exception cref="T:System.InvalidOperationException">Thrown by the Abort policy when no object is available.</exception>
+            <exception cref="T:System.TimeoutException">Thrown by the BlockTimeout policy when acquisition exceeds <paramref name="timeout"/>.</exception>
+            <example><code>
+            var obj = pool.Acquire(TimeSpan.FromSeconds(5));
+            try { /* use obj */ }
+            finally { pool.Release(obj); }
+            </code></example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.AcquireAsync(System.Threading.CancellationToken)">
+            <summary>Asynchronously acquires a pooled object, honouring the supplied cancellation token.</summary>
+            <exception cref="T:System.Threading.Tasks.TaskCanceledException">Thrown if <paramref name="cancellationToken"/> is cancelled while waiting.</exception>
+            <example><code>
+            var obj = await pool.AcquireAsync(cancellationToken);
+            try { /* use obj */ }
+            finally { pool.Release(obj); }
+            </code></example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.AcquireAsync(System.TimeSpan,System.Threading.CancellationToken)">
             <summary>
-            PR-E A3（=M5 统一 CT 传递）：异步获取池化对象，带超时边界。
-            实现方式：链接 CTS 组合「外部取消 + 超时」两路取消源转调无超时版本，
-            零新增池状态；超时语义与同步 <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Acquire(System.TimeSpan)"/> 对齐——
-            超时抛 <see cref="T:System.TimeoutException"/>（含 missed 计数与强制扩容一步），
-            外部取消传播 <see cref="T:System.Threading.Tasks.TaskCanceledException"/>，二者可通过取消源区分。
+            Asynchronously acquires a pooled object with a timeout boundary.
+            Implementation: link a CTS combining the "external cancellation + timeout" two cancellation sources and delegate to the no-timeout overload,
+            with zero added pool state; the timeout semantics align with the synchronous <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Acquire(System.TimeSpan)"/> —
+            a timeout throws <see cref="T:System.TimeoutException"/> (including the missed count and a forced scale-up step),
+            and an external cancellation propagates <see cref="T:System.Threading.Tasks.TaskCanceledException"/>; the two can be distinguished by the cancellation source.
             </summary>
+            <exception cref="T:System.ArgumentOutOfRangeException">Thrown if <paramref name="timeout"/> is negative.</exception>
+            <exception cref="T:System.TimeoutException">Thrown when acquisition exceeds <paramref name="timeout"/>.</exception>
+            <exception cref="T:System.Threading.Tasks.TaskCanceledException">Thrown if <paramref name="cancellationToken"/> is cancelled and the cancellation is not the timeout.</exception>
+            <example><code>
+            var obj = await pool.AcquireAsync(TimeSpan.FromSeconds(5), cancellationToken);
+            try { /* use obj */ }
+            finally { pool.Release(obj); }
+            </code></example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Release(`0)">
             <summary>
-            归还对象到池。M3 分配追踪开启时，额外统计本次归还路径的线程分配增量。
+            Returns an object to the pool. When allocation tracking is enabled, also counts the thread allocation delta on this return path.
             </summary>
+            <example><code>
+            pool.Release(obj);
+            </code></example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Evict(DotNetCore.HayateOP.HayateEvictReason)">
             <summary>
-            M15：按分类依据主动驱逐空闲对象（Touched/Idle/Expired，语义见 <see cref="T:DotNetCore.HayateOP.HayateEvictReason"/>）。
-            实现要点：
-            ① 仅作用于空闲对象——借出中的对象不在分片链表内（TryTake 已物理摘出），
-               <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.GetAll"/> 快照天然不含；即便时序竞态下链表项刚被借出，
-               <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.Remove(DotNetCore.HayateOP.HayateObject{`0})"/> 的原子认领也会失败并跳过，绝不销毁使用中的对象；
-            ② 销毁复用与后台驱逐完全相同的 <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Destroy(DotNetCore.HayateOP.HayateObject{`0})"/> 幂等 CAS——与后台驱逐 /
-               空闲校验 / 归还拒绝并发命中同一对象时只有一方真正销毁，不产生二次 Dispose；
-            ③ 默认后台驱逐行为不变，本 API 是叠加的主动运维出口（驱逐计数计入各自的
-               Destroy 路径，不额外记账）。
+            Proactively evicts idle objects by category (Touched/Idle/Expired; see <see cref="T:DotNetCore.HayateOP.HayateEvictReason"/> for semantics).
+            Implementation notes:
+            ① Only affects idle objects — borrowed objects are not in the shard list (TryTake already physically removed them),
+               so a <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.GetAll"/> snapshot naturally excludes them; even if a list item was just borrowed under a race,
+               <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.Remove(DotNetCore.HayateOP.HayateObject{`0})"/>'s atomic claim will fail and skip it, never destroying an in-use object;
+            ② Destruction reuses the exact same idempotent CAS as background eviction — when concurrent with background eviction /
+               idle validation / return rejection hitting the same object, only one side truly destroys it, with no double Dispose;
+            ③ The default background-eviction behavior is unchanged; this API is an additive proactive ops entry point (eviction counts go to their respective
+               Destroy paths, with no extra accounting).
             </summary>
+            <exception cref="T:System.ArgumentOutOfRangeException">Thrown if <paramref name="reason"/> is not Touched, Idle, or Expired.</exception>
+            <example><code>
+            int n = pool.Evict(HayateEvictReason.Idle);
+            </code></example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryColdBootAcquire(System.Int64)">
             <summary>
-            PR-D L5：冷池自举。池完全空（无空闲且无借出）且容量上限 &gt; 0 时，
-            同步创建首个对象直接借出（原子防重，并发首借仅创建一个），
-            消除 Min=0 冷池「等超时者补货」的不确定性（T12 ColdStart 实测 2/5 与 5/5 超时两种时序）。
-            仅由 Block / BlockTimeout 策略与异步等待路径调用——CreateNew 保持「等满超时后创建」语义（L6），
-            Abort 保持直接拒绝语义。
+            Cold boot. When the pool is completely empty (no idle and no borrowed) and the capacity limit &gt; 0,
+            synchronously create the first object and borrow it directly (atomic de-duplication; concurrent first borrows create only one),
+            eliminating the uncertainty of a Min=0 empty pool "waiting for a timeout to replenish" (empirically two failure timings).
+            Called only by the Block / BlockTimeout policies and the async wait path — CreateNew keeps the "create after the full timeout" semantics,
+            while Abort keeps the direct-reject semantics.
             </summary>
-            <returns>自举借出的对象；返回 <c>null</c> 表示本调用未认领自举（池非空 / 达上限 / 他线程正在创建），调用方应继续正常等待。</returns>
+            <returns>Object borrowed via cold boot; returns <c>null</c> when this call did not claim the boot (pool non-empty / at capacity / another thread is creating), and the caller should continue normal waiting.</returns>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.SelectStartShardIndex">
             <summary>
-            M18：计算本次借出的起始分片索引。
-            None 恒返 0（调用方以 <c>_affinityMode != None</c> 前置短路，保证默认路径零开销）；
-            Thread 按托管线程 ID 黄金比例散列稳定映射（同线程恒优先命中同一分片，且与分片数无公约数耦合）；
-            Custom 走用户委托，null/越界/异常一律回落 0（借出路径健壮性优先，绝不因策略缺失中断借出）。
+            Computes the starting shard index for this borrow.
+            None always returns 0 (the caller short-circuits with <c>_affinityMode != None</c> up front, guaranteeing zero overhead on the default path);
+            Thread maps stably by managed thread ID via a golden-ratio hash (the same thread always prefers the same shard, with no coupling to the shard count via a common divisor);
+            Custom uses the user delegate; null/out-of-range/exception all fall back to 0 (borrow-path robustness first — the borrow is never interrupted by a missing policy).
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.CaptureLeaseContext(DotNetCore.HayateOP.HayateObject{`0})">
             <summary>
-            M16：借出路径租约上下文采集。创建不可变租约（租约 ID + 帧数组 + 借出时刻），
-            同时写入包装对象（快照取证用）与当前异步流（AsyncLocal，调用方可经
-            <see cref="P:DotNetCore.HayateOP.HayateLeaseContext.Current"/> 读取；并发借还各自隔离，不相互覆盖）。
-            帧采集 fNeedFileInfo:false——不解析源文件/行号，避免 PDB I/O。
+            Borrow-path lease-context capture. Creates an immutable lease (lease ID + frame array + borrow timestamp),
+            written both to the wrapper (for snapshot forensics) and to the current async flow (AsyncLocal, which callers can read via
+            <see cref="P:DotNetCore.HayateOP.HayateLeaseContext.Current"/>; concurrent borrows and returns are isolated and do not overwrite each other).
+            Frames are captured with fNeedFileInfo: false — source file/line is not resolved, avoiding PDB I/O.
             </summary>
         </member>
-        <!-- Badly formed XML comment ignored for member "M:DotNetCore.HayateOP.HayatePoolBasic`1.FormatLeaseTrace(DotNetCore.HayateOP.HayateLeaseContext)" -->
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.FormatLeaseTrace(DotNetCore.HayateOP.HayateLeaseContext)">
+            <summary>
+            Formats the lease context into a single-line text (for snapshot LeakTraces output).
+            Frames are joined by "&lt;-" (call direction: outermost frame first); the frame format is
+            <c>Type.Method+0xoffset</c>; falls back to placeholder text when there is no context or no frames.
+            </summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.InterlockedMax(System.Int64@,System.Int64)">
             <summary>
-            L2：无锁 Max 归并（CAS 环）。并发下最终收敛到真实最大值。
+            Lock-free Max merge (CAS loop). Concurrent calls eventually converge to the true maximum.
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.InterlockedMin(System.Int64@,System.Int64)">
             <summary>
-            L2：无锁 Min 归并（CAS 环）。并发下最终收敛到真实最小值。
+            Lock-free Min merge (CAS loop). Concurrent calls eventually converge to the true minimum.
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.CheckCapacityAlarm">
             <summary>
-            M12：容量告警检查。使用率口径 = 借出数 / MaxPoolSize（借出数由
-            「真实存活总数 - 空闲数」派生，与 TakeSnapshot 同口径）。
-            状态翻转去抖：只有经 CAS 成功翻转状态的线程触发一次回调；
-            回落低水位静默复位（不触发回调），重新越线可再次触发。
-            禁用（WarnAtRatio=0 且 CriticalAtRatio=0）时由调用方的只读标志短路，零开销。
+            Capacity-alarm check. Utilization = borrowed count / MaxPoolSize (the borrowed count is derived
+            from "total live count - idle count", the same basis as TakeSnapshot).
+            A debounced flip: only the thread that successfully flips the state via CAS fires the callback once;
+            falling back to the low-water mark silently resets (no callback), and re-crossing the line can fire again.
+            when disabled (WarnAtRatio = 0 and CriticalAtRatio = 0) the caller's read-only flag short-circuits it at zero cost.
             </summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.GetStats">
+            <example><code>
+            var stats = pool.GetStats();
+            Console.WriteLine(stats.CurrentSize);
+            </code></example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TakeSnapshot">
+            <example><code>
+            var snap = pool.TakeSnapshot();
+            foreach (var d in snap.ObjectDetails) { /* inspect */ }
+            </code></example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.ReloadConfig(System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <exception cref="T:System.ArgumentNullException">Thrown if <paramref name="configure"/> is null.</exception>
+            <example><code>
+            pool.ReloadConfig(o =&gt; o.MaxPoolSize = 64);
+            </code></example>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TrackedCount">
-            <summary>本分片登记的存活对象数（空闲 + 借出）。</summary>
+            <summary>The number of live objects registered in this shard (idle + borrowed).</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TrackedValues">
-            <summary>本分片登记的全部包装对象（含借出中）。</summary>
+            <summary>All wrapper objects registered in this shard (including those currently borrowed).</summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.Add(DotNetCore.HayateOP.HayateObject{`0})">
             <summary>
@@ -482,12 +580,13 @@
             Copies up to <paramref name="count"/> idle objects from the head of the shard free
             list into <paramref name="buffer"/> while holding the shard lock, returning the number
             copied. The caller may reuse the same buffer across shards / invocations to avoid
-            per-call array allocations (PR-D A2). The buffer is overwritten from index 0 each call.
+            per-call array allocations. The buffer is overwritten from index 0 each call.
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.SafeDispose(DotNetCore.HayateOP.HayateObject{`0},System.String)">
             <summary>
-            在锁外安全释放对象，吞掉用户 Dispose 抛出的异常并返回是否释放成功。
+            Safely releases the object outside the lock, swallowing any exception thrown by the user's
+            Dispose and reporting whether the release succeeded.
             </summary>
         </member>
         <member name="T:DotNetCore.HayateOP.HayateObjectPoolRegistry">
@@ -496,8 +595,9 @@
             <see cref="T:System.Collections.Concurrent.ConcurrentDictionary`2"/>. Pools self-register here as
             they are created; callers resolve by the same logical name.
             <para>
-            M11+（2.5）：内部条目升级为 <see cref="T:DotNetCore.HayateOP.HayatePoolMetadata"/>（池 + 元数据），
-            对外暴露 GetAll / Remove / Count 完整版管理面；Register / TryGet / Names 原语义不变。
+            Internal entries are upgraded to <see cref="T:DotNetCore.HayateOP.HayatePoolMetadata"/> (pool + metadata) and expose the
+            full management surface — GetAll / Remove / Count — while Register / TryGet / Names keep their
+            original semantics.
             </para>
             </summary>
         </member>
@@ -521,1081 +621,1737 @@
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEnableSharding(System.Boolean)">
             <summary>
-            启用/禁用分片功能
+            Enables or disables sharding.
             </summary>
+            <param name="enable">Whether to enable sharding; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableSharding(false);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEnableAutoScaling(System.Boolean)">
             <summary>
-            启用/禁用自动扩缩容
+            Enables or disables automatic scaling.
             </summary>
+            <param name="enable">Whether to enable automatic scaling; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableAutoScaling(false);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEnableValidation(System.Boolean)">
             <summary>
-            启用/禁用对象验证
+            Enables or disables object validation.
             </summary>
+            <param name="enable">Whether to enable validation; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableValidation(false);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEnableEviction(System.Boolean)">
             <summary>
-            启用/禁用空闲对象驱逐
+            Enables or disables idle-object eviction.
             </summary>
+            <param name="enable">Whether to enable eviction; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableEviction(false);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEnableGenerationOptimization(System.Boolean)">
             <summary>
-            启用/禁用分代优化
+            Enables or disables generational optimization.
             </summary>
+            <param name="enable">Whether to enable generational optimization; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableGenerationOptimization(false);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEnableLeakDetection(System.Boolean)">
             <summary>
-            启用/禁用泄漏检测
+            Enables or disables leak detection.
             </summary>
+            <param name="enable">Whether to enable leak detection; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableLeakDetection(false);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEnableMetrics(System.Boolean)">
             <summary>
-            启用/禁用指标统计
+            Enables or disables metrics collection.
             </summary>
+            <param name="enable">Whether to enable metrics; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableMetrics(true);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithWaitForWarmup(System.Boolean)">
             <summary>
-            设置是否等待预热完成（M17）。<c>true</c> 时预热转后台执行，借出操作在预热完成前阻塞。
+            Sets whether to wait for warmup to complete. When <c>true</c>, warmup runs in the background
+            and borrow operations block until warmup finishes.
             </summary>
-            <param name="wait">是否等待预热完成；默认 <c>false</c>（构造函数内同步预热，借出零额外等待）。</param>
+            <param name="wait">Whether to wait for warmup; defaults to <c>false</c> (synchronous warmup
+            inside the constructor, with no extra wait on borrow).</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithWaitForWarmup(true);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEnableAllocationTracking(System.Boolean)">
             <summary>
-            设置是否启用分配追踪（M3）。开启后 <c>GetStats()</c> / <c>TakeSnapshot()</c> 暴露
-            借出 / 归还路径的分配字节增量与样本数。
+            Sets whether to enable allocation tracking. When enabled, <c>GetStats()</c> /
+            <c>TakeSnapshot()</c> expose the per-path allocation byte delta and sample count for the
+            borrow and return paths.
             </summary>
+            <param name="enable">Whether to enable allocation tracking; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableAllocationTracking(true);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithCapacityAlarm(System.Double,System.Double)">
             <summary>
-            设置容量告警阈值（M12）。使用率口径为「借出数 / MaxPoolSize」。
+            Sets the capacity alarm thresholds. Utilization is measured as borrowed count / MaxPoolSize.
             </summary>
-            <param name="warnAtRatio">警告阈值（0~1；0 表示禁用警告档）。</param>
-            <param name="criticalAtRatio">危急阈值（0~1；0 表示禁用危急档；与警告同时启用时不得小于警告阈值，越界时自动修正）。</param>
+            <param name="warnAtRatio">Warning threshold (0~1; 0 disables the warning tier).</param>
+            <param name="criticalAtRatio">Critical threshold (0~1; 0 disables the critical tier; when
+            both tiers are enabled it must not be smaller than the warning threshold, and is auto-corrected
+            if out of range).</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="warnAtRatio"/> or
+            <paramref name="criticalAtRatio"/> is outside the range [0, 1], or <paramref name="criticalAtRatio"/>
+            is smaller than <paramref name="warnAtRatio"/> while both are enabled.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithCapacityAlarm(0.8, 0.95);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithOnCapacityWarning(System.Action{DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs})">
             <summary>
-            设置容量警告回调（使用率 ≥ WarnAtRatio 时状态翻转触发一次）
+            Sets the capacity warning callback (fires once on a state flip when utilization &gt;=
+            WarnAtRatio).
             </summary>
+            <param name="handler">The callback invoked when the warning threshold is crossed.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="handler"/> is <c>null</c>.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithOnCapacityWarning(args =&gt; Log.Warn("pool near capacity"));
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithOnCapacityCritical(System.Action{DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs})">
             <summary>
-            设置容量危急回调（使用率 ≥ CriticalAtRatio 时状态翻转触发一次）
+            Sets the capacity critical callback (fires once on a state flip when utilization &gt;=
+            CriticalAtRatio).
             </summary>
+            <param name="handler">The callback invoked when the critical threshold is crossed.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="handler"/> is <c>null</c>.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithOnCapacityCritical(args =&gt; Log.Error("pool at capacity"));
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithPoolName(System.String)">
             <summary>
-            设置池名称
+            Sets the pool name.
             </summary>
+            <param name="name">The name used for logging and metrics.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="name"/> is <c>null</c>.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithPoolName("orders");
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithMinSize(System.Int32)">
             <summary>
-            设置最小池大小
+            Sets the minimum pool size.
             </summary>
+            <param name="minSize">The minimum number of objects to keep in the pool.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="minSize"/> is negative.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithMinSize(10);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithMaxSize(System.Int32)">
             <summary>
-            设置最大池大小
+            Sets the maximum pool size.
             </summary>
+            <param name="maxSize">The maximum number of objects the pool may hold.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="maxSize"/> is negative.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithMaxSize(256);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithShardCount(System.Int32)">
             <summary>
-            设置分片数量
+            Sets the number of shards.
             </summary>
+            <param name="shardCount">The number of shards (1~32).</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="shardCount"/> is outside the
+            range [1, 32].</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithShardCount(8);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithShardAffinity(DotNetCore.HayateOP.HayateShardAffinityMode)">
             <summary>
-            M18：设置分片亲和模式（None=默认顺序扫描 / Thread=线程亲和 / Custom=自定义委托）。
-            传 <see cref="F:DotNetCore.HayateOP.HayateShardAffinityMode.Custom"/> 时须随后调用
-            <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithCustomShardAffinity(System.Func{System.Int32})"/>，否则 Build 时回落 None。
+            Sets the shard affinity mode (None = default sequential scan / Thread = thread affinity /
+            Custom = custom delegate). When <see cref="F:DotNetCore.HayateOP.HayateShardAffinityMode.Custom"/> is passed, you
+            must subsequently call <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithCustomShardAffinity(System.Func{System.Int32})"/>, otherwise it falls
+            back to None at build time.
             </summary>
+            <param name="mode">The shard affinity mode to use.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="mode"/> is not one of the
+            supported affinity modes.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithShardAffinity(HayateShardAffinityMode.Thread);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithCustomShardAffinity(System.Func{System.Int32})">
             <summary>
-            M18：设置自定义起始分片委托并切入 Custom 模式。
-            返回值建议落在 [0, ShardCount)；null/越界/异常时本次借出回落顺序扫描（不抛出）。
+            Sets the custom starting-shard delegate and switches into Custom mode. The return value should
+            fall in [0, ShardCount); on null / out-of-range / exception it falls back to a sequential scan
+            for that borrow (without throwing).
             </summary>
+            <param name="shardSelector">The delegate that returns the preferred starting shard index.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="shardSelector"/> is <c>null</c>.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithCustomShardAffinity(() =&gt; Thread.CurrentThread.ManagedThreadId % 8);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithAcquireTimeout(System.TimeSpan)">
             <summary>
-            设置默认获取超时时间
+            Sets the default acquire timeout.
             </summary>
+            <param name="timeout">The maximum time to wait for a borrow.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="timeout"/> is not greater than
+            <see cref="F:System.TimeSpan.Zero"/>.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithAcquireTimeout(TimeSpan.FromSeconds(3));
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithScalingInterval(System.Int32)">
             <summary>
-            设置扩缩容检查间隔
+            Sets the scaling check interval.
             </summary>
+            <param name="intervalMs">The scaling decision interval in milliseconds (minimum 100).</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="intervalMs"/> is below 100ms.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithScalingInterval(2000);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithScaleUpThreshold(System.Double)">
             <summary>
-            设置扩容阈值（使用率）
+            Sets the scale-up threshold (utilization).
             </summary>
+            <param name="threshold">The utilization ratio (0~1) above which the pool scales up.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="threshold"/> is outside the
+            range [0, 1].</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithScaleUpThreshold(0.85);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithScaleDownThreshold(System.Double)">
             <summary>
-            设置缩容阈值（使用率）
+            Sets the scale-down threshold (utilization).
             </summary>
+            <param name="threshold">The utilization ratio (0~1) below which the pool scales down.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="threshold"/> is outside the
+            range [0, 1].</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithScaleDownThreshold(0.2);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithScaleUpCooldownSeconds(System.Int32)">
             <summary>
-            设置扩容冷却时间（秒）
+            Sets the scale-up cooldown (seconds).
             </summary>
+            <param name="seconds">The cooldown in seconds before another scale-up is allowed.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="seconds"/> is negative.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithScaleUpCooldownSeconds(30);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithScaleDownCooldownSeconds(System.Int32)">
             <summary>
-            设置缩容冷却时间（秒）
+            Sets the scale-down cooldown (seconds).
             </summary>
+            <param name="seconds">The cooldown in seconds before another scale-down is allowed.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="seconds"/> is negative.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithScaleDownCooldownSeconds(60);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithScaleUpStep(System.Int32)">
             <summary>
-            设置扩容步长
+            Sets the scale-up step.
             </summary>
+            <param name="step">The number of objects added per scale-up (minimum 1).</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="step"/> is below 1.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithScaleUpStep(4);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithScaleDownStep(System.Int32)">
             <summary>
-            设置缩容步长
+            Sets the scale-down step.
             </summary>
+            <param name="step">The number of objects removed per scale-down (minimum 1).</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="step"/> is below 1.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithScaleDownStep(2);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithValidateOnBorrow(System.Boolean)">
             <summary>
-            设置是否在借出时验证对象
+            Sets whether to validate objects on borrow.
             </summary>
+            <param name="enable">Whether to validate before borrowing; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithValidateOnBorrow(true);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithValidateOnReturn(System.Boolean)">
             <summary>
-            设置是否在归还时验证对象
+            Sets whether to validate objects on return.
             </summary>
+            <param name="enable">Whether to validate before returning; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithValidateOnReturn(true);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithValidateWhileIdle(System.Boolean)">
             <summary>
-            设置是否在空闲时验证对象
+            Sets whether to validate objects while idle.
             </summary>
+            <param name="enable">Whether to validate idle objects; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithValidateWhileIdle(true);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithValidateInterval(System.Int32)">
             <summary>
-            设置空闲验证间隔（毫秒）
+            Sets the idle validation interval (milliseconds).
             </summary>
+            <param name="intervalMs">The validation interval in milliseconds (minimum 1000).</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="intervalMs"/> is below 1000ms.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithValidateInterval(30000);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithOldGenerationValidationInterval(System.Int32)">
             <summary>
-            设置老年代验证间隔（次数）
+            Sets the old-generation validation interval (number of passes).
             </summary>
+            <param name="interval">The number of regular validation passes between full old-generation
+            validations (minimum 1).</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="interval"/> is below 1.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithOldGenerationValidationInterval(5);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithGenerationThreshold(System.Int32)">
             <summary>
-            设置分代升级阈值（毫秒）
+            Sets the generation-promotion threshold (milliseconds).
             </summary>
+            <param name="thresholdMs">The age in milliseconds before an object is promoted to an older
+            generation (minimum 1000).</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="thresholdMs"/> is below 1000ms.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithGenerationThreshold(30000);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithMaxLifeTime(System.TimeSpan)">
             <summary>
-            设置对象最大生命周期
+            Sets the maximum object lifetime.
             </summary>
+            <param name="lifetime">The maximum allowed object lifetime.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="lifetime"/> is not greater than
+            <see cref="F:System.TimeSpan.Zero"/>.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithMaxLifeTime(TimeSpan.FromMinutes(15));
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithMaxIdleTime(System.TimeSpan)">
             <summary>
-            设置对象最大空闲时间
+            Sets the maximum object idle time.
             </summary>
+            <param name="idleTime">The maximum time an object may stay idle before eviction.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="idleTime"/> is not greater than
+            <see cref="F:System.TimeSpan.Zero"/>.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithMaxIdleTime(TimeSpan.FromMinutes(5));
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithSoftMinEvictableIdleTime(System.TimeSpan)">
             <summary>
-            设置软最小空闲驱逐时间
+            Sets the soft minimum evictable idle time.
             </summary>
+            <param name="idleTime">The minimum idle duration before an object becomes evictable.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="idleTime"/> is not greater than
+            <see cref="F:System.TimeSpan.Zero"/>.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithSoftMinEvictableIdleTime(TimeSpan.FromMinutes(2));
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEvictionInterval(System.Int32)">
             <summary>
-            设置驱逐检查间隔（毫秒）
+            Sets the eviction check interval (milliseconds).
             </summary>
+            <param name="intervalMs">The eviction scan interval in milliseconds (minimum 1000).</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="intervalMs"/> is below 1000ms.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEvictionInterval(30000);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithNumTestsPerEvictionRun(System.Int32)">
             <summary>
-            设置每次驱逐检查的对象数量
+            Sets the number of objects tested per eviction run.
             </summary>
+            <param name="count">The number of samples scanned per eviction run (minimum 1).</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="count"/> is below 1.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithNumTestsPerEvictionRun(16);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithCreationRetryCount(System.Int32)">
             <summary>
-            设置对象创建重试次数
+            Sets the object creation retry count.
             </summary>
+            <param name="count">The maximum number of retries after a creation failure (minimum 0).</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithCreationRetryCount(3);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithCreationRetryDelay(System.TimeSpan)">
             <summary>
-            设置对象创建重试延迟
+            Sets the object creation retry delay.
             </summary>
+            <param name="delay">The backoff between creation retries.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="delay"/> is negative.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithCreationRetryDelay(TimeSpan.FromMilliseconds(200));
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLeakDetectionThreshold(System.TimeSpan)">
             <summary>
-            设置泄漏检测阈值
+            Sets the leak detection threshold.
             </summary>
+            <param name="threshold">The maximum time a borrowed object may stay out before it is treated
+            as a suspected leak.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="threshold"/> is not greater than
+            <see cref="F:System.TimeSpan.Zero"/>.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithLeakDetectionThreshold(TimeSpan.FromMinutes(5));
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLeakDetection(System.Boolean)">
             <summary>
-            设置是否启用泄漏检测
+            Sets whether to enable leak detection.
             </summary>
+            <param name="enable">Whether to enable leak detection; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithLeakDetection(true);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLeakTraceCapture(DotNetCore.HayateOP.HayateLeakTraceCaptureMode,System.Int32)">
             <summary>
-            设置泄漏取证模式与采样率（PR-D L1）。<br />
-            默认 <see cref="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.Off"/>：借出热路径不抓取调用栈，泄漏扫描不受影响。
-            如需 2.0 及之前的"每次借出抓全栈"旧行为，显式传入 <see cref="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.EveryAcquire"/>。
+            Sets the leak trace capture mode and sample rate.<br />
+            Defaults to <see cref="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.Off"/>: the borrow hot path does not capture
+            a call stack and leak scanning is unaffected. To restore the pre-2.0 behavior of capturing a
+            full stack on every borrow, pass <see cref="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.EveryAcquire"/>.
             </summary>
-            <param name="mode">取证模式（Off / Sampled / EveryAcquire）。</param>
-            <param name="sampleRate">采样分母（1/N），仅 Sampled 模式生效；≤0 时由选项自动修正为默认值 1024。</param>
+            <param name="mode">The capture mode (Off / Sampled / EveryAcquire).</param>
+            <param name="sampleRate">The sample denominator (1/N), only used in Sampled mode; values
+            &lt;= 0 are auto-corrected to the default of 1024.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithLeakTraceCapture(HayateLeakTraceCaptureMode.Sampled, 512);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithRejectPolicy(DotNetCore.HayateOP.HayatePoolRejectPolicy)">
             <summary>
-            设置拒绝策略
+            Sets the reject policy.
             </summary>
+            <param name="policy">The policy to apply when a borrow fails.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithRejectPolicy(HayatePoolRejectPolicy.BlockTimeout);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithPolicy(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0})">
             <summary>
-            设置对象池策略
+            Sets the object pool policy.
             </summary>
+            <param name="policy">The policy used to create, validate and reset pooled objects.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="policy"/> is <c>null</c>.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithPolicy(new MyResourcePolicy());
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithScalingStrategy(DotNetCore.HayateOP.Scaling.IHayateScalingStrategy)">
             <summary>
-            设置扩缩容策略
+            Sets the scaling strategy.
             </summary>
+            <param name="strategy">The strategy that decides when and how much to scale.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="strategy"/> is <c>null</c>.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithScalingStrategy(new ThresholdScalingStrategy());
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithMetrics(DotNetCore.HayateOP.Metrics.IHayateMetrics)">
             <summary>
-            设置指标收集器
+            Sets the metrics collector.
             </summary>
+            <param name="metrics">The metrics sink used to record pool runtime metrics.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="metrics"/> is <c>null</c>.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithMetrics(new MyMetricsCollector());
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLogger(DotNetCore.HayateOP.Logging.IHayateLogger)">
             <summary>
-            设置日志记录器（显式实例，优先于 <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLoggerFactory(DotNetCore.HayateOP.Logging.IHayateLoggerFactory)"/>）
+            Sets the logger (explicit instance, takes precedence over
+            <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLoggerFactory(DotNetCore.HayateOP.Logging.IHayateLoggerFactory)"/>).
             </summary>
+            <param name="logger">The logger instance to use.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="logger"/> is <c>null</c>.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithLogger(new MyLogger());
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLoggerFactory(DotNetCore.HayateOP.Logging.IHayateLoggerFactory)">
             <summary>
-            设置池级日志工厂（M19）：构建时按池名调用一次
-            <see cref="M:DotNetCore.HayateOP.Logging.IHayateLoggerFactory.CreateLogger(System.String)"/>，为每个池创建独立日志器。
+            Sets the pool-level logger factory. At build time, <see cref="M:DotNetCore.HayateOP.Logging.IHayateLoggerFactory.CreateLogger(System.String)"/>
+            is called once per pool name to create an independent logger for each pool.
             </summary>
+            <param name="loggerFactory">The logger factory used to create per-pool loggers.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="loggerFactory"/> is <c>null</c>.</exception>
             <remarks>
-            零破坏：未调用本方法时沿用内建单例日志器；与 <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLogger(DotNetCore.HayateOP.Logging.IHayateLogger)"/> 同时使用时，
-            显式 <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLogger(DotNetCore.HayateOP.Logging.IHayateLogger)"/> 实例优先。
+            Non-breaking: when this method is not called, the built-in singleton logger is used; when both
+            this and <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLogger(DotNetCore.HayateOP.Logging.IHayateLogger)"/> are set, the explicit <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLogger(DotNetCore.HayateOP.Logging.IHayateLogger)"/> instance wins.
             </remarks>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithLoggerFactory(new MyLoggerFactory());
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.ResolveLogger">
             <summary>
-            M19：解析本次构建使用的日志器。显式 <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLogger(DotNetCore.HayateOP.Logging.IHayateLogger)"/> 优先；
-            否则按池名向工厂索取；无工厂时回落内建单例日志器（2.4 行为）。
+            Resolves the logger used for this build. An explicit <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLogger(DotNetCore.HayateOP.Logging.IHayateLogger)"/> wins; otherwise
+            the factory is queried by pool name; when no factory is set, the built-in singleton logger is
+            used (behavior before 2.4).
             </summary>
+            <returns>The logger to use for this pool.</returns>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.Configure(System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
             <summary>
-            全量配置（覆盖所有选项）
+            Applies full configuration by invoking a callback against the underlying options.
             </summary>
+            <param name="configure">The callback that mutates the options instance.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .Configure(o =&gt; { o.MinPoolSize = 8; o.MaxPoolSize = 128; });
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.Build">
+            <summary>
+            Builds the configured object pool.
+            </summary>
+            <returns>A ready-to-use <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/>.</returns>
+            <exception cref="T:System.InvalidOperationException">The configuration is invalid, or a custom
+            <c>IHayateMetrics</c> was registered via <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithMetrics(DotNetCore.HayateOP.Metrics.IHayateMetrics)"/> while metrics collection is
+            disabled.</exception>
+            <example>
+            <code>
+            var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithMaxSize(128)
+                .Build();
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.BuildOrThrow(System.Boolean)">
             <summary>
-            容错构建入口（M13）。<br />
-            <paramref name="throwOnError"/> 为 <c>true</c>（默认）时与 <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.Build"/> 行为完全一致；
-            为 <c>false</c> 时构建失败（配置非法 / metrics 注册冲突等）不抛出，降级返回一个
-            「Min=0、Max=0、全部功能开关关闭」的可用空池并记录错误日志——后续 Acquire 走
-            拒绝策略语义（如 BlockTimeout 超时抛出），池本身可安全 Dispose 与观测。
+            Fault-tolerant build entry point.<br />
+            When <paramref name="throwOnError"/> is <c>true</c> (the default), behavior is identical to
+            <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.Build"/>; when <c>false</c>, a build failure (invalid configuration, metrics
+            registration conflict, etc.) does not throw but degrades to a usable empty pool with
+            Min=0/Max=0 and all feature toggles off, while logging an error — subsequent Acquire calls
+            follow the reject-policy semantics (e.g. BlockTimeout throwing on timeout), and the pool
+            itself can be safely disposed and observed.
             </summary>
-            <param name="throwOnError">构建失败时是否抛出异常；<c>false</c> 降级为空池。</param>
+            <param name="throwOnError">Whether to throw on a build failure; <c>false</c> degrades to an
+            empty pool.</param>
+            <returns>A ready-to-use <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/>.</returns>
+            <exception cref="T:System.InvalidOperationException">When <paramref name="throwOnError"/> is
+            <c>true</c> and the configuration is invalid.</exception>
             <remarks>
-            典型场景：配置来自外部输入（Configuration / 远端下发），构建失败时业务需要
-            「可运行的降级池 + 告警日志」而非进程崩溃。注意：预热阶段的创建失败本就被池内
-            捕获（PreWarm 记录日志后继续），因此空池降级主要覆盖构建期配置校验失败。
+            Typical scenario: configuration comes from external input (appsettings / remote push) and, on
+            build failure, the business needs a "runnable degraded pool + alert log" rather than a process
+            crash. Note: creation failures during warmup are already captured inside the pool (PreWarm logs
+            and continues), so the empty-pool degradation mainly covers build-time configuration validation
+            failures.
             </remarks>
+            <example>
+            <code>
+            var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+                .Configure(o =&gt; LoadFromConfig(o))
+                .BuildOrThrow(throwOnError: false);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.BuildDegradedEmptyPool">
             <summary>
-            M13：构建降级空池。Min=0 / Max=0 / 全部功能开关关闭，仅保留与拒绝策略相关的
-            语义配置（超时 / 拒绝策略 / 创建重试），保证 Acquire 行为可预期。
+            Builds the degraded empty pool. Min=0 / Max=0 / all feature toggles off, keeping only the
+            reject-policy-related semantic configuration (timeout / reject policy / creation retry) so
+            that Acquire behavior stays predictable.
             </summary>
+            <returns>A degraded <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/> that rejects via the configured policy.</returns>
         </member>
         <member name="T:DotNetCore.HayateOP.HayatePoolCapacityAlarmLevel">
             <summary>
-            池容量告警级别（M12）。
+            Pool capacity alarm level.
             </summary>
             <remarks>
-            语义：按「借出对象数 / MaxPoolSize」的使用率与 <c>WarnAtRatio</c> / <c>CriticalAtRatio</c>
-            比较得出；仅在状态翻转时触发一次回调（回落静默复位、重新整备）。
+            Semantics: derived from the usage ratio (borrowed objects / MaxPoolSize) compared against <c>WarnAtRatio</c> / <c>CriticalAtRatio</c>;
+            a callback fires only once on a state transition (it silently resets and re-arms when the ratio falls back).
             </remarks>
         </member>
         <member name="F:DotNetCore.HayateOP.HayatePoolCapacityAlarmLevel.Normal">
-            <summary>正常水位（低于告警阈值）。</summary>
+            <summary>Normal water level (below the warning threshold).</summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayatePoolCapacityAlarmLevel.Warning">
-            <summary>警告水位（使用率 ≥ WarnAtRatio 且低于 CriticalAtRatio）。</summary>
+            <summary>Warning water level (usage ratio &gt;= WarnAtRatio and below CriticalAtRatio).</summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayatePoolCapacityAlarmLevel.Critical">
-            <summary>危急水位（使用率 ≥ CriticalAtRatio）。</summary>
+            <summary>Critical water level (usage ratio &gt;= CriticalAtRatio).</summary>
         </member>
         <member name="T:DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs">
             <summary>
-            池容量告警事件参数（M12）。
+            Pool capacity alarm event arguments.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs.PoolName">
-            <summary>触发告警的池名称。</summary>
+            <summary>The name of the pool that raised the alarm.</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs.Level">
-            <summary>告警级别（Warning / Critical；Normal 不触发回调）。</summary>
+            <summary>The alarm level (Warning / Critical; Normal does not raise a callback).</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs.UsageRatio">
-            <summary>触发时刻的使用率（借出数 / MaxPoolSize，0~1）。</summary>
+            <summary>The usage ratio at trigger time (borrowed count / MaxPoolSize, 0~1).</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs.BorrowedCount">
-            <summary>触发时刻的借出对象数。</summary>
+            <summary>The number of borrowed objects at trigger time.</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs.MaxPoolSize">
-            <summary>池容量上限（MaxPoolSize）。</summary>
+            <summary>The pool capacity upper bound (MaxPoolSize).</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs.#ctor(System.String,DotNetCore.HayateOP.HayatePoolCapacityAlarmLevel,System.Double,System.Int32,System.Int32)">
+            <summary>
+            Initializes a new instance of the <see cref="T:DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs"/> class.
+            </summary>
+            <param name="poolName">The name of the pool that raised the alarm.</param>
+            <param name="level">The alarm level (Warning or Critical; Normal never raises a callback).</param>
+            <param name="usageRatio">The usage ratio at trigger time (borrowed count / MaxPoolSize, 0~1).</param>
+            <param name="borrowedCount">The number of borrowed objects at trigger time.</param>
+            <param name="maxPoolSize">The pool capacity upper bound (MaxPoolSize).</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolCapacityAlarmEventArgs.ToString">
+            <summary>
+            Returns a human-readable description of the capacity alarm, including the level and usage ratio.
+            </summary>
+            <returns>A formatted alarm string.</returns>
         </member>
         <member name="T:DotNetCore.HayateOP.HayatePoolMetadata">
             <summary>
-            注册表中单个池的元数据条目（M11+，2.5）。
+            A metadata entry for a single pool in the registry (2.5).
             <para>
-            在「逻辑池名 → 池实例」的既有映射之上补充管理面信息：元素类型、池运行时类型、
-            注册（构建）时间。<see cref="P:DotNetCore.HayateOP.HayatePoolMetadata.RegisteredAt"/> 取注册瞬间——DI 流程中池构建后立即注册，
-            可视为池的构建时间；直接 Builder 场景若自行注册则同义。
+            Adds management-plane information on top of the existing "logical pool name -> pool instance" mapping: element type, pool runtime type,
+            and registration (build) time. <see cref="P:DotNetCore.HayateOP.HayatePoolMetadata.RegisteredAt"/> is taken at the registration instant - in a DI flow the pool is registered immediately after being built,
+            which can be treated as the pool's build time; in a direct Builder scenario, self-registration is equivalent.
             </para>
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolMetadata.PoolName">
-            <summary>池注册名（逻辑名，注册表的键）。</summary>
+            <summary>The registered pool name (the logical name, used as the registry key).</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolMetadata.ElementType">
-            <summary>池化元素的类型（<see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/> 的 T）；非泛型实现为 null。</summary>
+            <summary>The type of the pooled element (the T of <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/>); null for non-generic implementations.</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolMetadata.PoolType">
-            <summary>池实例的运行时类型。</summary>
+            <summary>The runtime type of the pool instance.</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolMetadata.RegisteredAt">
-            <summary>注册（≈构建）时间。</summary>
+            <summary>The registration (approximately the build) time.</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolMetadata.Pool">
-            <summary>池实例（非泛型面）。注意：与注册表生命周期解耦，池可能已被外部 Dispose。</summary>
+            <summary>The pool instance (non-generic surface). Note: decoupled from the registry lifecycle; the pool may have already been disposed externally.</summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolMetadata.ResolveElementType(DotNetCore.HayateOP.IHayateObjectPool)">
             <summary>
-            从池实例反射解析 <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/> 的元素类型 T。
-            解析不到（非泛型自定义实现）时返回 null——元数据仍可用，只是缺类型信息。
+            Reflects the element type T of <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/> from the pool instance.
+            Returns null when it cannot be resolved (a non-generic custom implementation) — the metadata
+            is still usable, it just lacks type information.
             </summary>
         </member>
         <member name="T:DotNetCore.HayateOP.HayatePoolObjectDetail">
             <summary>
-            M20（2.5）：快照中的逐对象生命周期明细。
-            由 <see cref="P:DotNetCore.HayateOP.HayatePoolSnapshot.ObjectDetails"/> 携带，一次快照覆盖全部存活包装对象
-            （空闲 + 借出）。字段为快照瞬间取值，不构成任何一致性保证（诊断用途）。
+            Per-object lifecycle detail within a snapshot (2.5).
+            Carried by <see cref="P:DotNetCore.HayateOP.HayatePoolSnapshot.ObjectDetails"/>; one snapshot covers every live wrapper object
+            (idle plus borrowed). Fields are captured at the snapshot instant and carry no consistency guarantee (diagnostic use only).
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolObjectDetail.ShardIndex">
-            <summary>对象归属分片索引。</summary>
+            <summary>The index of the shard that owns this object.</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolObjectDetail.IsBorrowed">
-            <summary>快照瞬间是否处于借出状态。</summary>
+            <summary>Whether the object is borrowed at the snapshot instant.</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolObjectDetail.LeaseCount">
-            <summary>累计借出次数。</summary>
+            <summary>The cumulative number of times this object has been borrowed.</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolObjectDetail.CreatedAtTick">
-            <summary>创建时刻的挂钟时间戳（<see cref="!:DateTimeOffset.UtcNow.Ticks"/> 口径）。</summary>
+            <summary>The wall-clock timestamp at creation time (same basis as <c>DateTimeOffset.UtcNow.Ticks</c>).</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolObjectDetail.LeaseTimeMs">
-            <summary>最近一次租约时长（毫秒；未归还时为最近一次记录值或 0）。</summary>
+            <summary>The duration of the most recent lease, in milliseconds (the last recorded value, or 0 if not yet returned).</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolObjectDetail.Generation">
-            <summary>分代标记（0 年轻代 / 1 老年代，仅分代优化开启时升级）。</summary>
+            <summary>The generation marker (0 = young generation, 1 = old generation; promoted only when generational optimization is enabled).</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolObjectDetail.OwnerPoolName">
-            <summary>所属池的逻辑名。</summary>
+            <summary>The logical name of the owning pool.</summary>
         </member>
         <member name="T:DotNetCore.HayateOP.HayatePoolOptions">
             <summary>
-            Hayate 对象池运行参数。
+            Runtime options for the Hayate object pool.
             </summary>
             <remarks>
-            该配置用于平衡吞吐、延迟与资源占用。时间类配置优先使用 <see cref="T:System.TimeSpan"/>；
-            带 <c>Ms</c> 后缀的配置单位为毫秒。
+            These options balance throughput, latency, and resource usage. Time-based options prefer
+            <see cref="T:System.TimeSpan"/>; options whose name ends with <c>Ms</c> are expressed in milliseconds.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.MinPoolSize">
             <summary>
-            池预热的最小对象数。<br />
-            默认值：<see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_MIN_POOL_SIZE"/>（5）。
+            Minimum number of objects prewarmed in the pool.<br />
+            Default value: <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_MIN_POOL_SIZE"/> (5).
             </summary>
             <remarks>
-            用途：启动阶段预创建对象，降低冷启动抖动。<br />
-            特例：设置为 0 时不预热。<br />
-            边界：建议大于等于 0，且不大于 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/>。<br />
-            推荐值区间：0~64。
+            Purpose: pre-create objects at startup to reduce cold-start jitter.<br />
+            Special case: setting it to 0 disables prewarming.<br />
+            Boundary: should be &gt;= 0 and not greater than <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/>.<br />
+            Recommended range: 0~64.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize">
             <summary>
-            池允许维护的最大对象数。<br />
-            默认值：<see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_MAX_POOL_SIZE"/>（50）。
+            Maximum number of objects the pool is allowed to maintain.<br />
+            Default value: <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_MAX_POOL_SIZE"/> (50).
             </summary>
             <remarks>
-            用途：限制内存与下游资源上限。<br />
-            特例：上限过小会放大等待与超时。<br />
-            边界：建议大于等于 1，且不小于 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MinPoolSize"/>。<br />
-            推荐值区间：32~2048。
+            Purpose: caps memory and downstream resource usage.<br />
+            Special case: too small a cap amplifies waiting and timeouts.<br />
+            Boundary: should be &gt;= 1 and not less than <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MinPoolSize"/>.<br />
+            Recommended range: 32~2048.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.DefaultAcquireTimeout">
             <summary>
-            默认借用超时时间。<br />
-            默认值：<c>TimeSpan.FromSeconds(5)</c>。
+            Default borrow timeout.<br />
+            Default value: <c>TimeSpan.FromSeconds(5)</c>.
             </summary>
             <remarks>
-            用途：作为无参 <c>Acquire</c> 的等待上限。<br />
-            特例：在阻塞策略下，超时后会进入拒绝策略分支。<br />
-            边界：建议大于 <see cref="F:System.TimeSpan.Zero"/>。<br />
-            推荐值区间：1~30 秒。
+            Purpose: serves as the wait upper bound for the parameterless <c>Acquire</c>.<br />
+            Special case: under the blocking policy, a timeout triggers the reject-policy branch.<br />
+            Boundary: should be greater than <see cref="F:System.TimeSpan.Zero"/>.<br />
+            Recommended range: 1~30 seconds.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.RejectPolicy">
             <summary>
-            借用失败时的拒绝策略。<br />
-            默认值：<see cref="F:DotNetCore.HayateOP.HayatePoolRejectPolicy.BlockTimeout"/>。
+            Reject policy applied when a borrow fails.<br />
+            Default value: <see cref="F:DotNetCore.HayateOP.HayatePoolRejectPolicy.BlockTimeout"/>.
             </summary>
             <remarks>
-            用途：定义等待超时后的处理动作。<br />
-            特例：当前实现对 <c>Abort</c> 与 <c>CreateNew</c> 有显式分支，其他值会抛出 <see cref="T:System.InvalidOperationException"/>。<br />
-            边界：必须是有效枚举值。<br />
-            推荐值区间：通用场景使用 <c>BlockTimeout</c>，降级兜底可选 <c>CreateNew</c>。
+            Purpose: defines the action taken after the wait times out.<br />
+            Special case: the current implementation has explicit branches for <c>Abort</c> and
+            <c>CreateNew</c>; other values throw <see cref="T:System.InvalidOperationException"/>.<br />
+            Boundary: must be a valid enum value.<br />
+            Recommended range: use <c>BlockTimeout</c> for general scenarios; <c>CreateNew</c> is an
+            option for graceful-degradation fallbacks.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.CreationRetryCount">
             <summary>
-            创建失败后的最大重试次数。<br />
-            默认值：<see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_CREATION_RETRY_COUNT"/>（3）。
+            Maximum number of retries after a creation failure.<br />
+            Default value: <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_CREATION_RETRY_COUNT"/> (3).
             </summary>
             <remarks>
-            用途：提高瞬时失败时的创建成功率。<br />
-            特例：设置为 0 将直接失败不重试。<br />
-            边界：建议大于等于 0。<br />
-            推荐值区间：1~5。
+            Purpose: improves creation success rate under transient failures.<br />
+            Special case: setting it to 0 fails immediately without retrying.<br />
+            Boundary: should be &gt;= 0.<br />
+            Recommended range: 1~5.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.CreationRetryDelay">
             <summary>
-            创建重试间隔。<br />
-            默认值：<c>TimeSpan.FromMilliseconds(100)</c>（当前使用 <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_CREATION_RETRY_DELAY_MILLISECONDS"/>）。
+            Delay between creation retries.<br />
+            Default value: <c>TimeSpan.FromMilliseconds(100)</c> (currently uses
+            <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_CREATION_RETRY_DELAY_MILLISECONDS"/>).
             </summary>
             <remarks>
-            用途：控制连续重试之间的退避时间。<br />
-            特例：当前默认值较大（30s），与“创建重试延迟”常见预期不一致。<br />
-            边界：建议大于等于 <see cref="F:System.TimeSpan.Zero"/>。<br />
-            推荐值区间：50~1000ms。
+            Purpose: controls the backoff between consecutive retries.<br />
+            Special case: the current default is relatively large (30s), which differs from the common
+            expectation for a "creation retry delay".<br />
+            Boundary: should be &gt;= <see cref="F:System.TimeSpan.Zero"/>.<br />
+            Recommended range: 50~1000ms.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableSharding">
             <summary>
-            启用分片功能（关闭后强制单分片，所有分片相关配置失效）
+            Enables sharding. When disabled, the pool is forced into a single shard and all
+            shard-related configuration is ignored.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.ShardCount">
             <summary>
-            分片数量。默认值：<see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_SHARD_COUNT"/>（4）。
+            Number of shards. Default value: <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_SHARD_COUNT"/> (4).
             </summary>
             <remarks>
-            用途：通过多分片降低并发争用。<br />
-            特例：分片过多会提升管理成本并放大预热偏差。<br />
-            边界：建议大于等于 1。<br />
-            推荐值区间：2~16。
+            Purpose: reduce concurrent contention through multiple shards.<br />
+            Special case: too many shards raise management cost and amplify prewarm skew.<br />
+            Boundary: should be &gt;= 1.<br />
+            Recommended range: 2~16.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.ShardAffinityMode">
             <summary>
-            M18（2.5）：借出路径的分片亲和模式。默认 <see cref="F:DotNetCore.HayateOP.HayateShardAffinityMode.None"/>（顺序扫描，现状语义）。
+            Shard affinity mode for the borrow path. Defaults to
+            <see cref="F:DotNetCore.HayateOP.HayateShardAffinityMode.None"/> (sequential scan, preserving the original
+            semantics).
             </summary>
             <remarks>
-            None：从 0 号分片开始顺序扫描（与 2.4 及之前一致，零额外开销）。<br />
-            Thread：按托管线程 ID 稳定映射起始分片（同线程始终优先命中同一分片，提升缓存/句柄局部性；
-            起始分片忙时仍按环形继续扫描其余分片，不损失可用性）。<br />
-            Custom：使用 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.CustomShardAffinity"/> 委托返回的起始分片索引；委托返回 null 或越界时回落 None。
-            注意：Close 关闭分片（单分片）时本配置无实际效果。
+            None: starts scanning from shard 0 (identical to 2.4 and earlier, with zero extra
+            overhead).<br />
+            Thread: maps the starting shard stably by managed thread ID (the same thread always prefers
+            the same shard first, improving cache/handle locality; when the starting shard is busy it
+            continues scanning the remaining shards ring-wise, without losing availability).<br />
+            Custom: uses the starting shard index returned by the <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.CustomShardAffinity"/>
+            delegate; when the delegate returns null or an out-of-range value, it falls back to None.
+            Note: this setting has no effect when sharding is closed (single shard).
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.CustomShardAffinity">
             <summary>
-            M18：<see cref="F:DotNetCore.HayateOP.HayateShardAffinityMode.Custom"/> 模式下的起始分片索引委托。
-            返回值建议落在 [0, ShardCount)；返回越界值或 null 时本次借出回落顺序扫描。
-            仅在 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ShardAffinityMode"/> = Custom 时被调用（每次借出至多一次）。
+            Starting-shard-index delegate for <see cref="F:DotNetCore.HayateOP.HayateShardAffinityMode.Custom"/> mode.
+            The return value should fall in [0, ShardCount); an out-of-range or null return makes this
+            borrow fall back to a sequential scan. Only invoked when <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ShardAffinityMode"/> is
+            Custom (at most once per borrow).
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableAutoScaling">
             <summary>
-            启用自动扩缩容（关闭后池大小固定为MinPoolSize，所有扩缩容相关配置失效）
+            Enables automatic scaling. When disabled, the pool size is fixed to MinPoolSize and all
+            scaling-related configuration is ignored.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.ScalingIntervalMs">
             <summary>
-            伸缩策略检查周期（毫秒）。<br />
-            默认值：<see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_SCALING_INTERVAL_MILLISECONDS"/>（5000ms）。
+            Scaling check interval (milliseconds).<br />
+            Default value: <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_SCALING_INTERVAL_MILLISECONDS"/> (5000ms).
             </summary>
             <remarks>
-            用途：控制扩缩容决策频率。<br />
-            特例：过小会导致频繁调整，过大则响应慢。<br />
-            边界：建议大于 0。<br />
-            推荐值区间：1000~10000ms。
+            Purpose: controls how often scaling decisions are made.<br />
+            Special case: too small causes frequent adjustments; too large makes the pool slow to
+            respond.<br />
+            Boundary: should be &gt; 0.<br />
+            Recommended range: 1000~10000ms.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.ScaleUpThreshold">
             <summary>
-            扩容触发阈值（使用率）。<br />
-            默认值：<see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_SCALE_UP_THRESHOLD"/>（0.8）。
+            Scale-up trigger threshold (utilization).<br />
+            Default value: <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_SCALE_UP_THRESHOLD"/> (0.8).
             </summary>
             <remarks>
-            用途：当使用率达到阈值时倾向扩容。<br />
-            特例：与 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ScaleDownThreshold"/> 过近会造成抖动。<br />
-            边界：建议在 0~1 之间，且大于缩容阈值。<br />
-            推荐值区间：0.70~0.90。
+            Purpose: scale up when utilization reaches the threshold.<br />
+            Special case: too close to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ScaleDownThreshold"/> causes flapping.<br />
+            Boundary: should be between 0 and 1, and greater than the scale-down threshold.<br />
+            Recommended range: 0.70~0.90.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.ScaleDownThreshold">
             <summary>
-            缩容触发阈值（使用率）。<br />
-            默认值：<see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_SCALE_DOWN_THRESHOLD"/>（0.2）。
+            Scale-down trigger threshold (utilization).<br />
+            Default value: <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_SCALE_DOWN_THRESHOLD"/> (0.2).
             </summary>
             <remarks>
-            用途：当使用率长期低于阈值时倾向缩容。<br />
-            特例：过高会导致对象频繁销毁重建。<br />
-            边界：建议在 0~1 之间，且小于扩容阈值。<br />
-            推荐值区间：0.10~0.40。
+            Purpose: scale down when utilization stays below the threshold for a long time.<br />
+            Special case: too high causes objects to be destroyed and recreated too often.<br />
+            Boundary: should be between 0 and 1, and less than the scale-up threshold.<br />
+            Recommended range: 0.10~0.40.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.ScaleDownStep">
             <summary>
-            缩容步长（每次缩容减少的对象数）。<br />
-            默认值：<see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_SCALE_DOWN_STEP"/>（5）。
+            Scale-down step (number of objects removed per scale-down).<br />
+            Default value: <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_SCALE_DOWN_STEP"/> (5).
             </summary>
             <remarks>
-            用途：与 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ScaleUpStep"/> 解耦，便于业务侧"扩容激进、缩容保守"调优。<br />
-            边界：必须 ≥ 1；若超过当前可用对象数，结果会被钳制为 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MinPoolSize"/>。
+            Purpose: decoupled from <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ScaleUpStep"/> so callers can tune "aggressive scale-up,
+            conservative scale-down".<br />
+            Boundary: must be &gt;= 1; if it exceeds the current available object count, the result is
+            clamped to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MinPoolSize"/>.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableValidation">
             <summary>
-            启用对象验证（关闭后所有借出/归还/空闲验证逻辑失效）
+            Enables object validation. When disabled, all borrow/return/idle validation logic is
+            ignored.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.ValidateOnBorrow">
             <summary>
-            借出前是否校验对象有效性。<br />
-            默认值：<c>false</c>。
+            Whether to validate object validity before borrowing.<br />
+            Default value: <c>false</c>.
             </summary>
             <remarks>
-            用途：在 <c>Acquire</c> 前剔除失效对象。<br />
-            特例：启用后会增加借出路径延迟。<br />
-            边界：布尔开关。<br />
-            推荐值区间：对象易失效时开启；纯内存轻对象可关闭。
+            Purpose: filter out invalid objects before <c>Acquire</c>.<br />
+            Special case: enabling it adds latency to the borrow path.<br />
+            Boundary: boolean switch.<br />
+            Recommended range: enable when objects are prone to becoming invalid; disable for pure
+            in-memory lightweight objects.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.ValidateOnReturn">
             <summary>
-            归还前是否校验对象有效性。<br />
-            默认值：<c>false</c>。
+            Whether to validate object validity before returning.<br />
+            Default value: <c>false</c>.
             </summary>
             <remarks>
-            用途：在归还阶段过滤异常对象。<br />
-            特例：当前版本主流程未使用该开关，可视为预留配置。<br />
-            边界：布尔开关。<br />
-            推荐值区间：保持默认，待实现接入后再按业务开启。
+            Purpose: filter out abnormal objects at return time.<br />
+            Special case: the current main flow does not use this switch yet; treat it as a reserved
+            configuration.<br />
+            Boundary: boolean switch.<br />
+            Recommended range: keep the default until the implementation is wired in, then enable per
+            business needs.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.ValidateWhileIdle">
             <summary>
-            是否对空闲对象进行周期校验（属性名沿用当前实现）。<br />
-            默认值：<c>false</c>。
+            Whether to periodically validate idle objects (property name kept from the current
+            implementation).<br />
+            Default value: <c>false</c>.
             </summary>
             <remarks>
-            用途：定期清理空闲队列中的无效对象。<br />
-            特例：当前版本主流程未使用该开关，可视为预留配置。<br />
-            边界：布尔开关。<br />
-            推荐值区间：保持默认。
+            Purpose: periodically clean up invalid objects in the idle queue.<br />
+            Special case: the current main flow does not use this switch yet; treat it as a reserved
+            configuration.<br />
+            Boundary: boolean switch.<br />
+            Recommended range: keep the default.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.ValidateIntervalMs">
             <summary>
-            周期校验间隔（毫秒）。<br />
-            默认值：<see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_VALIDATE_INTERVAL_MILLISECONDS"/>（30000ms）。
+            Periodic validation interval (milliseconds).<br />
+            Default value: <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_VALIDATE_INTERVAL_MILLISECONDS"/> (30000ms).
             </summary>
             <remarks>
-            用途：控制后台校验任务频率。<br />
-            特例：即使相关开关未开启，间隔过小也会增加定时器唤醒频率。<br />
-            边界：建议大于 0。<br />
-            推荐值区间：10000~60000ms。
+            Purpose: controls the frequency of the background validation task.<br />
+            Special case: even when the relevant switches are off, too small an interval increases timer
+            wake-up frequency.<br />
+            Boundary: should be &gt; 0.<br />
+            Recommended range: 10000~60000ms.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableEviction">
             <summary>
-            启用空闲对象驱逐（关闭后不执行驱逐逻辑，所有驱逐相关配置失效）
+            Enables idle-object eviction. When disabled, no eviction logic runs and all eviction-related
+            configuration is ignored.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime">
             <summary>
-            对象最大存活时长。<br />
-            默认值：<c>TimeSpan.FromMinutes(10)</c>。
+            Maximum object lifetime.<br />
+            Default value: <c>TimeSpan.FromMinutes(10)</c>.
             </summary>
             <remarks>
-            用途：限制对象生命周期，降低陈旧状态风险。<br />
-            特例：外部连接类对象可设置更短。<br />
-            边界：建议大于 <see cref="F:System.TimeSpan.Zero"/>。<br />
-            推荐值区间：5~60 分钟。
+            Purpose: cap object lifetime to reduce stale-state risk.<br />
+            Special case: external-connection objects can use a shorter value.<br />
+            Boundary: should be greater than <see cref="F:System.TimeSpan.Zero"/>.<br />
+            Recommended range: 5~60 minutes.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.MaxIdleTime">
             <summary>
-            对象最大空闲时长。<br />
-            默认值：<c>TimeSpan.FromMinutes(5)</c>。
+            Maximum object idle time.<br />
+            Default value: <c>TimeSpan.FromMinutes(5)</c>.
             </summary>
             <remarks>
-            用途：清理长期未使用对象，回收资源。<br />
-            特例：低频业务可适当放宽以减少重建。<br />
-            边界：建议大于等于 <see cref="F:System.TimeSpan.Zero"/>。<br />
-            推荐值区间：1~30 分钟。
+            Purpose: reclaim resources by evicting long-unused objects.<br />
+            Special case: low-frequency workloads can relax this to reduce recreation.<br />
+            Boundary: should be &gt;= <see cref="F:System.TimeSpan.Zero"/>.<br />
+            Recommended range: 1~30 minutes.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.SoftMinEvictableIdleTime">
             <summary>
-            软最小可驱逐空闲时长。<br />
-            默认值：<c>TimeSpan.FromMinutes(2)</c>。
+            Soft minimum evictable idle time.<br />
+            Default value: <c>TimeSpan.FromMinutes(2)</c>.
             </summary>
             <remarks>
-            用途：给空闲对象保留最短驻留时间，减少抖动。<br />
-            特例：资源紧张时仍可能被驱逐。<br />
-            边界：建议大于等于 <see cref="F:System.TimeSpan.Zero"/>，且不大于 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxIdleTime"/>。<br />
-            推荐值区间：0.5~10 分钟。
+            Purpose: keep objects resident for a minimum idle duration to reduce flapping.<br />
+            Special case: may still be evicted under resource pressure.<br />
+            Boundary: should be &gt;= <see cref="F:System.TimeSpan.Zero"/> and not greater than
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxIdleTime"/>.<br />
+            Recommended range: 0.5~10 minutes.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EvictionIntervalMs">
             <summary>
-            驱逐扫描周期（毫秒）。<br />
-            默认值：<see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_EVICTION_INTERVAL_MILLISECONDS"/>（30000ms）。
+            Eviction scan interval (milliseconds).<br />
+            Default value: <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_EVICTION_INTERVAL_MILLISECONDS"/> (30000ms).
             </summary>
             <remarks>
-            用途：控制驱逐任务执行频率。<br />
-            特例：扫描过于频繁会提高 CPU 与锁竞争。<br />
-            边界：建议大于 0。<br />
-            推荐值区间：10000~60000ms。
+            Purpose: controls how often the eviction task runs.<br />
+            Special case: scanning too frequently raises CPU and lock contention.<br />
+            Boundary: should be &gt; 0.<br />
+            Recommended range: 10000~60000ms.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.NumTestsPerEvictionRun">
             <summary>
-            每次驱逐扫描的样本数。<br />
-            默认值：<see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_EVICTION_RUNS_PER_EVICTION"/>（10）。
+            Number of samples scanned per eviction run.<br />
+            Default value: <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_EVICTION_RUNS_PER_EVICTION"/> (10).
             </summary>
             <remarks>
-            用途：控制单次驱逐开销与清理力度。<br />
-            特例：值过小会延迟清理，值过大会影响峰值延迟。<br />
-            边界：建议大于等于 1。<br />
-            推荐值区间：5~128。
+            Purpose: controls the cost and cleanup strength of a single eviction.<br />
+            Special case: too small delays cleanup; too large affects peak latency.<br />
+            Boundary: should be &gt;= 1.<br />
+            Recommended range: 5~128.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableGenerationOptimization">
             <summary>
-            启用分代优化（关闭后所有对象均为年轻代，不跳过验证）
+            Enables generational optimization. When disabled, all objects are treated as the young
+            generation and validation is never skipped.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.GenerationThresholdMs">
             <summary>
-            对象晋升代际的阈值（毫秒）。<br />
-            默认值：<see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_GEN_THRESHOLD_MILLISECONDS"/>（30000ms）。
+            Threshold (milliseconds) for an object to be promoted to an older generation.<br />
+            Default value: <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_GEN_THRESHOLD_MILLISECONDS"/> (30000ms).
             </summary>
             <remarks>
-            用途：标记长期存活对象，供策略层做分代管理。<br />
-            特例：阈值过小会导致对象过早晋升。<br />
-            边界：建议大于等于 0。<br />
-            推荐值区间：5000~120000ms。
+            Purpose: mark long-lived objects so the policy layer can manage generations.<br />
+            Special case: too small a threshold promotes objects prematurely.<br />
+            Boundary: should be &gt;= 0.<br />
+            Recommended range: 5000~120000ms.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.OldGenerationValidationInterval">
-            <summary>
-            老年代数据验证的间隔次数配置项
-            </summary>
-            <value>
-            默认值：3；
-            推荐值区间：1 ~ 10；
-            边界限制：最小值为1，最大值无硬性限制（建议不超过20）；
-            </value>
-            <remarks>
-            【核心用途】：控制老年代数据的验证频率，属性值 N 表示每执行 N 次常规检查流程，才对老年代数据执行 1 次全量验证，
-            用于平衡老年代数据验证的完整性与性能开销（老年代全量验证耗时较长，高频验证会降低整体处理效率）。
+             <summary>
+             Interval (in regular-validation passes) between full validations of the old generation.
+             </summary>
+             <value>
+             Default value: 3;
+             Recommended range: 1 ~ 10;
+             Boundary: minimum 1, no hard maximum (recommended not to exceed 20);
+             </value>
+             <remarks>
+             Core purpose: controls the validation frequency of the old generation. A value of N means
+             that for every N regular validation passes, the old generation is fully validated once. This
+             balances the completeness of old-generation validation against performance cost (a full
+             old-generation validation is relatively expensive, so validating too often reduces overall
+             throughput).
             
-            【特例说明】：
-            1. 当值为 1 时：每次常规检查流程都会触发老年代全量验证，适用于数据一致性要求极高、性能敏感度低的场景（如金融核心数据校验）；
-            2. 当值 ≤ 0 时：框架会自动修正为默认值 3，不允许关闭老年代验证（若需完全关闭，需单独配置 OldGenerationValidationEnabled = false）；
-            3. 当值 > 10 时：验证频率过低，可能导致老年代数据异常累积过久，增加问题排查难度，仅建议在纯性能优先、数据容错率高的场景临时使用。
+             Special cases:
+             1. When the value is 1: every regular validation pass triggers a full old-generation
+                validation. Use this for scenarios with very high consistency requirements and low
+                performance sensitivity (e.g. financial core-data checks).
+             2. When the value is &lt;= 0: the framework automatically corrects it to the default of 3;
+                the old-generation validation cannot be disabled this way (to disable it entirely, set
+                OldGenerationValidationEnabled = false separately).
+             3. When the value &gt; 10: the validation frequency is too low, which may let
+                old-generation anomalies accumulate for too long and increase troubleshooting difficulty.
+                Only use this temporarily in pure performance-first, high fault-tolerance scenarios.
             
-            【推荐值区间说明】：
-            - 常规业务场景（平衡性能与验证完整性）：3 ~ 5；
-            - 高性能低一致性场景：6 ~ 10；
-            - 高一致性低性能场景：1 ~ 2；
-            </remarks>
+             Recommended range:
+             - General business scenarios (balance performance and validation completeness): 3 ~ 5;
+             - High-performance, low-consistency scenarios: 6 ~ 10;
+             - High-consistency, low-performance scenarios: 1 ~ 2;
+             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLeakDetection">
             <summary>
-            启用对象泄漏检测（关闭后不记录调用堆栈，不执行泄漏扫描）
+            Enables object leak detection. When disabled, call stacks are not recorded and no leak scan
+            runs.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.LeakDetectionThreshold">
             <summary>
-            泄漏检测阈值。<br />
-            默认值：<c>TimeSpan.FromMinutes(30)</c>（由 <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_LEAK_DETECTION_THRESHOLD_SECONDS"/> 构造）。
+            Leak detection threshold.<br />
+            Default value: <c>TimeSpan.FromMinutes(30)</c> (constructed from
+            <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_LEAK_DETECTION_THRESHOLD_SECONDS"/>).
             </summary>
             <remarks>
-            用途：定义借出对象多久未归还才视为疑似泄漏。<br />
-            特例：常量名为“SECONDS”，但当前默认表达式按“分钟”构造。<br />
-            边界：建议大于 <see cref="F:System.TimeSpan.Zero"/>。<br />
-            推荐值区间：10 秒~10 分钟（请按实际耗时调整）。
+            Purpose: defines how long a borrowed object can stay out before it is treated as a suspected
+            leak.<br />
+            Special case: the constant is named "SECONDS" but the default expression is built in
+            minutes.<br />
+            Boundary: should be greater than <see cref="F:System.TimeSpan.Zero"/>.<br />
+            Recommended range: 10 seconds ~ 10 minutes (adjust to actual durations).
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.LeakTraceCaptureMode">
             <summary>
-            泄漏取证模式。<br />
-            默认值：<see cref="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.Off"/>。<br />
+            Leak trace capture mode.<br />
+            Default value: <see cref="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.Off"/>.<br />
             </summary>
             <remarks>
-            用途：控制借出热路径是否抓取调用栈（取证），与泄漏检测本身（阈值判定 + LeakCount）解耦。<br />
-            行为变更（PR-D L1）：2.0 及之前默认每次借出抓取全栈（数十微秒 CPU / 10~40KB 分配/次）；
-            2.1 起默认 <c>Off</c>，LeakTraces 中为占位文案；需要栈信息时显式选择
-            <see cref="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.Sampled"/> 或 <see cref="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.EveryAcquire"/>。<br />
-            边界：仅在 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLeakDetection"/> 为 <c>true</c> 时生效。
+            Purpose: controls whether the borrow hot path captures a call stack (for evidence),
+            decoupled from leak detection itself (threshold judgement + LeakCount).<br />
+            Behavior change: prior to 2.0, a full stack trace was captured on every borrow by default
+            (tens of microseconds of CPU / 10~40KB allocated per borrow); starting with 2.1 the default
+            is <c>Off</c> and LeakTraces holds a placeholder entry. To capture stacks, explicitly choose
+            <see cref="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.Sampled"/> or
+            <see cref="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.EveryAcquire"/>.<br />
+            Boundary: only takes effect when <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLeakDetection"/> is <c>true</c>.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.LeakTraceSampleRate">
             <summary>
-            泄漏取证采样分母（1/N）。<br />
-            默认值：<c>1024</c>（由 <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_LEAK_TRACE_SAMPLE_RATE"/> 构造）。
+            Leak-trace sample denominator (1/N).<br />
+            Default value: <c>1024</c> (constructed from
+            <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_LEAK_TRACE_SAMPLE_RATE"/>).
             </summary>
             <remarks>
-            用途：仅 <see cref="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.Sampled"/> 模式生效，每 N 次借出抓取 1 次调用栈（第 1 次必抓）；N=1 等价于每次抓取。<br />
-            边界：≤ 0 时构建/运行期自动修正为默认值 1024（见 <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/>）。
+            Purpose: only effective in <see cref="F:DotNetCore.HayateOP.HayateLeakTraceCaptureMode.Sampled"/> mode; captures a
+            stack once every N borrows (the first borrow always captures); N=1 is equivalent to
+            capturing every time.<br />
+            Boundary: when &lt;= 0, the build/runtime auto-corrects it to the default 1024 (see
+            <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/>).
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.WarnAtRatio">
             <summary>
-            容量告警阈值（使用率，借出数 / MaxPoolSize）。<br />
-            默认值：<c>0</c>（0 表示不启用容量告警，零热路径开销）。
+            Capacity warning threshold (utilization, borrowed count / MaxPoolSize).<br />
+            Default value: <c>0</c> (0 means capacity warnings are disabled, with zero hot-path
+            overhead).
             </summary>
             <remarks>
-            用途：借出水位越过该比例时触发一次 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.OnCapacityWarning"/> 回调。<br />
-            特例：状态翻转去抖——越线只触发一次，回落到阈值下方静默复位后可再次触发。<br />
-            边界：0（禁用）或 (0, 1]；大于 1 会被 <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/> 钳制为 1。
+            Purpose: when the borrow water level crosses this ratio, fires the
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.OnCapacityWarning"/> callback once.<br />
+            Special case: edge-debounced — crossing the line fires only once; after falling back below
+            the threshold and resetting silently, it can fire again.<br />
+            Boundary: 0 (disabled) or (0, 1]; values &gt; 1 are clamped to 1 by
+            <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/>.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.CriticalAtRatio">
             <summary>
-            容量危急阈值（使用率，借出数 / MaxPoolSize）。<br />
-            默认值：<c>0</c>（0 表示不启用危急告警）。
+            Capacity critical threshold (utilization, borrowed count / MaxPoolSize).<br />
+            Default value: <c>0</c> (0 means critical alarms are disabled).
             </summary>
             <remarks>
-            用途：借出水位越过该比例时触发一次 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.OnCapacityCritical"/> 回调。<br />
-            特例：与 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.WarnAtRatio"/> 同时启用时不得小于后者（规范化时自动抬升至 WarnAtRatio）；<br />
-            从 Normal 直接越线到 Critical 时仅触发 Critical 回调，不补发 Warning。<br />
-            边界：0（禁用）或 (0, 1]；大于 1 会被 <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/> 钳制为 1。
+            Purpose: when the borrow water level crosses this ratio, fires the
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.OnCapacityCritical"/> callback once.<br />
+            Special case: when enabled together with <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.WarnAtRatio"/>, it must not be smaller
+            than it (normalized by auto-raising to WarnAtRatio); crossing directly from Normal to
+            Critical fires only the Critical callback, without a supplementary Warning.<br />
+            Boundary: 0 (disabled) or (0, 1]; values &gt; 1 are clamped to 1 by
+            <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/>.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.OnCapacityWarning">
             <summary>
-            容量告警回调（使用率 ≥ <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.WarnAtRatio"/> 时状态翻转触发一次）。默认 <c>null</c>。
+            Capacity warning callback (fires once on a state flip when utilization &gt;=
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.WarnAtRatio"/>). Default <c>null</c>.
             </summary>
             <remarks>
-            回调在借/还路径内联执行，应保持轻量（毫秒级返回）；回调内抛出的异常会被池捕获并记录日志，不影响借还主流程。
+            The callback runs inline on the borrow/return path and should stay lightweight (return
+            within milliseconds); exceptions thrown inside it are caught and logged by the pool and do
+            not affect the borrow/return main flow.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.OnCapacityCritical">
             <summary>
-            容量危急回调（使用率 ≥ <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.CriticalAtRatio"/> 时状态翻转触发一次）。默认 <c>null</c>。
+            Capacity critical callback (fires once on a state flip when utilization &gt;=
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.CriticalAtRatio"/>). Default <c>null</c>.
             </summary>
             <remarks>
-            回调在借/还路径内联执行，应保持轻量（毫秒级返回）；回调内抛出的异常会被池捕获并记录日志，不影响借还主流程。
+            The callback runs inline on the borrow/return path and should stay lightweight (return
+            within milliseconds); exceptions thrown inside it are caught and logged by the pool and do
+            not affect the borrow/return main flow.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableMetrics">
             <summary>
-            是否启用指标采集。<br />
-            默认值：<c>false</c>。
+            Whether to enable metrics collection.<br />
+            Default value: <c>false</c>.
             </summary>
             <remarks>
-            用途：输出池运行指标用于观测。<br />
-            特例：高频路径下开启会增加少量开销。<br />
-            边界：布尔开关。<br />
-            推荐值区间：测试/生产建议开启，极限性能压测可关闭。
+            Purpose: emit pool runtime metrics for observability.<br />
+            Special case: enabling it on high-frequency paths adds a small overhead.<br />
+            Boundary: boolean switch.<br />
+            Recommended range: enable in test/production; disable under extreme-performance benchmarks.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableAllocationTracking">
             <summary>
-            是否启用分配追踪（M3）。<br />
-            默认值：<c>false</c>。
+            Whether to enable allocation tracking.<br />
+            Default value: <c>false</c>.
             </summary>
             <remarks>
-            用途：统计借出 / 归还路径的线程分配增量（字节），用于定位热路径上的隐藏分配，
-            与基准测试的 <c>B/Op</c> 口径互为印证。<br />
-            特例：每次借还额外调用一次分配查询 API（近似零分配），仍有少量开销；
-            <c>net48</c> / <c>netstandard2.0</c> 目标框架缺少该 API，追踪在这些框架下静默不可用（计数恒 0）。<br />
-            边界：布尔开关。<br />
-            推荐值区间：诊断 / 调优期开启，生产热路径建议关闭。
+            Purpose: count the per-thread allocation delta (in bytes) on the borrow/return path, to
+            locate hidden allocations on the hot path; corroborates the benchmark's <c>B/Op</c> metric.<br />
+            Special case: each borrow/return makes one extra allocation-query API call (near zero
+            allocation) and still has a small overhead; the <c>net48</c> / <c>netstandard2.0</c> target
+            frameworks lack this API, so tracking is silently unavailable there (count stays 0).<br />
+            Boundary: boolean switch.<br />
+            Recommended range: enable during diagnosis/tuning; disable on production hot paths.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.WaitForWarmup">
             <summary>
-            是否让预热在后台进行、并令借出操作等待预热完成。<br />
-            默认值：<c>false</c>（与 2.4 及之前一致——构造期同步预热，借出不做额外等待）。
+            Whether to run warmup in the background and have borrow operations wait for warmup to
+            finish.<br />
+            Default value: <c>false</c> (consistent with 2.4 and earlier — synchronous warmup at
+            construction, with no extra wait on borrow).
             </summary>
             <remarks>
-            用途：<c>true</c> 时构造立即返回，<see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MinPoolSize"/> 的预热在后台线程完成；
-            预热完成前所有 <c>Acquire</c> / <c>AcquireAsync</c> 阻塞在就绪信号上，保证调用方
-            拿到对象时池已就绪（避免冷启动期大量创建开销落在首个业务请求上）。<br />
-            特例：与 L5 冷池自举互斥——等待期内不会触发「池空同步创建」自举，自举让位于就绪信号；
-            预热若失败，信号仍会置位（不永久阻塞），失败原因记录到日志。<br />
-            边界：布尔开关。<br />
-            推荐值区间：启动期可容忍少量延迟、且希望首请求零创建开销的服务建议开启。
+            Purpose: when <c>true</c>, construction returns immediately and the <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MinPoolSize"/>
+            warmup completes on a background thread; before warmup finishes, all <c>Acquire</c> /
+            <c>AcquireAsync</c> block on the readiness signal, so callers always get a ready pool
+            (avoiding large creation cost landing on the first business request during cold start).<br />
+            Special case: mutually exclusive with cold-pool bootstrap — during the wait, the "synchronous
+            create on empty pool" bootstrap is not triggered; bootstrap yields to the readiness signal;
+            if warmup fails, the signal is still set (no permanent block) and the failure reason is
+            logged.<br />
+            Boundary: boolean switch.<br />
+            Recommended range: enable for services that can tolerate a small startup delay yet want zero
+            creation cost on the first request.
             </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolOptions.CopyTo">
+            <summary>
+            Creates a new <see cref="T:DotNetCore.HayateOP.HayatePoolOptions"/> and copies all current settings into it.
+            </summary>
+            <returns>A new options instance with the same settings as this one.</returns>
+            <example>
+            <code>
+            var copy = options.CopyTo();
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolOptions.CopyTo(DotNetCore.HayateOP.HayatePoolOptions)">
+            <summary>
+            Copies all current settings into the supplied <paramref name="options"/> instance.
+            </summary>
+            <param name="options">The target options instance to copy values into.</param>
+            <returns>The same <paramref name="options"/> instance, updated with the current settings.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="options"/> is <c>null</c>.</exception>
+            <example>
+            <code>
+            var target = new HayatePoolOptions();
+            options.CopyTo(target);
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches">
+            <summary>
+            Normalizes dependent options so the configuration is internally consistent and passes
+            <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.IsValid"/>.
+            </summary>
+            <remarks>
+            Disabling a feature (sharding, auto-scaling, validation) forces its related settings into a
+            safe state; sample rates and alarm thresholds are clamped and ordering constraints are
+            enforced. Call this before building or validating the pool.
+            </remarks>
+            <example>
+            <code>
+            options.ApplyFeatureSwitches();
+            if (options.IsValid()) { /* build the pool */ }
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolOptions.IsValid">
+            <summary>
+            Validates that the current option values form a legal, buildable configuration.
+            </summary>
+            <returns><c>true</c> if the configuration is valid; otherwise <c>false</c>.</returns>
+            <remarks>
+            Internally calls <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/> first, then checks pool-size bounds,
+            scaling thresholds, time spans and feature-specific constraints.
+            </remarks>
+            <example>
+            <code>
+            if (!options.IsValid())
+                throw new InvalidOperationException("Invalid pool options");
+            </code>
+            </example>
         </member>
         <member name="T:DotNetCore.HayateOP.HayatePoolRejectPolicy">
             <summary>
-             拒绝策略枚举，定义了当请求被拒绝时的处理方式
+            Rejection-policy enum defining how a request is handled when it is rejected.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayatePoolRejectPolicy.Abort">
             <summary>
-             直接抛出异常，拒绝请求
+            Throw an exception immediately to reject the request.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayatePoolRejectPolicy.Block">
             <summary>
-             阻塞等待，直到有可用对象或超时，拒绝请求
+            Block and wait until an object becomes available or a timeout elapses.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayatePoolRejectPolicy.BlockTimeout">
             <summary>
-             默认策略，阻塞等待，直到有可用对象或超时，拒绝请求，并且在超时后抛出异常
+            The default policy: block and wait until an object becomes available or the timeout elapses,
+            and throw if the timeout is exceeded.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayatePoolRejectPolicy.CreateNew">
             <summary>
-             先等待归还、等满 acquire timeout 后才创建新对象（并非名字暗示的「立即绕过池建新」）。
-             创建的对象会登记进池、归还时可回池复用（T15）；空池冷启动首次调用最多付出一个完整超时延迟。
+            Wait for a return first and only create a new object once the acquire timeout has elapsed (contrary to what the name suggests, it does not immediately bypass the pool to create a new one).
+            The created object is registered into the pool and can be returned and reused; on a cold-start first call against an empty pool, it pays at most one full-timeout delay.
             </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.Timestamp">
+            <summary>The UTC timestamp at which this snapshot was taken.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.PooledCount">
+            <summary>The total number of objects currently held by the pool (idle plus borrowed).</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.BorrowedCount">
+            <summary>The number of objects currently borrowed out.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.TotalCreated">
+            <summary>The cumulative number of objects the pool has ever created.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.TotalMissed">
+            <summary>The cumulative number of acquires that could not be satisfied.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.TotalAcquired">
+            <summary>The cumulative number of successful acquires.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.LeakCount">
+            <summary>The cumulative leak count reported by leak detection.</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.LeakSuspectedCount">
             <summary>
-            疑似泄漏次数（M4，泄漏检测关闭时的回查告警计数）。
+            The suspected-leak count (a retrospective alert counter used when leak detection is disabled).
             </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.LeakTraces">
+            <summary>The captured leak traces (stack frames or placeholders), if leak tracing is enabled.</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.AllocationTrackingEnabled">
             <summary>
-            是否启用分配追踪（M3）。
+            Whether allocation tracking is enabled.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.AcquireAllocatedBytes">
             <summary>
-            借出路径累计分配字节数（M3，仅同步 <c>Acquire</c>）。
+            Cumulative bytes allocated on the borrow path (synchronous <c>Acquire</c> only).
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.ReleaseAllocatedBytes">
             <summary>
-            归还路径累计分配字节数（M3，仅同步 <c>Release</c>）。
+            Cumulative bytes allocated on the return path (synchronous <c>Release</c> only).
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.ObjectDetails">
             <summary>
-            M20（2.5）：逐对象生命周期明细（覆盖全部存活包装对象：空闲 + 借出）。
+            Per-object lifecycle details (covering every live wrapper object: idle plus borrowed).
             </summary>
         </member>
         <member name="T:DotNetCore.HayateOP.HayatePoolStats">
             <summary>
-            对象池统计信息
             Statistics information for object pool
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.PooledCount">
             <summary>
-            当前池中可用的对象数量
             Current number of available objects in the pool
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.TotalCreated">
             <summary>
-            累计创建的对象总数
             Total number of objects created since pool initialization
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.TotalReleased">
             <summary>
-            累计归还到池中的对象总数
             Total number of objects returned to the pool
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.TotalMissed">
             <summary>
-            累计未命中次数（需要创建新对象的次数）
             Total number of cache misses (times when new objects had to be created)
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.TotalAcquired">
             <summary>
-            累计被租用的对象总数
+            Total number of objects leased (borrowed) since pool initialization
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.AvailableSlots">
             <summary>
-            可用槽位数量
             Number of available slots in the pool
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.MinSize">
             <summary>
-            对象池的最小容量
             Minimum capacity of the object pool
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.CurrentSize">
             <summary>
-            对象池的当前容量
             Current capacity of the object pool
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.LeakDetectedCount">
             <summary>
-            检测到的对象泄漏次数
             Number of detected object leaks
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.LeakSuspectedCount">
             <summary>
-            疑似泄漏次数（M4，泄漏检测关闭时的回查告警计数）。<br />
-            EnableLeakDetection=false 时，TakeSnapshot 按同一 LeakDetectionThreshold 统计
-            「借出超阈值未归还」的对象次数；仅计数、不取证、不回收。
+            When EnableLeakDetection=false, TakeSnapshot counts objects by the same LeakDetectionThreshold
+            (borrowed past the threshold without being returned); it only counts, does not capture evidence or reclaim.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.AllocationTrackingEnabled">
             <summary>
-            是否启用分配追踪（M3）。
+            Whether allocation tracking is enabled.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.AcquireAllocatedBytes">
             <summary>
-            借出路径累计分配字节数（M3，仅同步 <c>Acquire</c>；分配追踪关闭时为 0）。
+            Cumulative bytes allocated on the acquire path (synchronized only from <c>Acquire</c>; 0 when allocation tracking is disabled).
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.ReleaseAllocatedBytes">
             <summary>
-            归还路径累计分配字节数（M3，仅同步 <c>Release</c>；分配追踪关闭时为 0）。
+            Cumulative bytes allocated on the release path (synchronized only from <c>Release</c>;
+            0 when allocation tracking is disabled).
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.AcquireAllocationSamples">
             <summary>
-            借出分配采样次数（M3）。
+            Number of allocation samples taken on the acquire path.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.ReleaseAllocationSamples">
             <summary>
-            归还分配采样次数（M3）。
+            Number of allocation samples taken on the release path.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.AverageAcquireAllocatedBytes">
             <summary>
-            借出路径平均分配字节数（M3）。
+            Average bytes allocated per acquire (acquire path).
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.AverageReleaseAllocatedBytes">
             <summary>
-            归还路径平均分配字节数（M3）。
+            Average bytes allocated per release (release path).
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.AverageWaitTimeMs">
             <summary>
-            平均等待时间（毫秒）
-            Average wait time in milliseconds
+            The average wait time in milliseconds.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.AverageLeaseTimeMs">
             <summary>
-            平均租用时间（毫秒）
             Average lease time in milliseconds
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.MaxWaitTimeMs">
             <summary>
-            最大等待时间（毫秒）
             Maximum wait time in milliseconds
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.MaxLeaseTimeMs">
             <summary>
-            最大租用时间（毫秒）
             Maximum lease time in milliseconds
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.MinWaitTimeMs">
             <summary>
-            最小等待时间（毫秒）
             Minimum wait time in milliseconds
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.MinLeaseTimeMs">
             <summary>
-            最小租用时间（毫秒）
             Minimum lease time in milliseconds
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.WaitTimeCount">
             <summary>
-            等待时间记录次数
             Number of wait time records
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.LeaseTimeCount">
             <summary>
-            租用时间记录次数
-            Number of lease time records
+            The number of lease-time records.
             </summary>
         </member>
         <member name="T:DotNetCore.HayateOP.HayateShardAffinityMode">
             <summary>
-            M18（2.5）：借出路径的分片亲和模式。
-            决定 Acquire / AcquireAsync 扫描分片时的起始位置——命中起始分片后仍按环形
-            继续扫描其余分片，因此任何模式都不损失可用性，只影响命中优先级与局部性。
+            The shard-affinity mode for the borrow path (2.5).
+            Determines the starting position when Acquire / AcquireAsync scan shards - after hitting the starting shard it continues scanning in a ring,
+            so no mode sacrifices availability; they only affect hit priority and locality.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayateShardAffinityMode.None">
             <summary>
-            顺序扫描（默认）：从 0 号分片开始按索引顺序扫描，与 2.4 及之前行为完全一致，零额外开销。
+            Sequential scan (default): starts from shard 0 and scans in index order, identical to the pre-2.5 behavior with zero extra overhead.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayateShardAffinityMode.Thread">
             <summary>
-            线程亲和：按托管线程 ID 稳定映射起始分片（同一线程始终优先命中同一分片，
-            利于对象在 CPU 缓存 / NUMA 节点 / 线程本地资源上的复用）。
+            Thread affinity: stably maps the starting shard from the managed thread id (the same thread
+            always prefers the same shard first), which helps reuse objects in the CPU cache / NUMA node /
+            thread-local resources.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayateShardAffinityMode.Custom">
             <summary>
-            自定义委托：由 <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.CustomShardAffinity"/> 决定起始分片。
-            委托返回 null 或越界时本次借出回落顺序扫描（不抛异常，保证借出路径健壮性）。
+            Custom delegate: the starting shard is decided by <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.CustomShardAffinity"/>.
+            When the delegate returns null or an out-of-range value, the borrow falls back to sequential scanning (it does not throw, preserving borrow-path robustness).
             </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPool.GetStats">
+            <summary>Returns a point-in-time snapshot of pool statistics (counts, timings, allocation tracking).</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPool.TakeSnapshot">
+            <summary>Returns a snapshot of every pooled object and its current state.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPool.ReloadConfig(System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <summary>Reloads pool configuration by applying the supplied mutator to the live options.</summary>
+            <param name="configure">A callback that mutates the current <see cref="T:DotNetCore.HayateOP.HayatePoolOptions"/>.</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPool.Clear">
+            <summary>Destroys every object currently held by the pool.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPool.GetOptions">
+            <summary>Returns the live configuration options for this pool.</summary>
+            <returns>The pool's <see cref="T:DotNetCore.HayateOP.HayatePoolOptions"/>.</returns>
         </member>
         <member name="T:DotNetCore.HayateOP.IHayateObjectPool`1">
             <summary>
-            对象池通用接口
+            The generic object-pool contract for acquiring and releasing instances of <typeparamref name="T"/>.
             </summary>
-            <typeparam name="T"></typeparam>
+            <typeparam name="T">The pooled object type.</typeparam>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPool`1.Acquire">
+            <summary>Acquires an object from the pool, blocking until one becomes available.</summary>
+            <returns>A pooled object of type <typeparamref name="T"/>.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPool`1.Acquire(System.TimeSpan)">
+            <summary>Acquires an object from the pool, blocking up to the given timeout.</summary>
+            <param name="timeout">The maximum wait time.</param>
+            <returns>A pooled object of type <typeparamref name="T"/>.</returns>
+            <exception cref="T:System.TimeoutException">The timeout elapsed before an object became available.</exception>
         </member>
         <member name="M:DotNetCore.HayateOP.IHayateObjectPool`1.AcquireAsync(System.TimeSpan,System.Threading.CancellationToken)">
             <summary>
-            异步获取池化对象，带超时边界（与同步 <see cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.Acquire(System.TimeSpan)"/> 语义对齐）：
-            超时抛 <see cref="T:System.TimeoutException"/>；外部取消传播 <see cref="T:System.Threading.Tasks.TaskCanceledException"/>。
+            Asynchronously acquires an object from the pool with a timeout boundary (aligned with the
+            synchronous <see cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.Acquire(System.TimeSpan)"/> semantics): a timeout throws
+            <see cref="T:System.TimeoutException"/>, while external cancellation propagates a
+            <see cref="T:System.Threading.Tasks.TaskCanceledException"/>.
             </summary>
-            <param name="timeout">等待上限。</param>
-            <param name="cancellationToken">外部取消令牌，可随时中断等待。</param>
+            <param name="timeout">The maximum wait time.</param>
+            <param name="cancellationToken">An external cancellation token that can interrupt the wait at any time.</param>
+            <example>
+            <code>
+            var obj = await pool.AcquireAsync(TimeSpan.FromSeconds(3), cancellationToken);
+            try { /* use obj */ }
+            finally { pool.Release(obj); }
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPool`1.Release(`0)">
+            <summary>
+            Returns an object to the pool so it can be reused.
+            </summary>
+            <param name="item">The object previously obtained from <c>Acquire</c>; must not be <c>null</c>.</param>
+            <example>
+            <code>
+            pool.Release(obj);
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.IHayateObjectPool`1.Evict(DotNetCore.HayateOP.HayateEvictReason)">
             <summary>
-            M15（2.5）：按分类依据主动驱逐空闲对象，返回实际驱逐数量。
-            仅作用于<b>空闲</b>对象（借出中的对象一律不碰）；驱逐复用与后台驱逐相同的
-            分片原子认领 + 销毁幂等 CAS，可与其他驱逐/借还路径并发调用。
-            默认后台驱逐（<c>EvictionCallback</c>）行为不变——本 API 是叠加的主动运维出口。
+            Proactively evicts idle objects by category and returns the number actually evicted.
+            Only affects <b>idle</b> objects (borrowed objects are never touched). Eviction reuses the same
+            shard atomic-claim + idempotent destroy CAS as background eviction, so it can run concurrently
+            with other eviction / borrow-return paths.
+            The default background eviction (<c>EvictionCallback</c>) is unchanged — this API is an
+            additional, on-demand operational outlet.
             </summary>
-            <param name="reason">驱逐依据（Touched=用过即清 / Idle=超 MaxIdleTime / Expired=超 MaxLifeTime）。</param>
+            <param name="reason">The eviction basis (Touched = evict if used, Idle = exceeds MaxIdleTime, Expired = exceeds MaxLifeTime).</param>
+            <example>
+            <code>
+            int evicted = pool.Evict(HayateEvictReason.Idle);
+            </code>
+            </example>
         </member>
         <member name="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry">
             <summary>
@@ -1608,185 +2364,220 @@
             name used to register the pool.
             </para>
             <para>
-            M11+（2.5）：在按名寻址之上补充完整版管理面——<see cref="M:DotNetCore.HayateOP.IHayateObjectPoolRegistry.GetAll"/> 枚举全部注册项
-            （含池元数据：元素类型 / 运行时类型 / 注册时间）、<see cref="M:DotNetCore.HayateOP.IHayateObjectPoolRegistry.Remove(System.String)"/> 反注册、
-            <see cref="P:DotNetCore.HayateOP.IHayateObjectPoolRegistry.Count"/> 存量计数。键控池（O-A）与共享实例（O-C）等后续设施复用本骨架。
+            Builds on name-based addressing with a full management surface -- <see cref="M:DotNetCore.HayateOP.IHayateObjectPoolRegistry.GetAll"/> enumerates every
+            registration (including pool metadata: element type / runtime type / registration time), <see cref="M:DotNetCore.HayateOP.IHayateObjectPoolRegistry.Remove(System.String)"/>
+            deregisters, and <see cref="P:DotNetCore.HayateOP.IHayateObjectPoolRegistry.Count"/> reports the current count. Keyed pools and shared instances reuse this skeleton.
             </para>
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.IHayateObjectPoolRegistry.Register(System.String,DotNetCore.HayateOP.IHayateObjectPool)">
             <summary>Registers (or replaces) a pool under the given name.</summary>
+            <param name="poolName">The logical name to register the pool under.</param>
+            <param name="pool">The pool instance to register.</param>
+            <exception cref="T:System.ArgumentNullException"><paramref name="poolName"/> or <paramref name="pool"/> is <c>null</c>.</exception>
         </member>
         <member name="M:DotNetCore.HayateOP.IHayateObjectPoolRegistry.TryGet(System.String,DotNetCore.HayateOP.IHayateObjectPool@)">
             <summary>Tries to resolve a previously-registered pool by name.</summary>
+            <param name="poolName">The logical name to look up.</param>
+            <param name="pool">When this method returns <c>true</c>, receives the resolved pool; otherwise <c>null</c>.</param>
+            <returns><c>true</c> if a pool was found; otherwise <c>false</c>.</returns>
         </member>
         <member name="P:DotNetCore.HayateOP.IHayateObjectPoolRegistry.Names">
             <summary>All currently registered pool names.</summary>
         </member>
         <member name="M:DotNetCore.HayateOP.IHayateObjectPoolRegistry.GetAll">
             <summary>
-            M11+：枚举全部注册项（池实例 + 元数据）。返回快照，枚举期间的其他注册/移除不影响结果。
+            Enumerates every registration (pool instance + metadata). Returns a snapshot; registrations
+            or removals made while enumerating do not affect the result.
             </summary>
+            <example>
+            <code>
+            foreach (var meta in registry.GetAll())
+                Console.WriteLine($"{meta.PoolName}: {meta.ElementType}");
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.IHayateObjectPoolRegistry.Remove(System.String)">
             <summary>
-            M11+：按名称反注册。<paramref name="poolName"/> 为 null/空白或名称不存在时返回 <c>false</c>。
-            注意：仅从注册表摘除条目，<b>不</b> Dispose 池——生命周期归注册方所有。
+            Deregisters a pool by name. Only removes the registry entry; it does NOT dispose the pool --
+            pool lifetime is owned by the registrar.
             </summary>
+            <param name="poolName">The name to remove.</param>
+            <returns><c>true</c> if an entry was removed; <c>false</c> if <paramref name="poolName"/> is
+            <c>null</c>/whitespace or the name is not registered.</returns>
         </member>
         <member name="P:DotNetCore.HayateOP.IHayateObjectPoolRegistry.Count">
-            <summary>M11+：当前注册的池数量。</summary>
+            <summary>The number of currently registered pools.</summary>
         </member>
         <member name="T:DotNetCore.HayateOP.IHayateResettable">
             <summary>
-            标记对象可在归还时自动重置状态
+            Marks an object whose state can be automatically reset when it is returned to the pool.
             </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateResettable.Reset">
+            <summary>Resets the object to a reusable initial state before it is handed back to a caller.</summary>
         </member>
         <member name="M:DotNetCore.HayateOP.Logging.DefaultHayateLogger.RenderTemplate(System.String,System.Object[])">
             <summary>
-            T13：取代原 NormalizeFormatString 正则改写。
-            按占位符出现顺序把参数依次代入：{Name} → 参数值，{Name:F2} → 应用格式说明符。
-            池内模板约定：每个命名占位符按出现顺序对应一个参数（与调用点一一对应），
-            生产结构化日志请使用 HayateMicrosoftLoggerAdapter{T}（MEL 原生支持命名模板）。
-            无正则、单趟扫描，消除每次日志调用的 Regex 开销。
+            Replaces the original NormalizeFormatString regex rewrite. Substitutes arguments in placeholder
+            order: {Name} -> argument value, {Name:F2} -> applies the format specifier. The in-pool template
+            convention is that each named placeholder maps to one argument in order (matching the call site).
+            For production structured logging use HayateMicrosoftLoggerAdapter{T} (MEL natively supports named templates).
+            No regex, single-pass scan -- eliminates the per-call Regex overhead.
             </summary>
         </member>
         <member name="T:DotNetCore.HayateOP.Logging.DefaultHayateLoggerFactory">
             <summary>
-            默认日志工厂（M19）：忽略分类名，返回与 2.4 及之前等价的内建日志器。
+            The default logger factory: it ignores the category name and returns the built-in logger equivalent to the one used in 2.4 and earlier.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Logging.DefaultHayateLoggerFactory.Instance">
-            <summary>共享实例（无状态，可安全复用）。</summary>
+            <summary>Shared instance (stateless, safe to reuse).</summary>
         </member>
         <member name="M:DotNetCore.HayateOP.Logging.DefaultHayateLoggerFactory.CreateLogger(System.String)">
             <inheritdoc />
         </member>
         <member name="T:DotNetCore.HayateOP.Logging.DelegateHayateLoggerFactory">
             <summary>
-            委托式日志工厂（M19）：把分类名交给用户提供的委托，便于把池日志桥接到
-            MEL <c>ILoggerFactory</c>、Serilog、NLog 等任意后端。
+            A delegate-based logger factory: it hands the category name to a user-supplied delegate, making it easy
+            to bridge pool logging into any backend such as MEL <c>ILoggerFactory</c>, Serilog, or NLog.
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.Logging.DelegateHayateLoggerFactory.#ctor(System.Func{System.String,DotNetCore.HayateOP.Logging.IHayateLogger})">
             <summary>
-            创建委托式工厂。
+            Creates a delegate-based logger factory.
             </summary>
-            <param name="factory">分类名 → 日志器 的映射委托。</param>
+            <param name="factory">A mapping delegate from category name to logger.</param>
+            <exception cref="T:System.ArgumentNullException"><paramref name="factory"/> is <c>null</c>.</exception>
         </member>
         <member name="M:DotNetCore.HayateOP.Logging.DelegateHayateLoggerFactory.CreateLogger(System.String)">
             <inheritdoc />
         </member>
         <member name="T:DotNetCore.HayateOP.Logging.IHayateLoggerFactory">
             <summary>
-            池级日志工厂（M19）。<br />
-            用途：为每个对象池按「池名（category）」创建独立日志器，替代全局单例日志；
-            典型场景为多池共存时把日志按池名分流（如输出到不同的 MEL category / 文件）。
+            The pool-level logger factory.<br />
+            Purpose: creates an independent logger for each object pool by "pool name (category)", replacing the
+            global singleton logger; the typical scenario is routing each pool's logs by name when multiple pools
+            coexist (e.g. to distinct MEL categories / files).
             </summary>
             <remarks>
-            零破坏约定：未通过 <c>HayatePoolBuilder&lt;T&gt;.WithLoggerFactory</c> 指定工厂时，
-            行为与 2.4 及之前完全一致——沿用 Builder 内建的单例 <see cref="T:DotNetCore.HayateOP.Logging.IHayateLogger"/>。
-            若同时显式调用 <c>WithLogger</c>，则显式实例优先于工厂。
+            Non-breaking contract: when no factory is supplied via
+            <c>HayatePoolBuilder&lt;T&gt;.WithLoggerFactory</c>, behavior is identical to 2.4 and earlier --
+            the Builder's built-in singleton <see cref="T:DotNetCore.HayateOP.Logging.IHayateLogger"/> is used. If <c>WithLogger</c> is also
+            called explicitly, the explicit instance takes precedence over the factory.
             </remarks>
         </member>
         <member name="M:DotNetCore.HayateOP.Logging.IHayateLoggerFactory.CreateLogger(System.String)">
             <summary>
-            为指定逻辑池创建日志器。
+            Creates a logger for the specified logical pool.
             </summary>
-            <param name="categoryName">日志分类名（默认为池名 <c>HayatePoolBuilder&lt;T&gt;.WithPoolName</c> 的值，缺省为元素类型名）。</param>
-            <returns>日志器实例；不可返回 <c>null</c>。</returns>
+            <param name="categoryName">The log category name (defaults to the pool name from <c>HayatePoolBuilder&lt;T&gt;.WithPoolName</c>, or the element type name if unspecified).</param>
+            <returns>The logger instance; must not return <c>null</c>.</returns>
         </member>
         <member name="T:DotNetCore.HayateOP.Metrics.IHayateMetrics">
             <summary>
-            对象池诊断指标接口
+            Diagnostic metrics interface for object pools.
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.Metrics.IHayateMetrics.RecordObjectAcquired(System.String,System.Object,System.Double)">
             <summary>
-            记录对象从池中取出的操作
+            Records the operation of taking an object from the pool.
             </summary>
-            <param name="poolName">对象池名称</param>
-            <param name="item">对象</param>
-            <param name="elapsedMilliseconds">耗时（毫秒）</param>
+            <param name="poolName">The object pool name.</param>
+            <param name="item">The object taken from the pool.</param>
+            <param name="elapsedMilliseconds">The elapsed time of the operation, in milliseconds.</param>
         </member>
         <member name="M:DotNetCore.HayateOP.Metrics.IHayateMetrics.RecordObjectReleased(System.String,System.Object,System.Boolean)">
             <summary>
-            记录对象归还到池中的操作
+            Records the operation of returning an object to the pool.
             </summary>
-            <param name="poolName"></param>
-            <param name="item"></param>
-            <param name="isValid"></param>
+            <param name="poolName">The object pool name.</param>
+            <param name="item">The object returned to the pool.</param>
+            <param name="isValid"><c>true</c> if the returned object passed validation; otherwise <c>false</c>.</param>
         </member>
         <member name="M:DotNetCore.HayateOP.Metrics.IHayateMetrics.RecordObjectMiss(System.String)">
             <summary>
-            记录对象池创建新对象的操作
+            Records a pool miss (a new object had to be created).
             </summary>
-            <param name="poolName"></param>
+            <param name="poolName">The object pool name.</param>
         </member>
         <member name="M:DotNetCore.HayateOP.Metrics.IHayateMetrics.RecordPoolScaled(System.String,System.String,System.Int32,System.Int32)">
             <summary>
-            记录对象池扩缩容的操作
+            Records a pool scale-up or scale-down operation.
             </summary>
-            <param name="poolName"></param>
-            <param name="action"></param>
-            <param name="oldSize"></param>
-            <param name="newSize"></param>
+            <param name="poolName">The object pool name.</param>
+            <param name="action">The scaling action performed (e.g. "scale-up" / "scale-down").</param>
+            <param name="oldSize">The pool size before scaling.</param>
+            <param name="newSize">The pool size after scaling.</param>
         </member>
         <member name="T:DotNetCore.HayateOP.Policies.DefaultHayateObjectPolicy`1">
             <summary>
-            默认对象策略池
+            The default object-pool policy.
             </summary>
             <typeparam name="T"></typeparam>
         </member>
         <member name="T:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1">
             <summary>
-            对象池策略接口，定义了对象池创建对象的规则
+            Defines the policy that controls how the pool creates, validates, and disposes pooled objects.
             </summary>
-            <typeparam name="T">池化对象类型</typeparam>
+            <typeparam name="T">The pooled object type.</typeparam>
         </member>
         <member name="M:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1.Create">
-            <summary>
-            创建对象
-            </summary>
+            <summary>Creates a new pooled object.</summary>
+            <returns>A new instance of <typeparamref name="T"/>; must not be <c>null</c>.</returns>
         </member>
         <member name="M:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1.OnRelease(`0)">
-            <summary>
-            归还对象时触发
-            </summary>
+            <summary>Called when an object is returned to the pool.</summary>
+            <param name="item">The object being returned.</param>
+            <returns><c>true</c> to accept the object back into the pool; <c>false</c> to destroy it.</returns>
         </member>
         <member name="M:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1.Validate(`0)">
-            <summary>
-            验证对象有效性
-            </summary>
+            <summary>Validates whether an object is still usable before it is handed out or returned.</summary>
+            <param name="item">The object to validate.</param>
+            <returns><c>true</c> if the object is valid; <c>false</c> to destroy it.</returns>
         </member>
         <member name="M:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1.OnAcquire(`0)">
-            <summary>
-            借出对象时触发
-            </summary>
+            <summary>Called when an object is acquired (borrowed) from the pool.</summary>
+            <param name="item">The object being acquired.</param>
         </member>
         <member name="M:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1.OnPassivate(`0)">
-            <summary>
-            对象归还到池前触发
-            </summary>
+            <summary>Called just before an object is placed back into the pool after return.</summary>
+            <param name="item">The object about to be passivated.</param>
         </member>
         <member name="M:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1.OnDestroy(`0)">
-            <summary>
-            对象销毁时触发
-            </summary>
+            <summary>Called when an object is destroyed (removed from the pool for good).</summary>
+            <param name="item">The object being destroyed.</param>
         </member>
         <member name="T:DotNetCore.HayateOP.Scaling.IHayateScalingStrategy">
             <summary>
-            自动伸缩策略接口，用于根据当前池的状态和配置选项计算新的池大小。
+            Auto-scaling strategy interface that computes the new pool size from the current pool state and options.
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.Scaling.IHayateScalingStrategy.CalculateNewSize(System.Int32,System.Int32,DotNetCore.HayateOP.HayatePoolOptions)">
             <summary>
-            计算新的池大小
+            Computes the new pool size from the current usage.
             </summary>
-            <param name="currentSize"></param>
-            <param name="idleCount"></param>
-            <param name="options"></param>
-            <returns></returns>
+            <param name="currentSize">The current pool size.</param>
+            <param name="idleCount">The number of currently idle (available) objects.</param>
+            <param name="options">The pool options supplying thresholds, steps, and min/max bounds.</param>
+            <returns>The computed new pool size, clamped to the configured bounds.</returns>
+            <example>
+            <code>
+            var strategy = new ThresholdScalingStrategy();
+            int next = strategy.CalculateNewSize(pool.CurrentSize, pool.AvailableSlots, pool.GetOptions());
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Scaling.ThresholdScalingStrategy.CalculateNewSize(System.Int32,System.Int32,DotNetCore.HayateOP.HayatePoolOptions)">
+            <summary>
+            Computes the next pool size from the current usage ratio. Scales up when usage exceeds the
+            configured scale-up threshold, scales down when below the scale-down threshold, and clamps the
+            result to the configured min/max pool size.
+            </summary>
+            <param name="currentSize">The current pool size.</param>
+            <param name="idleCount">The number of currently idle (available) objects.</param>
+            <param name="options">The pool options supplying thresholds, steps, and bounds.</param>
+            <returns>The computed next pool size (may equal <paramref name="currentSize"/> when no scaling occurs).</returns>
         </member>
     </members>
 </doc>

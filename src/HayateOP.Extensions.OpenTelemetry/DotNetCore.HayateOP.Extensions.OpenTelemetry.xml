@@ -6,59 +6,61 @@
     <members>
         <member name="T:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetricsOptions">
             <summary>
-            OpenTelemetry 桥接选项
+            OpenTelemetry bridge options.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetricsOptions.MeterName">
             <summary>
-            <see cref="T:System.Diagnostics.Metrics.Meter"/> 名称（Meter.Name）。默认 "DotNetCore.HayateOP"。
+            The <see cref="T:System.Diagnostics.Metrics.Meter"/> name (Meter.Name). Defaults to "DotNetCore.HayateOP".
             </summary>
         </member>
         <member name="T:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics">
             <summary>
-            T14：将 <see cref="T:DotNetCore.HayateOP.Metrics.IHayateMetrics"/> 事件桥接到 <see cref="N:System.Diagnostics.Metrics"/>（.NET 官方 Metrics API，
-            OpenTelemetry .NET SDK 的原生数据源）。
+            Bridges <see cref="T:DotNetCore.HayateOP.Metrics.IHayateMetrics"/> events to <see cref="N:System.Diagnostics.Metrics"/>
+            (the .NET built-in Metrics API and the native data source for the OpenTelemetry .NET SDK).
             <para>
-            指标清单：
+            Metric inventory:
             <list type="bullet">
-            <item><description>Counter <c>HayatePoolAcquire</c> —— 借出次数（tag: pool.name）</description></item>
-            <item><description>Counter <c>HayatePoolRelease</c> —— 归还次数（tag: pool.name, valid）</description></item>
-            <item><description>Counter <c>HayatePoolMiss</c> —— 未命中（需创建新对象）次数（tag: pool.name）</description></item>
-            <item><description>Counter <c>HayatePoolScaled</c> —— 扩缩容事件次数（tag: pool.name, action）</description></item>
-            <item><description>Histogram <c>HayatePoolWaitTime</c> —— 借出等待时长（ms，tag: pool.name）</description></item>
-            <item><description>ObservableGauge <c>HayatePoolSize</c> —— 各池当前容量（tag: pool.name）</description></item>
-            <item><description>ObservableGauge <c>HayatePoolAvailable</c> —— 各池当前可用（空闲）对象数（tag: pool.name）</description></item>
+            <item><description>Counter <c>HayatePoolAcquire</c> — borrow count (tag: pool.name)</description></item>
+            <item><description>Counter <c>HayatePoolRelease</c> — return count (tag: pool.name, valid)</description></item>
+            <item><description>Counter <c>HayatePoolMiss</c> — miss count (object creation required) (tag: pool.name)</description></item>
+            <item><description>Counter <c>HayatePoolScaled</c> — scaling event count (tag: pool.name, action)</description></item>
+            <item><description>Histogram <c>HayatePoolWaitTime</c> — borrow wait time in milliseconds (tag: pool.name)</description></item>
+            <item><description>ObservableGauge <c>HayatePoolSize</c> — current capacity of each pool (tag: pool.name)</description></item>
+            <item><description>ObservableGauge <c>HayatePoolAvailable</c> — current available (idle) objects of each pool (tag: pool.name)</description></item>
             </list>
             </para>
             <para>
-            本包零外部 NuGet 依赖：<see cref="T:System.Diagnostics.Metrics.Meter"/> 由 .NET 6+ 基础类库内置（System.Diagnostics.DiagnosticSource），
-            使用方按需自行引入 OpenTelemetry SDK + Exporter（OTLP / Prometheus / InMemory …）订阅
-            Meter "<c>DotNetCore.HayateOP</c>" 即可；无 SDK 时也可用 <c>dotnet-counters</c> 直接观测。
+            This package has zero external NuGet dependencies: <see cref="T:System.Diagnostics.Metrics.Meter"/> is built into the
+            .NET 6+ base class library (System.Diagnostics.DiagnosticSource). Consumers bring their own
+            OpenTelemetry SDK + Exporter (OTLP / Prometheus / InMemory …) to subscribe to the
+            "DotNetCore.HayateOP" Meter; without an SDK, <c>dotnet-counters</c> can observe it directly.
             </para>
             <para>
-            解耦约束：本类不访问池的任何内部状态——事件经 <see cref="T:DotNetCore.HayateOP.Metrics.IHayateMetrics"/> 回调、
-            gauge 经公开的 <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/> + <see cref="M:DotNetCore.HayateOP.IHayateObjectPool.GetStats"/> 取数。
+            Decoupling constraint: this class does not access any internal pool state — events come via the
+            <see cref="T:DotNetCore.HayateOP.Metrics.IHayateMetrics"/> callbacks, and gauges are read from the public
+            <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/> + <see cref="M:DotNetCore.HayateOP.IHayateObjectPool.GetStats"/>.
             </para>
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics.TagPoolName">
-            <summary>池名 tag 键（OTel 惯例小写点分）。</summary>
+            <summary>Pool-name tag key (OTel convention: lowercase dotted).</summary>
         </member>
         <member name="F:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics.TagValid">
-            <summary>归还有效性 tag 键。</summary>
+            <summary>Return-validity tag key.</summary>
         </member>
         <member name="F:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics.TagAction">
-            <summary>扩缩容动作 tag 键（expand / shrink）。</summary>
+            <summary>Scaling-action tag key (expand / shrink).</summary>
         </member>
         <member name="M:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics.#ctor(DotNetCore.HayateOP.IHayateObjectPoolRegistry,DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetricsOptions)">
             <summary>
-            创建桥接实例。
+            Creates the bridge instance.
             </summary>
             <param name="registry">
-            池注册表（gauge 数据源）。可为 <c>null</c>——此时 gauge 仍会被创建，
-            但观测不到任何池（适合仅关心事件计数器的场景）。
+            The pool registry (gauge data source). May be <c>null</c> — the gauges are still created
+            but no pool is observable (suitable when only the event counters matter).
             </param>
-            <param name="options">可选配置（Meter 名等）。</param>
+            <param name="options">Optional configuration (meter name, etc.).</param>
         </member>
         <member name="M:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics.RecordObjectAcquired(System.String,System.Object,System.Double)">
             <inheritdoc />
@@ -73,173 +75,171 @@
             <inheritdoc />
         </member>
         <member name="M:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics.Dispose">
-            <summary>释放 Meter（注销全部指标；幂等）。</summary>
+            <summary>Disposes the Meter (unregisters all metrics; idempotent).</summary>
         </member>
         <member name="T:DotNetCore.HayateOP.Prometheus.HayatePrometheusOptions">
             <summary>
-            M22：Prometheus 导出器配置。
+            Prometheus exporter configuration.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.Prometheus.HayatePrometheusOptions.Namespace">
-            <summary>指标名前缀（命名空间）。默认 <c>hayateop</c>。</summary>
+            <summary>Metric-name prefix (namespace). Defaults to <c>hayateop</c>.</summary>
         </member>
         <member name="T:DotNetCore.HayateOP.Prometheus.HayatePrometheusExporter">
             <summary>
-            M22：把各池的 <see cref="T:DotNetCore.HayateOP.HayatePoolStats"/> 序列化为 Prometheus 文本格式。
+            Serializes each pool's <see cref="T:DotNetCore.HayateOP.HayatePoolStats"/> into the Prometheus text format.
             <para>
-            数据源为公开的 <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/> + <see cref="M:DotNetCore.HayateOP.IHayateObjectPool.GetStats"/>，
-            不触碰池内部状态；单个池取数失败不影响整体输出（跳过该池）。
+            The data source is the public <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/> + <see cref="M:DotNetCore.HayateOP.IHayateObjectPool.GetStats"/>;
+            it never touches internal pool state, and a single pool failing to read does not affect the overall
+            output (that pool is skipped).
             </para>
             <para>
-            暴露的指标族（前缀可经 <see cref="P:DotNetCore.HayateOP.Prometheus.HayatePrometheusOptions.Namespace"/> 配置）：
+            Exposed metric families (the prefix is configurable via <see cref="P:DotNetCore.HayateOP.Prometheus.HayatePrometheusOptions.Namespace"/>):
             <list type="bullet">
-            <item><description><c>hayateop_pool_size</c>（gauge）—— 各池存活对象数（空闲 + 借出）</description></item>
-            <item><description><c>hayateop_pool_available</c>（gauge）—— 各池当前空闲对象数</description></item>
-            <item><description><c>hayateop_pool_created_total</c> / <c>_released_total</c> / <c>_acquired_total</c> / <c>_missed_total</c>（counter）</description></item>
-            <item><description><c>hayateop_pool_leak_detected_total</c> / <c>_leak_suspected_total</c>（counter）</description></item>
-            <item><description><c>hayateop_pool_wait_average_milliseconds</c> / <c>_lease_average_milliseconds</c>（gauge）</description></item>
-            <item><description><c>hayateop_pool_acquire_allocated_bytes_average</c> / <c>_release_allocated_bytes_average</c>（gauge，仅在启用 M3 分配追踪的池上出现）</description></item>
+            <item><description><c>hayateop_pool_size</c> (gauge) — live objects per pool (idle + borrowed)</description></item>
+            <item><description><c>hayateop_pool_available</c> (gauge) — current idle objects per pool</description></item>
+            <item><description><c>hayateop_pool_created_total</c> / <c>_released_total</c> / <c>_acquired_total</c> / <c>_missed_total</c> (counter)</description></item>
+            <item><description><c>hayateop_pool_leak_detected_total</c> / <c>_leak_suspected_total</c> (counter)</description></item>
+            <item><description><c>hayateop_pool_wait_average_milliseconds</c> / <c>_lease_average_milliseconds</c> (gauge)</description></item>
+            <item><description><c>hayateop_pool_acquire_allocated_bytes_average</c> / <c>_release_allocated_bytes_average</c> (gauge, only present on pools with allocation tracking enabled)</description></item>
             </list>
             </para>
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.Prometheus.HayatePrometheusExporter.#ctor(DotNetCore.HayateOP.IHayateObjectPoolRegistry,DotNetCore.HayateOP.Prometheus.HayatePrometheusOptions)">
             <summary>
-            创建导出器。
+            Creates the exporter.
             </summary>
-            <param name="registry">池注册表（数据源）。可为 <c>null</c>——此时输出空文本。</param>
-            <param name="options">可选配置（命名空间前缀）。</param>
+            <param name="registry">The pool registry (data source). May be <c>null</c>, in which case the output is empty text.</param>
+            <param name="options">Optional configuration (namespace prefix).</param>
         </member>
         <member name="M:DotNetCore.HayateOP.Prometheus.HayatePrometheusExporter.Scrape">
             <summary>
-            采集并序列化为 Prometheus 文本（每次调用即时取数，无缓存）。
+            Scrapes and serializes to the Prometheus text format (reads live data on every call; no caching).
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.Prometheus.HayatePrometheusExporter.WriteAsync(System.IO.TextWriter)">
             <summary>
-            异步把 Prometheus 文本写入指定 writer（供端点直接回写响应流）。
+            Asynchronously writes the Prometheus text to the given writer (for endpoints to write directly
+            to the response stream).
             </summary>
+            <param name="writer">The text writer to write to. Must not be null.</param>
+            <exception cref="T:System.ArgumentNullException"><paramref name="writer"/> is null.</exception>
         </member>
         <member name="T:DotNetCore.HayateOP.Prometheus.HayatePrometheusSerializer">
             <summary>
-            M22：Prometheus 文本格式（exposition format 0.0.4）序列化器。
+            Prometheus text format (exposition format 0.0.4) serializer.
             <para>
-            零外部依赖——不引入 <c>prometheus-net</c> 或 OTel Prometheus exporter 包，
-            仅按 Prometheus 文本协议输出 <c># HELP</c> / <c># TYPE</c> / <c>metric{label="v"} value</c>。
-            使用方既可通过端点直接暴露，也可自行把文本写入任意采集通道。
+            Zero external dependencies — does not pull in <c>prometheus-net</c> or the OTel Prometheus
+            exporter package; it only emits <c># HELP</c> / <c># TYPE</c> / <c>metric{label="v"} value</c>
+            per the Prometheus text protocol. Consumers can either expose it directly via an endpoint or
+            write the text to any scraping channel themselves.
             </para>
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Prometheus.HayatePrometheusSerializer.ContentType">
-            <summary>Prometheus 文本响应 Content-Type（协议版本 0.0.4）。</summary>
+            <summary>The Prometheus text response Content-Type (protocol version 0.0.4).</summary>
         </member>
         <member name="F:DotNetCore.HayateOP.Prometheus.HayatePrometheusSerializer.PoolLabel">
-            <summary>池名标签键（与 OTel 桥接的 <c>pool.name</c> 语义一致，命名遵循 Prometheus 惯例）。</summary>
+            <summary>The pool-name label key (matches the OTel bridge's <c>pool.name</c> semantics, following Prometheus naming conventions).</summary>
         </member>
         <member name="M:DotNetCore.HayateOP.Prometheus.HayatePrometheusSerializer.EscapeLabelValue(System.String)">
             <summary>
-            转义标签值：反斜杠、双引号、换行按 Prometheus 文本协议要求转义。
+            Escapes a label value: backslash, double quote, and newline are escaped per the Prometheus text protocol.
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.Prometheus.HayatePrometheusSerializer.FormatValue(System.Double)">
             <summary>
-            数值格式化（不变文化）：整数不带小数点，浮点用往返精度；NaN / ±Inf 按协议字面量输出。
+            Formats a numeric value (invariant culture): integers have no decimal point and floats use
+            round-trip precision; NaN / ±Inf are emitted as the protocol literals.
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.Prometheus.HayatePrometheusSerializer.WriteGauge(System.Text.StringBuilder,System.String,System.String,System.Collections.Generic.IReadOnlyList{DotNetCore.HayateOP.Prometheus.HayatePrometheusSample})">
-            <summary>
-            写入一个 gauge 指标族（含 HELP / TYPE 头与逐池样本行）。
-            </summary>
+            <summary>Writes a gauge metric family (with HELP / TYPE headers and one line per pool sample).</summary>
         </member>
         <member name="M:DotNetCore.HayateOP.Prometheus.HayatePrometheusSerializer.WriteCounter(System.Text.StringBuilder,System.String,System.String,System.Collections.Generic.IReadOnlyList{DotNetCore.HayateOP.Prometheus.HayatePrometheusSample})">
-            <summary>
-            写入一个 counter 指标族（含 HELP / TYPE 头与逐池样本行）。
-            </summary>
+            <summary>Writes a counter metric family (with HELP / TYPE headers and one line per pool sample).</summary>
         </member>
         <member name="M:DotNetCore.HayateOP.Prometheus.HayatePrometheusSerializer.WriteMetricFamily(System.Text.StringBuilder,System.String,System.String,System.String,System.Collections.Generic.IReadOnlyList{DotNetCore.HayateOP.Prometheus.HayatePrometheusSample})">
             <summary>
-            写入指标族：<c># HELP</c>、<c># TYPE</c>，随后每个样本一行。
-            样本为空时不输出任何内容（避免暴露空指标族）。
+            Writes a metric family: <c># HELP</c>, <c># TYPE</c>, then one line per sample.
+            Emits nothing when the sample list is empty (avoids exposing an empty metric family).
             </summary>
+            <param name="builder">The string builder to append to. Must not be null.</param>
+            <param name="name">The metric name. Must not be null or whitespace.</param>
+            <param name="help">The HELP text.</param>
+            <param name="type">The metric type ("gauge", "counter", …).</param>
+            <param name="samples">The samples to write. Must not be null.</param>
+            <exception cref="T:System.ArgumentNullException"><paramref name="builder"/> or <paramref name="name"/> is null.</exception>
         </member>
         <member name="T:DotNetCore.HayateOP.Prometheus.HayatePrometheusSample">
             <summary>
-            M22：单条 Prometheus 样本（池名标签 + 数值）。
+            A single Prometheus sample (pool-name label + value).
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.Prometheus.HayatePrometheusSample.#ctor(System.String,System.Double)">
-            <summary>创建带池名标签的样本。</summary>
+            <summary>Creates a sample with a pool-name label.</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.Prometheus.HayatePrometheusSample.LabelValue">
-            <summary>池名标签值（<c>null</c> 表示无标签的全局样本）。</summary>
+            <summary>The pool-name label value (<c>null</c> means a global, unlabeled sample).</summary>
         </member>
         <member name="P:DotNetCore.HayateOP.Prometheus.HayatePrometheusSample.Value">
-            <summary>样本数值。</summary>
-        </member>
-        <member name="T:Microsoft.AspNetCore.Builder.HayatePrometheusEndpointExtensions">
-            <summary>
-            M22：Prometheus 抓取端点的 ASP.NET Core 映射扩展（仅 net8.0+ 目标框架编译）。
-            <para>
-            本文件所在包（<c>DotNetCore.HayateOP.Extensions.OpenTelemetry</c>）仅在 net8.0 及以上目标框架
-            引用 <c>Microsoft.AspNetCore.App</c>；net6.0 / net7.0 目标框架不包含本扩展（序列化器与
-            DI 注册在全部目标框架可用）。
-            </para>
-            </summary>
-        </member>
-        <member name="F:Microsoft.AspNetCore.Builder.HayatePrometheusEndpointExtensions.DefaultPattern">
-            <summary>默认抓取路径。</summary>
-        </member>
-        <member name="M:Microsoft.AspNetCore.Builder.HayatePrometheusEndpointExtensions.UseHayatePrometheusExporter(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder,System.String)">
-            <summary>
-            映射 Prometheus 文本抓取端点：GET 返回各池指标的 Prometheus 文本格式
-            （Content-Type <c>text/plain; version=0.0.4</c>）。
-            </summary>
-            <param name="endpoints">端点路由构建器。</param>
-            <param name="pattern">抓取路径，默认 <see cref="F:Microsoft.AspNetCore.Builder.HayatePrometheusEndpointExtensions.DefaultPattern"/>。</param>
-            <returns>端点约定构建器（可继续追加 <c>RequireAuthorization</c> 等）。</returns>
-            <remarks>
-            需先通过 <c>AddHayatePrometheusExporter()</c> 注册导出器；未注册时会按容器中的
-            <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/> 即时构建一个导出器（仍可用）。
-            </remarks>
+            <summary>The sample value.</summary>
         </member>
         <member name="T:Microsoft.Extensions.DependencyInjection.HayateOpenTelemetryServiceCollectionExtensions">
             <summary>
-            T14：<see cref="T:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics"/> 的 DI 注册扩展。
+            DI registration extension for <see cref="T:DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetrics"/>.
             </summary>
         </member>
         <member name="M:Microsoft.Extensions.DependencyInjection.HayateOpenTelemetryServiceCollectionExtensions.AddHayateOpenTelemetryMetrics(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Action{DotNetCore.HayateOP.OpenTelemetry.HayateOtelMetricsOptions})">
             <summary>
-            注册 OpenTelemetry 桥接指标（覆盖 <c>AddHayatePoolSupport()</c> 默认的
-            <c>EmptyHayateMetrics</c>），并令其通过容器中的
-            <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/>（由 <c>RegisterHayatePool&lt;T&gt;</c> 填充）
-            观测各池容量。
+            Registers the OpenTelemetry bridge metrics (overriding the <c>EmptyHayateMetrics</c> default
+            from <c>AddHayatePoolSupport()</c>) and lets it observe each pool's capacity through the
+            container's <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/> (populated by <c>RegisterHayatePool&lt;T&gt;</c>).
             <para>
-            本方法只负责把指标发布到 System.Diagnostics.Metrics；
-            消费端（OpenTelemetry SDK + Exporter / dotnet-counters）由使用方自行接入，
-            例如：<c>builder.Services.AddOpenTelemetry().WithMetrics(m =&gt; m.AddMeter("DotNetCore.HayateOP"))</c>。
+            This method only publishes the metrics to System.Diagnostics.Metrics; the consumer side
+            (OpenTelemetry SDK + Exporter / dotnet-counters) is wired up by the caller, e.g.:
+            <c>builder.Services.AddOpenTelemetry().WithMetrics(m =&gt; m.AddMeter("DotNetCore.HayateOP"))</c>.
             </para>
             </summary>
-            <param name="services">服务容器。</param>
-            <param name="configure">可选的桥接配置（Meter 名等）。</param>
-            <returns>服务容器（链式）。</returns>
+            <param name="services">The service container.</param>
+            <param name="configure">Optional bridge configuration (meter name, etc.).</param>
+            <returns>The service container (for chaining).</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="services"/> is null.</exception>
+            <example>
+            <code>
+            services.AddHayateOpenTelemetryMetrics();
+            // or with configuration:
+            services.AddHayateOpenTelemetryMetrics(o =&gt; o.MeterName = "MyApp.Pools");
+            </code>
+            </example>
         </member>
         <member name="T:Microsoft.Extensions.DependencyInjection.HayatePrometheusServiceCollectionExtensions">
             <summary>
-            M22：Prometheus 导出器的 DI 注册扩展。
+            DI registration extension for the Prometheus exporter.
             </summary>
         </member>
         <member name="M:Microsoft.Extensions.DependencyInjection.HayatePrometheusServiceCollectionExtensions.AddHayatePrometheusExporter(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Action{DotNetCore.HayateOP.Prometheus.HayatePrometheusOptions})">
             <summary>
-            注册 <see cref="T:DotNetCore.HayateOP.Prometheus.HayatePrometheusExporter"/> 单例（数据源为容器中的
-            <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/>，由 <c>RegisterHayatePool&lt;T&gt;</c> 填充）。
+            Registers the <see cref="T:DotNetCore.HayateOP.Prometheus.HayatePrometheusExporter"/> singleton (data source is the
+            container's <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/>, populated by <c>RegisterHayatePool&lt;T&gt;</c>).
             <para>
-            若使用 ASP.NET Core，可在注册后调用
-            <c>app.UseHayatePrometheusExporter()</c> 暴露 <c>/hayateop/metrics</c> 抓取端点（net8+）。
+            With ASP.NET Core, after registration call
+            <c>app.UseHayatePrometheusExporter()</c> to expose the <c>/hayateop/metrics</c> scrape
+            endpoint (net8+).
             </para>
             </summary>
-            <param name="services">服务容器。</param>
-            <param name="configure">可选配置（指标命名空间前缀等）。</param>
-            <returns>服务容器（链式）。</returns>
+            <param name="services">The service container.</param>
+            <param name="configure">Optional configuration (metric namespace prefix, etc.).</param>
+            <returns>The service container (for chaining).</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="services"/> is null.</exception>
+            <example>
+            <code>
+            services.AddHayatePrometheusExporter();
+            // or with a custom namespace prefix:
+            services.AddHayatePrometheusExporter(o =&gt; o.Namespace = "myapp");
+            </code>
+            </example>
         </member>
     </members>
 </doc>
