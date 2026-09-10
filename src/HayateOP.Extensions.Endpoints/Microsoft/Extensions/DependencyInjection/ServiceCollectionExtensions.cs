@@ -12,6 +12,17 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class EndpointsExtensions
 {
+    /// <summary>
+    /// Maps the HayateOP management endpoints (overview, pool list, pool detail, configuration
+    /// update, statistics, and clear) under the "/hayateop" route group.
+    /// </summary>
+    /// <param name="endpoints">The endpoint route builder.</param>
+    /// <returns>The endpoint convention builder for the mapped group.</returns>
+    /// <example>
+    /// <code>
+    /// app.MapHayatePoolEndpoints();   // maps GET /hayateop, /hayateop/pools, ...
+    /// </code>
+    /// </example>
     public static IEndpointConventionBuilder MapHayatePoolEndpoints(this IEndpointRouteBuilder endpoints)
     {
         var group = endpoints
@@ -31,51 +42,52 @@ public static class EndpointsExtensions
             .WithTags("Hayate Object Pool Management")
             .WithGroupName("HayateOP");
 
-        // 概览
+        // Overview.
         group.MapGet("/", GetOverviewAsync)
 #if NET6_0
             .WithMetadata(new SwaggerOperationAttribute(
-                summary: "获取池概览",
-                description: "返回管理端点的基本信息和版本号"))
+                summary: "Get pool overview",
+                description: "Returns basic information and the version of the management endpoint."))
 #else
             .WithOpenApi(op =>
             {
-                op.Summary = "获取池概览";
-                op.Description = "返回管理端点的基本信息和版本号";
+                op.Summary = "Get pool overview";
+                op.Description = "Returns basic information and the version of the management endpoint.";
                 return op;
             })
 #endif
             .WithName("GetHayatePoolOverview")
             .Produces<HayatePoolOverview>(StatusCodes.Status200OK);
 
-        // M11+：池列表（走注册表完整版枚举；未注入注册表时返回空列表，不影响 Type.GetType 兜底寻址）
+        // Pool list (enumerated from the full registry; returns an empty list when the registry is
+        // not injected, without affecting the Type.GetType fallback addressing).
         group.MapGet("/pools", GetPoolsAsync)
 #if NET6_0
             .WithMetadata(new SwaggerOperationAttribute(
-                summary: "获取池列表",
-                description: "枚举注册表中的全部池（名称、元素类型、注册时间、池内/借出计数）"))
+                summary: "Get pool list",
+                description: "Enumerates all pools in the registry (name, element type, registration time, pooled/borrowed counts)."))
 #else
             .WithOpenApi(op =>
             {
-                op.Summary = "获取池列表";
-                op.Description = "枚举注册表中的全部池（名称、元素类型、注册时间、池内/借出计数）";
+                op.Summary = "Get pool list";
+                op.Description = "Enumerates all pools in the registry (name, element type, registration time, pooled/borrowed counts).";
                 return op;
             })
 #endif
             .WithName("GetHayatePoolList")
             .Produces<IReadOnlyList<HayatePoolSummary>>(StatusCodes.Status200OK);
 
-        // 池详情
+        // Pool details.
         group.MapGet("/{poolName}", GetPoolDetailAsync)
 #if NET6_0
             .WithMetadata(new SwaggerOperationAttribute(
-                summary: "获取指定池详情",
-                description: "根据池名称返回配置信息和实时统计"))
+                summary: "Get pool details",
+                description: "Returns configuration and live statistics for the specified pool."))
 #else
             .WithOpenApi(op =>
             {
-                op.Summary = "获取指定池详情";
-                op.Description = "根据池名称返回配置信息和实时统计";
+                op.Summary = "Get pool details";
+                op.Description = "Returns configuration and live statistics for the specified pool.";
                 return op;
             })
 #endif
@@ -83,17 +95,17 @@ public static class EndpointsExtensions
             .Produces<HayatePoolDetail>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
-        // 更新配置
+        // Update configuration.
         group.MapPost("/{poolName}", UpdatePoolConfigAsync)
 #if NET6_0
             .WithMetadata(new SwaggerOperationAttribute(
-                summary: "更新池配置",
-                description: "验证并更新池配置，返回操作结果"))
+                summary: "Update pool configuration",
+                description: "Validates and updates the pool configuration, returning the operation result."))
 #else
             .WithOpenApi(op =>
             {
-                op.Summary = "更新池配置";
-                op.Description = "验证并更新池配置，返回操作结果";
+                op.Summary = "Update pool configuration";
+                op.Description = "Validates and updates the pool configuration, returning the operation result.";
                 return op;
             })
 #endif
@@ -102,17 +114,17 @@ public static class EndpointsExtensions
             .Produces<HayatePoolOperationResult>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest);
 
-        // 统计数据
+        // Statistics.
         group.MapGet("/{poolName}/stats", GetPoolStatsAsync)
 #if NET6_0
             .WithMetadata(new SwaggerOperationAttribute(
-                summary: "获取池统计数据",
-                description: "返回池的实时统计和当前快照"))
+                summary: "Get pool statistics",
+                description: "Returns live statistics and the current snapshot of the pool."))
 #else
             .WithOpenApi(op =>
             {
-                op.Summary = "获取池统计数据";
-                op.Description = "返回池的实时统计和当前快照";
+                op.Summary = "Get pool statistics";
+                op.Description = "Returns live statistics and the current snapshot of the pool.";
                 return op;
             })
 #endif
@@ -120,17 +132,17 @@ public static class EndpointsExtensions
             .Produces<HayatePoolStats>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
-        // 清空池
+        // Clear pool.
         group.MapPost("/{poolName}/clear", ClearPoolAsync)
 #if NET6_0
             .WithMetadata(new SwaggerOperationAttribute(
-                summary: "清空指定池",
-                description: "立即清空池，返回操作时间戳"))
+                summary: "Clear the specified pool",
+                description: "Clears the pool immediately and returns the operation timestamp."))
 #else
             .WithOpenApi(op =>
             {
-                op.Summary = "清空指定池";
-                op.Description = "立即清空池，返回操作时间戳";
+                op.Summary = "Clear the specified pool";
+                op.Description = "Clears the pool immediately and returns the operation timestamp.";
                 return op;
             })
 #endif
@@ -152,8 +164,9 @@ public static class EndpointsExtensions
     }
 
     /// <summary>
-    /// M11+：枚举注册表中的全部池。未注入注册表（直接 Builder 场景）时返回空列表，
-    /// 不影响单池寻址端点的 Type.GetType 兜底。
+    /// Enumerates all pools in the registry. Returns an empty list when the registry is not
+    /// injected (e.g. a direct builder scenario), without affecting the Type.GetType fallback
+    /// of the single-pool addressing endpoint.
     /// </summary>
     private static async Task<IResult> GetPoolsAsync(IServiceProvider sp)
     {
@@ -174,7 +187,8 @@ public static class EndpointsExtensions
             }
             catch
             {
-                // 池可能已被 Dispose / 瞬时故障：该池返回 0 计数，不影响其余池枚举。
+                // The pool may have been disposed or hit a transient failure: return a 0 count for
+                // it without affecting the rest of the enumeration.
             }
 
             summaries.Add(new HayatePoolSummary(
@@ -191,9 +205,10 @@ public static class EndpointsExtensions
     private static async Task<IResult> GetPoolDetailAsync(string poolName, IServiceProvider sp)
     {
         await Task.CompletedTask;
-        // T05：从注册表按「逻辑池名」寻址，替代 Type.GetType 反射（后者无法解析纯类型名）
+        // Resolve the pool from the registry by logical pool name, replacing Type.GetType reflection
+        // (which cannot resolve a plain type name).
         if (!TryResolve(sp, poolName, out var pool))
-            return Results.Problem($"池 {poolName} 不存在", statusCode: StatusCodes.Status404NotFound);
+            return Results.Problem($"Pool '{poolName}' does not exist", statusCode: StatusCodes.Status404NotFound);
 
         var stats = pool.GetStats();
         return Results.Ok(new HayatePoolDetail(poolName, pool.GetOptions(), stats));
@@ -203,26 +218,26 @@ public static class EndpointsExtensions
     {
         await Task.CompletedTask;
         if (!newConfig.IsValid())
-            return Results.Problem("无效的配置", statusCode: StatusCodes.Status400BadRequest);
+            return Results.Problem("Invalid configuration", statusCode: StatusCodes.Status400BadRequest);
 
         if (!TryResolve(sp, poolName, out var pool))
-            return Results.Problem($"池 {poolName} 不存在", statusCode: StatusCodes.Status404NotFound);
+            return Results.Problem($"Pool '{poolName}' does not exist", statusCode: StatusCodes.Status404NotFound);
 
         pool.ReloadConfig(opt =>
         {
             opt.MinPoolSize = newConfig.MinPoolSize;
             opt.MaxPoolSize = newConfig.MaxPoolSize;
-            // 其他配置项...
+            // Other configuration items...
         });
 
-        return Results.Ok(new HayatePoolOperationResult(poolName, "配置更新成功", DateTime.UtcNow));
+        return Results.Ok(new HayatePoolOperationResult(poolName, "Configuration updated successfully", DateTime.UtcNow));
     }
 
     private static async Task<IResult> GetPoolStatsAsync(string poolName, IServiceProvider sp)
     {
         await Task.CompletedTask;
         if (!TryResolve(sp, poolName, out var pool))
-            return Results.Problem($"池 {poolName} 不存在", statusCode: StatusCodes.Status404NotFound);
+            return Results.Problem($"Pool '{poolName}' does not exist", statusCode: StatusCodes.Status404NotFound);
 
         var stats = pool.GetStats();
         var snapshot = pool.TakeSnapshot();
@@ -233,15 +248,16 @@ public static class EndpointsExtensions
     {
         await Task.CompletedTask;
         if (!TryResolve(sp, poolName, out var pool))
-            return Results.Problem($"池 {poolName} 不存在", statusCode: StatusCodes.Status404NotFound);
+            return Results.Problem($"Pool '{poolName}' does not exist", statusCode: StatusCodes.Status404NotFound);
 
         pool.Clear();
-        return Results.Ok(new HayatePoolOperationResult(poolName, "池清空成功", DateTime.UtcNow));
+        return Results.Ok(new HayatePoolOperationResult(poolName, "Pool cleared successfully", DateTime.UtcNow));
     }
 
     /// <summary>
-    /// T05：优先按逻辑池名查注册表；若未注入注册表（例如直接用 Builder 而非 DI 注册），
-    /// 退回按类型名解析 DI 中注册的 IHayateObjectPool&lt;T&gt;。
+    /// Prefers resolving the pool from the registry by logical pool name; if the registry is not
+    /// injected (e.g. using the builder directly instead of DI registration), falls back to
+    /// resolving the registered IHayateObjectPool&lt;T&gt; by type name.
     /// </summary>
     private static bool TryResolve(IServiceProvider sp, string poolName, out IHayateObjectPool pool)
     {
@@ -249,7 +265,8 @@ public static class EndpointsExtensions
         if (registry != null && registry.TryGet(poolName, out pool!))
             return true;
 
-        // 兜底：注册表缺失或尚未填充时，按类型名做 DI 解析（兼容历史注册方式）
+        // Fallback: when the registry is missing or not yet populated, resolve via DI by type name
+        // (compatible with the legacy registration approach).
         var poolType = Type.GetType(poolName);
         if (poolType != null)
         {

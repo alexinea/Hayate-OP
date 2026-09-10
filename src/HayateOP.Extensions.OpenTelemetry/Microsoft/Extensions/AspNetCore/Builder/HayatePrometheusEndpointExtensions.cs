@@ -10,29 +10,38 @@ using System;
 namespace Microsoft.AspNetCore.Builder;
 
 /// <summary>
-/// M22：Prometheus 抓取端点的 ASP.NET Core 映射扩展（仅 net8.0+ 目标框架编译）。
+/// ASP.NET Core mapping extension for the Prometheus scrape endpoint (compiled only for the net8.0+ target framework).
 /// <para>
-/// 本文件所在包（<c>DotNetCore.HayateOP.Extensions.OpenTelemetry</c>）仅在 net8.0 及以上目标框架
-/// 引用 <c>Microsoft.AspNetCore.App</c>；net6.0 / net7.0 目标框架不包含本扩展（序列化器与
-/// DI 注册在全部目标框架可用）。
+/// The package containing this file (<c>DotNetCore.HayateOP.Extensions.OpenTelemetry</c>) references
+/// <c>Microsoft.AspNetCore.App</c> only on the net8.0+ target framework; the net6.0 / net7.0 targets
+/// do not include this extension (the serializer and DI registration are available on all targets).
 /// </para>
 /// </summary>
 public static class HayatePrometheusEndpointExtensions
 {
-    /// <summary>默认抓取路径。</summary>
+    /// <summary>The default scrape path.</summary>
     public const string DefaultPattern = "/hayateop/metrics";
 
     /// <summary>
-    /// 映射 Prometheus 文本抓取端点：GET 返回各池指标的 Prometheus 文本格式
-    /// （Content-Type <c>text/plain; version=0.0.4</c>）。
+    /// Maps the Prometheus text scrape endpoint: GET returns the Prometheus text format of each
+    /// pool's metrics (Content-Type <c>text/plain; version=0.0.4</c>).
     /// </summary>
-    /// <param name="endpoints">端点路由构建器。</param>
-    /// <param name="pattern">抓取路径，默认 <see cref="DefaultPattern"/>。</param>
-    /// <returns>端点约定构建器（可继续追加 <c>RequireAuthorization</c> 等）。</returns>
+    /// <param name="endpoints">The endpoint route builder.</param>
+    /// <param name="pattern">The scrape path; defaults to <see cref="DefaultPattern"/>.</param>
+    /// <returns>The endpoint convention builder (further chained calls such as <c>RequireAuthorization</c> are allowed).</returns>
     /// <remarks>
-    /// 需先通过 <c>AddHayatePrometheusExporter()</c> 注册导出器；未注册时会按容器中的
-    /// <see cref="IHayateObjectPoolRegistry"/> 即时构建一个导出器（仍可用）。
+    /// Requires registering the exporter via <c>AddHayatePrometheusExporter()</c> first; if not
+    /// registered, an exporter is built on the fly from the container's
+    /// <see cref="IHayateObjectPoolRegistry"/> (still usable).
     /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="endpoints"/> or <paramref name="pattern"/> is null.</exception>
+    /// <example>
+    /// <code>
+    /// app.UseHayatePrometheusExporter();   // exposes GET /hayateop/metrics
+    /// // or with a custom path:
+    /// app.UseHayatePrometheusExporter("/metrics");
+    /// </code>
+    /// </example>
     public static IEndpointConventionBuilder UseHayatePrometheusExporter(
         this IEndpointRouteBuilder endpoints,
         string pattern = DefaultPattern)

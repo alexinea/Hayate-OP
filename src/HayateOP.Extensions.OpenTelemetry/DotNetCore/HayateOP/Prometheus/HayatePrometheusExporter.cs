@@ -7,29 +7,30 @@ using System.Threading.Tasks;
 namespace DotNetCore.HayateOP.Prometheus;
 
 /// <summary>
-/// M22：Prometheus 导出器配置。
+/// Prometheus exporter configuration.
 /// </summary>
 public class HayatePrometheusOptions
 {
-    /// <summary>指标名前缀（命名空间）。默认 <c>hayateop</c>。</summary>
+    /// <summary>Metric-name prefix (namespace). Defaults to <c>hayateop</c>.</summary>
     public string Namespace { get; set; } = "hayateop";
 }
 
 /// <summary>
-/// M22：把各池的 <see cref="HayatePoolStats"/> 序列化为 Prometheus 文本格式。
+/// Serializes each pool's <see cref="HayatePoolStats"/> into the Prometheus text format.
 /// <para>
-/// 数据源为公开的 <see cref="IHayateObjectPoolRegistry"/> + <see cref="IHayateObjectPool.GetStats"/>，
-/// 不触碰池内部状态；单个池取数失败不影响整体输出（跳过该池）。
+/// The data source is the public <see cref="IHayateObjectPoolRegistry"/> + <see cref="IHayateObjectPool.GetStats"/>;
+/// it never touches internal pool state, and a single pool failing to read does not affect the overall
+/// output (that pool is skipped).
 /// </para>
 /// <para>
-/// 暴露的指标族（前缀可经 <see cref="HayatePrometheusOptions.Namespace"/> 配置）：
+/// Exposed metric families (the prefix is configurable via <see cref="HayatePrometheusOptions.Namespace"/>):
 /// <list type="bullet">
-/// <item><description><c>hayateop_pool_size</c>（gauge）—— 各池存活对象数（空闲 + 借出）</description></item>
-/// <item><description><c>hayateop_pool_available</c>（gauge）—— 各池当前空闲对象数</description></item>
-/// <item><description><c>hayateop_pool_created_total</c> / <c>_released_total</c> / <c>_acquired_total</c> / <c>_missed_total</c>（counter）</description></item>
-/// <item><description><c>hayateop_pool_leak_detected_total</c> / <c>_leak_suspected_total</c>（counter）</description></item>
-/// <item><description><c>hayateop_pool_wait_average_milliseconds</c> / <c>_lease_average_milliseconds</c>（gauge）</description></item>
-/// <item><description><c>hayateop_pool_acquire_allocated_bytes_average</c> / <c>_release_allocated_bytes_average</c>（gauge，仅在启用 M3 分配追踪的池上出现）</description></item>
+/// <item><description><c>hayateop_pool_size</c> (gauge) — live objects per pool (idle + borrowed)</description></item>
+/// <item><description><c>hayateop_pool_available</c> (gauge) — current idle objects per pool</description></item>
+/// <item><description><c>hayateop_pool_created_total</c> / <c>_released_total</c> / <c>_acquired_total</c> / <c>_missed_total</c> (counter)</description></item>
+/// <item><description><c>hayateop_pool_leak_detected_total</c> / <c>_leak_suspected_total</c> (counter)</description></item>
+/// <item><description><c>hayateop_pool_wait_average_milliseconds</c> / <c>_lease_average_milliseconds</c> (gauge)</description></item>
+/// <item><description><c>hayateop_pool_acquire_allocated_bytes_average</c> / <c>_release_allocated_bytes_average</c> (gauge, only present on pools with allocation tracking enabled)</description></item>
 /// </list>
 /// </para>
 /// </summary>
@@ -39,10 +40,10 @@ public sealed class HayatePrometheusExporter
     private readonly HayatePrometheusOptions _options;
 
     /// <summary>
-    /// 创建导出器。
+    /// Creates the exporter.
     /// </summary>
-    /// <param name="registry">池注册表（数据源）。可为 <c>null</c>——此时输出空文本。</param>
-    /// <param name="options">可选配置（命名空间前缀）。</param>
+    /// <param name="registry">The pool registry (data source). May be <c>null</c>, in which case the output is empty text.</param>
+    /// <param name="options">Optional configuration (namespace prefix).</param>
     public HayatePrometheusExporter(
         IHayateObjectPoolRegistry registry = null,
         HayatePrometheusOptions options = null)
@@ -52,7 +53,7 @@ public sealed class HayatePrometheusExporter
     }
 
     /// <summary>
-    /// 采集并序列化为 Prometheus 文本（每次调用即时取数，无缓存）。
+    /// Scrapes and serializes to the Prometheus text format (reads live data on every call; no caching).
     /// </summary>
     public string Scrape()
     {
@@ -102,19 +103,22 @@ public sealed class HayatePrometheusExporter
             Map(pools, s => s.AverageLeaseTimeMs));
 
         HayatePrometheusSerializer.WriteGauge(sb, $"{ns}_pool_acquire_allocated_bytes_average",
-            "Average bytes allocated per borrow (M3 allocation tracking; only pools with tracking enabled).",
+            "Average bytes allocated per borrow (allocation tracking; only pools with tracking enabled).",
             Map(pools, s => s.AllocationTrackingEnabled ? s.AverageAcquireAllocatedBytes : double.NaN, onlyWhen: s => s.AllocationTrackingEnabled));
 
         HayatePrometheusSerializer.WriteGauge(sb, $"{ns}_pool_release_allocated_bytes_average",
-            "Average bytes allocated per return (M3 allocation tracking; only pools with tracking enabled).",
+            "Average bytes allocated per return (allocation tracking; only pools with tracking enabled).",
             Map(pools, s => s.AllocationTrackingEnabled ? s.AverageReleaseAllocatedBytes : double.NaN, onlyWhen: s => s.AllocationTrackingEnabled));
 
         return sb.ToString();
     }
 
     /// <summary>
-    /// 异步把 Prometheus 文本写入指定 writer（供端点直接回写响应流）。
+    /// Asynchronously writes the Prometheus text to the given writer (for endpoints to write directly
+    /// to the response stream).
     /// </summary>
+    /// <param name="writer">The text writer to write to. Must not be null.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="writer"/> is null.</exception>
     public Task WriteAsync(TextWriter writer)
     {
         if (writer is null) throw new ArgumentNullException(nameof(writer));
@@ -136,7 +140,7 @@ public sealed class HayatePrometheusExporter
             }
             catch
             {
-                // 单池取数失败不拖垮整体采集（与 HayateOtelMetrics 同一策略）
+                // A single pool failing to read does not break the overall scrape (same strategy as HayateOtelMetrics).
             }
         }
 

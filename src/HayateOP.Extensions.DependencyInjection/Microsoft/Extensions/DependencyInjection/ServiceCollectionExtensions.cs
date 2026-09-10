@@ -11,6 +11,17 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class ServiceCollectionExtensions
 {
+    /// <summary>
+    /// Adds the core HayateOP services (scaling strategy and an empty metrics sink) so pools can be registered.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <returns>The Hayate service collection for further configuration.</returns>
+    /// <example>
+    /// <code>
+    /// services.AddHayatePoolSupport();
+    /// services.RegisterHayatePool&lt;MyConnection&gt;();
+    /// </code>
+    /// </example>
     public static IHayateServiceCollection AddHayatePoolSupport(this IServiceCollection services)
     {
         services.TryAddSingleton<IHayateScalingStrategy, ThresholdScalingStrategy>();
@@ -19,6 +30,19 @@ public static class ServiceCollectionExtensions
         return new MSDIHayateServiceCollection(services);
     }
 
+    /// <summary>
+    /// Registers a HayateOP pool of type <typeparamref name="T"/> with the DI container.
+    /// </summary>
+    /// <param name="services">The Hayate service collection.</param>
+    /// <param name="configure">Optional callback to configure the pool options.</param>
+    /// <typeparam name="T">The pooled object type.</typeparam>
+    /// <returns>The Hayate service collection for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// services.AddHayatePoolSupport();
+    /// services.RegisterHayatePool&lt;MyConnection&gt;(opt =&gt; opt.MaxPoolSize = 64);
+    /// </code>
+    /// </example>
     public static IHayateServiceCollection RegisterHayatePool<T>(this IHayateServiceCollection services,
         Action<HayatePoolOptions> configure = null)
         where T : class, new()
@@ -27,8 +51,9 @@ public static class ServiceCollectionExtensions
 
         services.Services.Configure<HayatePoolOptions>(poolRegisterName, configure ?? (_ => { }));
 
-        // T05：注册池注册表（单例）。池在解析时把自己的非泛型 IHayateObjectPool 注册进去，
-        // 供管理端点 / 诊断按「逻辑池名」查找，替代 Type.GetType 反射寻址。
+        // Register the pool registry (singleton). Each pool registers its non-generic
+        // IHayateObjectPool into it on resolution, so the management endpoints / diagnostics can
+        // look it up by logical pool name instead of using Type.GetType reflection.
         services.Services.TryAddSingleton<IHayateObjectPoolRegistry, HayateObjectPoolRegistry>();
 
         services.Services.AddSingleton<IHayateObjectPolicy<T>, DefaultHayateObjectPolicy<T>>();
@@ -42,8 +67,9 @@ public static class ServiceCollectionExtensions
             var loggerFactory = sp.GetService<ILoggerFactory>();
             var logger = new HayateMicrosoftLoggerAdapter<T>(loggerFactory?.CreateLogger<T>());
 
-            // L8（2.2）：仅当 metrics 总开关开启时才挂接 DI 注册的自定义 metrics，
-            // 否则保持 2.1 语义（自定义实例不生效），避免 Build() 快速失败误伤 DI 用户。
+            // Only attach the DI-registered custom metrics when the metrics master switch is enabled;
+            // otherwise keep the v2.1 semantics (the custom instance has no effect) to avoid Build()
+            // fast-failing and wrongly affecting DI users.
             var builder = new HayatePoolBuilder<T>()
                 .WithPoolName(poolRegisterName)
                 .WithPolicy(policy)
@@ -59,7 +85,7 @@ public static class ServiceCollectionExtensions
                 .Configure(opt => options.CopyTo(opt))
                 .Build();
 
-            // 把池的非泛型面注册进注册表，端点通过池名即可寻址（T05）
+            // Register the pool's non-generic face into the registry so endpoints can address it by name.
             var registry = sp.GetService<IHayateObjectPoolRegistry>();
             if (registry != null)
             {

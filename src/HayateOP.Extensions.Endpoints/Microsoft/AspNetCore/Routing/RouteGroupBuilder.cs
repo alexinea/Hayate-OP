@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Http;
 namespace Microsoft.AspNetCore.Routing;
 
 /// <summary>
-/// .NET 6 兼容的 RouteGroupBuilder 实现
+/// RouteGroupBuilder implementation compatible with .NET 6.
 /// </summary>
 public sealed class RouteGroupBuilder : IEndpointConventionBuilder
 {
@@ -37,7 +37,7 @@ public sealed class RouteGroupBuilder : IEndpointConventionBuilder
         => BuildAndApplyMetadata(_builder.MapMethods(CombinePattern(_prefix, pattern), httpMethods, handler));
 
     /// <summary>
-    /// 为组内所有 Endpoint 添加 Tags（用于 Swagger 文档）
+    /// Adds tags to all endpoints in the group (used for Swagger documentation).
     /// </summary>
     public RouteGroupBuilder WithTags(params string[] tags)
     {
@@ -46,7 +46,7 @@ public sealed class RouteGroupBuilder : IEndpointConventionBuilder
     }
 
     /// <summary>
-    /// 为组内所有 Endpoint 设置 GroupName（用于 Swagger 文档分组）
+    /// Sets the group name for all endpoints in the group (used for Swagger documentation grouping).
     /// </summary>
     public RouteGroupBuilder WithGroupName(string groupName)
     {
@@ -55,7 +55,7 @@ public sealed class RouteGroupBuilder : IEndpointConventionBuilder
     }
 
     /// <summary>
-    /// 为组内所有 Endpoint 启用授权
+    /// Enables authorization for all endpoints in the group.
     /// </summary>
     public RouteGroupBuilder RequireAuthorization()
     {
@@ -64,7 +64,7 @@ public sealed class RouteGroupBuilder : IEndpointConventionBuilder
     }
 
     /// <summary>
-    /// 为组内所有 Endpoint 启用授权（指定策略）
+    /// Enables authorization for all endpoints in the group with the specified policy.
     /// </summary>
     public RouteGroupBuilder RequireAuthorization(string policyName)
     {
@@ -73,7 +73,7 @@ public sealed class RouteGroupBuilder : IEndpointConventionBuilder
     }
 
     /// <summary>
-    /// 为组内所有 Endpoint 添加自定义 Metadata（通用扩展）
+    /// Adds custom metadata to all endpoints in the group (general-purpose extension).
     /// </summary>
     public RouteGroupBuilder WithMetadata(params object[] metadata)
     {
@@ -81,10 +81,10 @@ public sealed class RouteGroupBuilder : IEndpointConventionBuilder
         return this;
     }
 
-    #region 实现 IEndpointConventionBuilder 接口
+    #region Implementation of IEndpointConventionBuilder interface
 
     /// <summary>
-    /// 添加组级别的约定（自动应用到所有子 Endpoint）
+    /// Adds a group-level convention (automatically applied to all child endpoints).
     /// </summary>
     void IEndpointConventionBuilder.Add(Action<EndpointBuilder> convention)
     {
@@ -94,16 +94,16 @@ public sealed class RouteGroupBuilder : IEndpointConventionBuilder
 
     #endregion
 
-    // 将组 Metadata 应用到每个子 Endpoint
+    // Apply the group metadata to each child endpoint.
     private RouteHandlerBuilder BuildAndApplyMetadata(RouteHandlerBuilder handlerBuilder)
     {
-        // 1. 应用组级别的 Metadata
+        // 1. Apply the group-level metadata.
         foreach (var metadata in _groupMetadata)
         {
             handlerBuilder.WithMetadata(metadata);
         }
 
-        // 2. 应用组级别的约定（通过 IEndpointConventionBuilder.Add 添加的）
+        // 2. Apply the group-level conventions (added via IEndpointConventionBuilder.Add).
         foreach (var convention in _conventions)
         {
             handlerBuilder.Add(convention);
@@ -112,7 +112,7 @@ public sealed class RouteGroupBuilder : IEndpointConventionBuilder
         return handlerBuilder;
     }
 
-    // 拼接路由前缀和子路由
+    // Concatenate the route prefix and the child route.
     private string CombinePattern(string prefix, string pattern)
     {
         if (string.IsNullOrEmpty(pattern))

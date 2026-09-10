@@ -15,7 +15,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 
 public static class ConfigurationExtensions
 {
-    // 热更新令牌缓存，用于池释放时解绑事件，避免内存泄漏
+    // Hot-reload change-token cache; unbound on pool disposal to avoid memory leaks.
     private static readonly ConcurrentDictionary<string, IDisposable> _changeTokenCache = new();
 
     public static IHayateServiceCollection RegisterGlobalConfig(this IHayateServiceCollection services,
@@ -30,6 +30,22 @@ public static class ConfigurationExtensions
         return services;
     }
 
+    /// <summary>
+    /// Registers a HayateOP pool driven by configuration.
+    /// </summary>
+    /// <param name="services">The Hayate service collection.</param>
+    /// <param name="configuration">The configuration root used to read pool options.</param>
+    /// <param name="poolName">Optional logical pool name; defaults to the type name of <typeparamref name="T"/>.</param>
+    /// <param name="configSectionPath">Configuration section path; defaults to "HayatePool".</param>
+    /// <typeparam name="T">The pooled object type.</typeparam>
+    /// <exception cref="InvalidOperationException">Thrown when the merged pool configuration is invalid.</exception>
+    /// <example>
+    /// <code>
+    /// services.RegisterHayatePool&lt;MyConnection&gt;(configuration);
+    /// // or with an explicit name and section:
+    /// services.RegisterHayatePool&lt;MyConnection&gt;(configuration, poolName: "db", configSectionPath: "Pools");
+    /// </code>
+    /// </example>
     public static IHayateServiceCollection RegisterHayatePool<T>(this IHayateServiceCollection services,
         IConfiguration configuration,
         string poolName = null,
@@ -39,15 +55,15 @@ public static class ConfigurationExtensions
         poolName ??= typeof(T).Name;
         var poolConfigSection = configuration.GetSection($"{configSectionPath}:Pools:{poolName}");
 
-        // 注册池的命名配置（覆盖全局配置）
+        // Register the pool's named configuration (overrides the global configuration).
         services.Services.Configure<HayatePoolOptions>(poolName, poolConfigSection);
 
         services.Services.TryAddSingleton<IHayateObjectPolicy<T>, DefaultHayateObjectPolicy<T>>();
 
-        // 注册实例
+        // Register the pool instance.
         services.Services.AddSingleton<IHayateObjectPool<T>>(sp =>
         {
-            // 解析依赖
+            // Resolve dependencies.
             var optionsMonitor = sp.GetRequiredService<IOptionsMonitor<HayatePoolOptions>>();
             var policy = sp.GetRequiredService<IHayateObjectPolicy<T>>();
             var scalingStrategy = sp.GetRequiredService<IHayateScalingStrategy>();
@@ -55,16 +71,17 @@ public static class ConfigurationExtensions
             var loggerFactory = sp.GetService<ILoggerFactory>();
             var logger = new HayateMicrosoftLoggerAdapter<T>(loggerFactory?.CreateLogger<T>());
 
-            // 合并全局配置与池专属配置
+            // Merge the global and pool-specific configuration.
             var mergedOptions = MergeOptions(optionsMonitor.CurrentValue, poolConfigSection);
             if (!mergedOptions.IsValid())
             {
-                throw new InvalidOperationException($"HayatePool [{poolName}] 配置无效");
+                throw new InvalidOperationException($"HayatePool [{poolName}] configuration is invalid");
             }
 
-            // 池构建
-            // L8（2.2）：仅当 metrics 总开关开启时才挂接 DI 注册的自定义 metrics，
-            // 否则保持 2.1 语义（自定义实例不生效），避免 Build() 快速失败误伤 Configuration 用户。
+            // Build the pool.
+            // Only attach the DI-registered custom metrics when the metrics master switch is enabled;
+            // otherwise keep the v2.1 semantics (the custom instance has no effect) to avoid Build()
+            // fast-failing and wrongly affecting Configuration users.
             var builder = new HayatePoolBuilder<T>()
                 .WithPoolName(poolName)
                 .WithPolicy(policy)
@@ -80,34 +97,34 @@ public static class ConfigurationExtensions
                 .Configure(opt => mergedOptions.CopyTo(opt))
                 .Build();
 
-            // 注册配置变更监听，热更新池配置
+            // Subscribe to configuration change tokens to hot-reload the pool configuration.
             var changeToken = optionsMonitor.OnChange((newOptions, changedPoolName) =>
             {
-                
+
                 if (changedPoolName != poolName && changedPoolName != Options.Options.DefaultName) return;
 
                 try
                 {
-                    // 合并最新配置
+                    // Merge the latest configuration.
                     var latestOptions = MergeOptions(optionsMonitor.CurrentValue, poolConfigSection);
                     if (!latestOptions.IsValid())
                     {
-                        logger?.LogWarning("HayatePool [{PoolName}] 热更新配置无效，已忽略", poolName);
+                        logger?.LogWarning("HayatePool [{PoolName}] hot-reload configuration is invalid; ignored", poolName);
                         return;
                     }
 
-                    // 同步更新到池
+                    // Sync the update to the pool.
                     pool.ReloadConfig(opt => latestOptions.CopyTo(opt));
 
-                    logger?.LogInformation("HayatePool [{PoolName}] 配置热更新成功", poolName);
+                    logger?.LogInformation("HayatePool [{PoolName}] configuration hot-reloaded successfully", poolName);
                 }
                 catch (Exception ex)
                 {
-                    logger?.LogError(ex, "HayatePool [{PoolName}] 配置热更新失败", poolName);
+                    logger?.LogError(ex, "HayatePool [{PoolName}] configuration hot-reload failed", poolName);
                 }
             });
 
-            // 缓存变更令牌，池释放时用于解绑事件
+            // Cache the change token so it can be unbound when the pool is disposed.
             _changeTokenCache.TryAdd(poolName, changeToken);
 
             return pool;
@@ -121,10 +138,10 @@ public static class ConfigurationExtensions
     {
         var merged = new HayatePoolOptions();
 
-        // 先应用全局配置
+        // Apply the global configuration first.
         globalOptions.CopyTo(merged);
 
-        // 再应用池配置（覆盖全局）
+        // Then apply the pool configuration (overrides the global one).
         ApplyPoolOptionsOverrides(merged, poolSection);
 
         merged.ApplyFeatureSwitches();
@@ -134,11 +151,14 @@ public static class ConfigurationExtensions
 
     private static void ApplyPoolOptionsOverrides(HayatePoolOptions target, IConfiguration poolSection)
     {
-        // T13 修复（默认值误判）：原实现以「值 != C# 默认值」判断池配置是否显式设置，
-        // 用户显式配置为默认值时（如 MaxPoolSize 配回默认 100）会被误判为"未覆盖"，
-        // 导致全局配置意外生效。改为只应用配置节中真实出现的键：
-        // 值来自 binder 对整个配置节的绑定结果（正确处理 int/bool/TimeSpan 等），
-        // 缺席的键保持全局配置值。poolOptions 参数仅保留签名兼容用途。
+        // Fix for default-value misjudgment: the original implementation treated a value differing
+        // from the C# default as "explicitly set". When a user explicitly set a value back to its
+        // default (e.g. MaxPoolSize back to the default 100) it was misjudged as "not overridden",
+        // causing the global configuration to take effect unexpectedly. Now only keys that actually
+        // appear in the configuration section are applied: the bound values come from the binder's
+        // result for the whole section (correctly handling int/bool/TimeSpan, etc.), and absent keys
+        // keep the global configuration value. The poolOptions parameter is retained only for
+        // signature compatibility.
         var properties = typeof(HayatePoolOptions).GetProperties()
             .Where(p => p.CanRead && p.CanWrite)
             .GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
@@ -159,7 +179,7 @@ public static class ConfigurationExtensions
     {
         public void Dispose()
         {
-            // 释放所有热更新令牌，避免内存泄漏
+            // Dispose all hot-reload tokens to avoid memory leaks.
             foreach (var token in _changeTokenCache.Values)
             {
                 try

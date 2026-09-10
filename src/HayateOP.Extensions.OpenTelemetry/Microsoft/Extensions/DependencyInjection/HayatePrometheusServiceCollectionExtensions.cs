@@ -6,21 +6,30 @@ using System;
 namespace Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
-/// M22：Prometheus 导出器的 DI 注册扩展。
+/// DI registration extension for the Prometheus exporter.
 /// </summary>
 public static class HayatePrometheusServiceCollectionExtensions
 {
     /// <summary>
-    /// 注册 <see cref="HayatePrometheusExporter"/> 单例（数据源为容器中的
-    /// <see cref="IHayateObjectPoolRegistry"/>，由 <c>RegisterHayatePool&lt;T&gt;</c> 填充）。
+    /// Registers the <see cref="HayatePrometheusExporter"/> singleton (data source is the
+    /// container's <see cref="IHayateObjectPoolRegistry"/>, populated by <c>RegisterHayatePool&lt;T&gt;</c>).
     /// <para>
-    /// 若使用 ASP.NET Core，可在注册后调用
-    /// <c>app.UseHayatePrometheusExporter()</c> 暴露 <c>/hayateop/metrics</c> 抓取端点（net8+）。
+    /// With ASP.NET Core, after registration call
+    /// <c>app.UseHayatePrometheusExporter()</c> to expose the <c>/hayateop/metrics</c> scrape
+    /// endpoint (net8+).
     /// </para>
     /// </summary>
-    /// <param name="services">服务容器。</param>
-    /// <param name="configure">可选配置（指标命名空间前缀等）。</param>
-    /// <returns>服务容器（链式）。</returns>
+    /// <param name="services">The service container.</param>
+    /// <param name="configure">Optional configuration (metric namespace prefix, etc.).</param>
+    /// <returns>The service container (for chaining).</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="services"/> is null.</exception>
+    /// <example>
+    /// <code>
+    /// services.AddHayatePrometheusExporter();
+    /// // or with a custom namespace prefix:
+    /// services.AddHayatePrometheusExporter(o =&gt; o.Namespace = "myapp");
+    /// </code>
+    /// </example>
     public static IServiceCollection AddHayatePrometheusExporter(
         this IServiceCollection services,
         Action<HayatePrometheusOptions> configure = null)

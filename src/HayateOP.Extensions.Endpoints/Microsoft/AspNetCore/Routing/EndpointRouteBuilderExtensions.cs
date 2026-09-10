@@ -3,16 +3,16 @@
 namespace Microsoft.AspNetCore.Routing;
 
 /// <summary>
-/// 为 .NET 6 提供 MapGroup 兼容实现
+/// Provides a MapGroup compatibility implementation for .NET 6.
 /// </summary>
 public static class EndpointRouteBuilderExtensions
 {
     /// <summary>
-    /// 兼容 .NET 7 的 MapGroup 方法，用法完全一致
+    /// MapGroup method compatible with .NET 7; the usage is identical.
     /// </summary>
-    /// <param name="builder">Endpoint 构建器</param>
-    /// <param name="prefix">路由前缀</param>
-    /// <returns>路由组构建器</returns>
+    /// <param name="builder">The endpoint route builder.</param>
+    /// <param name="prefix">The route prefix.</param>
+    /// <returns>The route group builder.</returns>
     public static RouteGroupBuilder MapGroup(this IEndpointRouteBuilder builder, string prefix)
     {
         if (builder == null)
@@ -20,7 +20,7 @@ public static class EndpointRouteBuilderExtensions
         if (prefix == null)
             throw new ArgumentNullException(nameof(prefix));
 
-        // .NET 6 中手动创建 RouteGroupBuilder（底层逻辑和 .NET 7 一致）
+        // Manually create the RouteGroupBuilder on .NET 6 (the underlying logic matches .NET 7).
         return new RouteGroupBuilder(builder, prefix);
     }
 }
