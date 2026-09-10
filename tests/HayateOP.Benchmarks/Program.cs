@@ -1,82 +1,94 @@
-﻿// T11 — HayateOP 基准测试（PR-C，2026-09-08）
-// 六套基准：Acquire_Default / Acquire_WithValidation / Acquire_Sharded_4 /
-//           Release_Only / Mixed_AcquireRelease_50_50 / Concurrent_Acquire_100Threads
-// 对照基线：Microsoft.Extensions.ObjectPool.DefaultObjectPool<T>（Baseline = true）。
-// 短迭代 Job（3 预热 + 10 迭代）防本地/CI 挂起；报告输出 BenchmarkDotNet.Artifacts/results/。
+﻿// M1 — HayateOP 标准 BenchmarkDotNet 编排（2.5 / P3）
+//
+// 覆盖矩阵（Acquire / Release / AcquireAsync 全路径）：
+//   · 被测实现：HayateOP Lean（全功能关闭）/ Sharded4（仅分片）/ Full（全功能）
+//   · 对照基线：Microsoft.Extensions.ObjectPool（MEOP，Baseline）+ 原生 `new`（无池，分配口径下界）
+//   · 异步维度：MEOP / 原生无异步 API，标注 N/A（不在编排内出现）
+//   · 并发维度：100 线程 Parallel.For 借还（吞吐 + 争用）
+//
+// 统计口径：BDN 内置统计列（Mean/Median/StdDev/Min/Max）+ 自定义 P50/P90/P95/P99 分位列
+//   （由各迭代平均耗时计算，规避 BDN 无 P99 内置列的缺口）；MemoryDiagnoser 提供 B/Op 分配口径。
+// 运行：dotnet run -c Release -- --filter '*'   （不带 filter 时运行本类全部基准）
+// 报告：BenchmarkDotNet.Artifacts/results/*-report-github.md（MarkdownExporter）
 
-using System.Collections.Concurrent;
+using System.Globalization;
 using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Diagnosers;
+using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Columns;
+using BenchmarkDotNet.Mathematics;
+using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using DotNetCore.HayateOP;
 using Microsoft.Extensions.ObjectPool;
 
-var summary = BenchmarkRunner.Run<HayateOpBenchmark>();
+BenchmarkRunner.Run<HayateOpBenchmarks>(args: args);
 
-[Config(typeof(BenchmarkConfig))]
-public class HayateOpBenchmark
+/// <summary>
+/// M1：HayateOP 头对头基准编排。
+/// </summary>
+[Config(typeof(BenchConfig))]
+[MemoryDiagnoser]
+[ThreadingDiagnoser]
+public class HayateOpBenchmarks
 {
-    private class PooledObject
+    /// <summary>被池化对象（与既有 T11 基准同构，保证历史数据可比较）。</summary>
+    public class PooledObject
     {
         public int Data { get; set; }
         public void Reset() => Data = 0;
     }
 
     // 容量配比说明（防 GlobalSetup 卡死）：Hayate 极简/分片池 autoScaling=false，
-    // 池空不自动创建（Known Limitation）。Mixed 常驻借出 50 + ReleaseSlots 借出 32 = 82；
-    // Min=250 保证套 6（100 线程并发借还）仍有 ≥100 空闲对象可用，绝不触发 Block 等待。
+    // 池空不自动创建。Min=250 保证并发套（100 线程借还）仍有 ≥100 空闲对象可用，
+    // 绝不触发 Block 等待（对齐 T11 既有口径，保证与历史基线可比）。
     private const int MinPoolSize = 250;
     private const int MaxPoolSize = 300;
     private const int ThreadCount = 100;
-    private const int BorrowedHalf = MinPoolSize / 5;   // Mixed 50/50 的常驻借出深度（50）
-    private const int ReleaseSlots = 32;      // Release_Only 的借出槽位（2 的幂，取模免分支）
+    private const int ReleaseSlots = 32;      // Release 套的借出槽位（2 的幂，取模免分支）
 
-    private class BenchmarkConfig : ManualConfig
+    private class BenchConfig : ManualConfig
     {
-        public BenchmarkConfig()
+        public BenchConfig()
         {
-            // 短迭代 Job：3 次预热 + 10 次正式迭代，防止长跑挂起（T11 硬约束）
+            // 短迭代 Job：3 预热 + 10 迭代，防长跑挂起
             AddJob(Job.Default
                 .WithWarmupCount(3)
                 .WithIterationCount(10)
                 .WithGcServer(true)
-                .WithGcConcurrent(true));
+                .WithGcConcurrent(true)
+                .WithId("Short"));
 
-            AddDiagnoser(MemoryDiagnoser.Default);
-            AddDiagnoser(ThreadingDiagnoser.Default);
+            AddColumn(StatisticColumn.StdDev);
+            AddColumn(StatisticColumn.Median);
+            AddColumn(new PercentileColumn("P50", 0.50));
+            AddColumn(new PercentileColumn("P90", 0.90));
+            AddColumn(new PercentileColumn("P95", 0.95));
+            AddColumn(new PercentileColumn("P99", 0.99));
             AddColumn(RankColumn.Arabic);
             AddColumn(BaselineRatioColumn.RatioMean);
+            AddExporter(MarkdownExporter.GitHub);
         }
     }
 
     // ── 被测池 ──────────────────────────────────────────────
-    private ObjectPool<PooledObject> _msPool = null!;              // MEOOP 对照基线
-    private IHayateObjectPool<PooledObject> _hayateMinimal = null!; // 全功能关闭（与 MEOOP 对齐）
-    private IHayateObjectPool<PooledObject> _hayateSharded4 = null!; // 仅开 4 分片
-    private IHayateObjectPool<PooledObject> _hayateFull = null!;    // 全功能开启
+    private ObjectPool<PooledObject> _meop = null!;                   // MEOP 对照（Baseline）
+    private IHayateObjectPool<PooledObject> _lean = null!;            // 全功能关闭
+    private IHayateObjectPool<PooledObject> _sharded4 = null!;        // 仅 4 分片
+    private IHayateObjectPool<PooledObject> _full = null!;            // 全功能开启
 
-    // Mixed 50/50 的常驻借出栈（每迭代 1 次 Release + 1 次 Acquire，净中性）
-    private readonly ConcurrentStack<PooledObject> _mixedMs = new();
-    private readonly ConcurrentStack<PooledObject> _mixedMinimal = new();
-    private readonly ConcurrentStack<PooledObject> _mixedSharded = new();
-
-    // Release_Only 的借出槽位（Release 后立即补位 Acquire，维持借出集恒定）
-    private PooledObject[] _releaseSlotsMs = null!;
-    private PooledObject[] _releaseSlotsMinimal = null!;
-    private PooledObject[] _releaseSlotsSharded = null!;
     private int _releaseCursor;
 
     [GlobalSetup]
     public void Setup()
     {
-        _msPool = new DefaultObjectPoolProvider { MaximumRetained = MaxPoolSize }
+        _meop = new DefaultObjectPoolProvider { MaximumRetained = MaxPoolSize }
             .Create(new DefaultPooledObjectPolicy<PooledObject>());
 
-        _hayateMinimal = new HayatePoolBuilder<PooledObject>()
-            .WithPoolName("bench-minimal")
+        _lean = new HayatePoolBuilder<PooledObject>()
+            .WithPoolName("bench-lean")
             .WithMinSize(MinPoolSize)
             .WithMaxSize(MaxPoolSize)
             .WithEnableSharding(false)
@@ -88,7 +100,7 @@ public class HayateOpBenchmark
             .WithEnableMetrics(false)
             .Build();
 
-        _hayateSharded4 = new HayatePoolBuilder<PooledObject>()
+        _sharded4 = new HayatePoolBuilder<PooledObject>()
             .WithPoolName("bench-sharded4")
             .WithMinSize(MinPoolSize)
             .WithMaxSize(MaxPoolSize)
@@ -102,8 +114,8 @@ public class HayateOpBenchmark
             .WithEnableMetrics(false)
             .Build();
 
-        _hayateFull = new HayatePoolBuilder<PooledObject>()
-            .WithPoolName("bench-full-feature")
+        _full = new HayatePoolBuilder<PooledObject>()
+            .WithPoolName("bench-full")
             .WithMinSize(MinPoolSize)
             .WithMaxSize(MaxPoolSize)
             .WithEnableSharding(true)
@@ -116,148 +128,182 @@ public class HayateOpBenchmark
             .WithEnableMetrics(true)
             .Build();
 
-        // 预热：把各池填充到 MinPoolSize（借满再归还触发登记/扩容路径）
-        for (var i = 0; i < MaxPoolSize; i++) _msPool.Return(_msPool.Get());
-        for (var i = 0; i < MaxPoolSize; i++) _hayateMinimal.Release(_hayateMinimal.Acquire());
-        for (var i = 0; i < MaxPoolSize; i++) _hayateSharded4.Release(_hayateSharded4.Acquire());
-        for (var i = 0; i < MaxPoolSize; i++) _hayateFull.Release(_hayateFull.Acquire());
-
-        // Mixed 50/50：各池常驻借出 BorrowedHalf 个
-        FillStack(_mixedMs, () => _msPool.Get());
-        FillStack(_mixedMinimal, () => _hayateMinimal.Acquire());
-        FillStack(_mixedSharded, () => _hayateSharded4.Acquire());
-
-        // Release_Only：各池借出 ReleaseSlots 个占槽
-        _releaseSlotsMs = FillSlots(() => _msPool.Get());
-        _releaseSlotsMinimal = FillSlots(() => _hayateMinimal.Acquire());
-        _releaseSlotsSharded = FillSlots(() => _hayateSharded4.Acquire());
-    }
-
-    private static void FillStack(ConcurrentStack<PooledObject> stack, Func<PooledObject> acquire)
-    {
-        for (var i = 0; i < BorrowedHalf; i++) stack.Push(acquire());
-    }
-
-    private PooledObject[] FillSlots(Func<PooledObject> acquire)
-    {
-        var slots = new PooledObject[ReleaseSlots];
-        for (var i = 0; i < ReleaseSlots; i++) slots[i] = acquire();
-        return slots;
+        // 预热到 MaxPoolSize（借满再归还，触达登记 / 扩容路径），保证稳态取还不触发创建
+        for (var i = 0; i < MaxPoolSize; i++) _meop.Return(_meop.Get());
+        for (var i = 0; i < MaxPoolSize; i++) _lean.Release(_lean.Acquire());
+        for (var i = 0; i < MaxPoolSize; i++) _sharded4.Release(_sharded4.Acquire());
+        for (var i = 0; i < MaxPoolSize; i++) _full.Release(_full.Acquire());
     }
 
     [GlobalCleanup]
     public void Cleanup()
     {
-        _hayateMinimal.Dispose();
-        _hayateSharded4.Dispose();
-        _hayateFull.Dispose();
+        _lean.Dispose();
+        _sharded4.Dispose();
+        _full.Dispose();
     }
 
-    // ── 套 1：Acquire_Default（单线程，MEOOP 为基线） ──────────
-    [Benchmark(Baseline = true, Description = "套1 Acquire_Default | MEOOP Get（基线）")]
-    public void Microsoft_Acquire_Default()
+    // ── 套 1：Acquire+Release 单线程（全部实现并列对照） ──────
+
+    [Benchmark(Baseline = true, Description = "Acquire+Release | MEOP（基线）")]
+    public void Meop_AcquireRelease()
     {
-        var obj = _msPool.Get();
+        var obj = _meop.Get();
         obj.Data++;
-        _msPool.Return(obj);
+        _meop.Return(obj);
     }
 
-    [Benchmark(Description = "套1 Acquire_Default | Hayate 极简")]
-    public void Hayate_Acquire_Default_Minimal()
+    [Benchmark(Description = "Acquire+Release | 原生 new（无池下界）")]
+    public PooledObject Native_New()
     {
-        var obj = _hayateMinimal.Acquire();
+        var obj = new PooledObject();
         obj.Data++;
-        _hayateMinimal.Release(obj);
+        return obj;
     }
 
-    // ── 套 2：Acquire_WithValidation（全功能：校验+指标+泄漏检测+驱逐） ──
-    [Benchmark(Description = "套2 Acquire_WithValidation | Hayate 全功能")]
-    public void Hayate_Acquire_WithValidation_FullFeature()
+    [Benchmark(Description = "Acquire+Release | Hayate Lean")]
+    public void Hayate_Lean_AcquireRelease()
     {
-        var obj = _hayateFull.Acquire();
+        var obj = _lean.Acquire();
         obj.Data++;
-        _hayateFull.Release(obj);
+        _lean.Release(obj);
     }
 
-    // ── 套 3：Acquire_Sharded_4（仅开 4 分片，其余关闭） ──
-    [Benchmark(Description = "套3 Acquire_Sharded_4 | Hayate 4分片")]
-    public void Hayate_Acquire_Sharded_4()
+    [Benchmark(Description = "Acquire+Release | Hayate Sharded4")]
+    public void Hayate_Sharded_AcquireRelease()
     {
-        var obj = _hayateSharded4.Acquire();
+        var obj = _sharded4.Acquire();
         obj.Data++;
-        _hayateSharded4.Release(obj);
+        _sharded4.Release(obj);
     }
 
-    // ── 套 4：Release_Only（Release + 立即补位 Acquire，借出集恒定） ──
-    [Benchmark(Description = "套4 Release_Only | MEOOP Return")]
-    public void Microsoft_Release_Only()
+    [Benchmark(Description = "Acquire+Release | Hayate Full")]
+    public void Hayate_Full_AcquireRelease()
     {
-        var slot = _releaseCursor++ & (ReleaseSlots - 1);
-        _msPool.Return(_releaseSlotsMs[slot]);
-        _releaseSlotsMs[slot] = _msPool.Get();
+        var obj = _full.Acquire();
+        obj.Data++;
+        _full.Release(obj);
     }
 
-    [Benchmark(Description = "套4 Release_Only | Hayate 极简")]
-    public void Hayate_Release_Only_Minimal()
+    // ── 套 2：Release 路径（归还 + 立即补位，借出集恒定） ──────
+
+    [Benchmark(Description = "Release | MEOP Return")]
+    public void Meop_Release()
     {
-        var slot = _releaseCursor++ & (ReleaseSlots - 1);
-        _hayateMinimal.Release(_releaseSlotsMinimal[slot]);
-        _releaseSlotsMinimal[slot] = _hayateMinimal.Acquire();
+        var obj = _meop.Get();
+        _meop.Return(obj);
     }
 
-    // ── 套 5：Mixed_AcquireRelease_50_50（每迭代 1 还 + 1 借，50/50 交错） ──
-    [Benchmark(Description = "套5 Mixed_50_50 | MEOOP")]
-    public void Microsoft_Mixed_50_50()
+    [Benchmark(Description = "Release | Hayate Lean")]
+    public void Hayate_Lean_Release()
     {
-        if (_mixedMs.TryPop(out var obj)) _msPool.Return(obj);
-        _mixedMs.Push(_msPool.Get());
+        var obj = _lean.Acquire();
+        _lean.Release(obj);
     }
 
-    [Benchmark(Description = "套5 Mixed_50_50 | Hayate 极简")]
-    public void Hayate_Mixed_50_50_Minimal()
+    // ── 套 3：AcquireAsync 全路径（MEOP / 原生无异步 API → N/A） ──
+
+    [Benchmark(Description = "AcquireAsync+Release | Hayate Lean")]
+    public async Task Hayate_Lean_AcquireReleaseAsync()
     {
-        if (_mixedMinimal.TryPop(out var obj)) _hayateMinimal.Release(obj);
-        _mixedMinimal.Push(_hayateMinimal.Acquire());
+        var obj = await _lean.AcquireAsync();
+        obj.Data++;
+        _lean.Release(obj);
     }
 
-    [Benchmark(Description = "套5 Mixed_50_50 | Hayate 4分片")]
-    public void Hayate_Mixed_50_50_Sharded4()
+    [Benchmark(Description = "AcquireAsync+Release | Hayate Full")]
+    public async Task Hayate_Full_AcquireReleaseAsync()
     {
-        if (_mixedSharded.TryPop(out var obj)) _hayateSharded4.Release(obj);
-        _mixedSharded.Push(_hayateSharded4.Acquire());
+        var obj = await _full.AcquireAsync();
+        obj.Data++;
+        _full.Release(obj);
     }
 
-    // ── 套 6：Concurrent_Acquire_100Threads（Parallel 100 线程借还） ──
-    [Benchmark(Description = "套6 Concurrent_100Threads | MEOOP")]
-    public void Microsoft_Concurrent_100Threads()
+    // ── 套 4：并发 100 线程借还（争用口径） ────────────────────
+
+    [Benchmark(Description = "Concurrent-100 | MEOP")]
+    public void Meop_Concurrent100()
     {
         Parallel.For(0, ThreadCount, _ =>
         {
-            var obj = _msPool.Get();
+            var obj = _meop.Get();
             obj.Data++;
-            _msPool.Return(obj);
+            _meop.Return(obj);
         });
     }
 
-    [Benchmark(Description = "套6 Concurrent_100Threads | Hayate 极简")]
-    public void Hayate_Concurrent_100Threads_Minimal()
+    [Benchmark(Description = "Concurrent-100 | Hayate Lean")]
+    public void Hayate_Lean_Concurrent100()
     {
         Parallel.For(0, ThreadCount, _ =>
         {
-            var obj = _hayateMinimal.Acquire();
+            var obj = _lean.Acquire();
             obj.Data++;
-            _hayateMinimal.Release(obj);
+            _lean.Release(obj);
         });
     }
 
-    [Benchmark(Description = "套6 Concurrent_100Threads | Hayate 4分片")]
-    public void Hayate_Concurrent_100Threads_Sharded4()
+    [Benchmark(Description = "Concurrent-100 | Hayate Sharded4")]
+    public void Hayate_Sharded_Concurrent100()
     {
         Parallel.For(0, ThreadCount, _ =>
         {
-            var obj = _hayateSharded4.Acquire();
+            var obj = _sharded4.Acquire();
             obj.Data++;
-            _hayateSharded4.Release(obj);
+            _sharded4.Release(obj);
         });
+    }
+
+    // ── 自定义分位列（BDN 无内置 P99 列；由各迭代平均耗时计算） ──
+
+    /// <summary>
+    /// M1：分位延迟列。数据源为 <see cref="BenchmarkReport.GetResultRuns"/>（正式迭代，排除预热与
+    /// 工作负载试验），按迭代平均耗时升序取分位点；无数据时输出 "NA"。
+    /// </summary>
+    private sealed class PercentileColumn : IColumn
+    {
+        private readonly double _quantile;
+
+        public PercentileColumn(string id, double quantile)
+        {
+            Id = id;
+            _quantile = quantile;
+        }
+
+        public string Id { get; }
+        public string ColumnName => Id;
+        public string Legend => $"{Id} 分位延迟（各迭代平均耗时）";
+        public UnitType UnitType => UnitType.Time;
+        public bool AlwaysShow => true;
+        public ColumnCategory Category => ColumnCategory.Statistics;
+        public int PriorityInCategory => 0;
+        public bool IsNumeric => true;
+
+        public bool IsAvailable(Summary summary) => true;
+
+        public bool IsDefault(Summary summary, BenchmarkCase benchmarkCase) => false;
+
+        public string GetValue(Summary summary, BenchmarkCase benchmarkCase)
+            => Compute(summary, benchmarkCase);
+
+        public string GetValue(Summary summary, BenchmarkCase benchmarkCase, SummaryStyle style)
+            => Compute(summary, benchmarkCase);
+
+        private string Compute(Summary summary, BenchmarkCase benchmarkCase)
+        {
+            var runs = summary[benchmarkCase].GetResultRuns()?.ToList();
+            if (runs is null || runs.Count == 0) return "NA";
+
+            // Measurement.Nanoseconds 为「单次迭代总耗时」，需除以迭代内操作数还原单操作口径
+            var ordered = runs
+                .Select(r => r.Operations > 0 ? r.Nanoseconds / r.Operations : r.Nanoseconds)
+                .OrderBy(v => v)
+                .ToArray();
+
+            var index = (int)Math.Ceiling(_quantile * ordered.Length) - 1;
+            if (index < 0) index = 0;
+            if (index >= ordered.Length) index = ordered.Length - 1;
+            return ordered[index].ToString("N1", CultureInfo.InvariantCulture);
+        }
     }
 }
