@@ -503,6 +503,33 @@ proposes a smaller target and the scale-down cooldown has elapsed, still bounded
 `MinPoolSize`. If you relied on pools staying at their high-water mark, set
 `EnableAutoScaling = false` or raise `ScaleDownThreshold`.
 
+### Structured lease context and lifecycle fields (breaking changes in 2.5)
+
+Two observability-facing breaking changes land in 2.5 (M10/M16/M20):
+
+1. **`HayateObject<T>.AcquireTrace` (string) removed.** When leak-trace capture is
+   enabled (`LeakTraceCaptureMode = EveryAcquire` or `Sampled`), each borrow now
+   creates an immutable `HayateLeaseContext` (monotonic `LeaseId` + captured
+   `StackFrame[]` + `BorrowedAt`). The context is carried by an
+   `AsyncLocal<HayateLeaseContext>` flow (`HayateLeaseContext.Current`), so
+   **concurrent acquires each own an isolated context instead of overwriting a
+   shared string**; the wrapper exposes the same instance via
+   `HayateObject<T>.LeaseContext`. Frames are captured with
+   `new StackTrace(fNeedFileInfo: false)` (no PDB/source-file I/O). Release ends
+   the lease (flow context detached); `Destroy` clears the wrapper reference.
+   The three capture modes (Off by default / Sampled / EveryAcquire) keep their
+   2.1+ semantics. For the old text form, read `TakeSnapshot().LeakTraces`,
+   which the pool formats as `[Lease {id}] Type.Method+0xoffset <- ...`.
+2. **New lifecycle fields on `HayateObject<T>`** (M20): `CreatedAtTick`
+   (wall-clock creation time as `DateTimeOffset.UtcNow.Ticks`, complementing the
+   Stopwatch-based `CreatedAt` used for durations), `LeaseCount` (monotonic
+   borrow counter), and `OwnerPoolName` (logical pool name stamped at creation).
+   These flow through snapshots via the new `HayatePoolSnapshot.ObjectDetails`
+   collection (`HayatePoolObjectDetail`), populated on every `TakeSnapshot()`.
+
+Also new in 2.5: shard affinity (`ShardAffinityMode`, M18) and the full registry
+surface (`GetAll`/`Remove`/`HayatePoolMetadata`, M11+).
+
 ## Monitoring and Diagnostics
 
 ### Get current statistics
