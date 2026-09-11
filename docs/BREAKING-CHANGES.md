@@ -137,3 +137,11 @@ Behaviours to be aware of before adopting HayateOP.
 - **`MinPoolSize = 0` cold pools bootstrap on first acquire.** No background component pre-creates
   objects to reach `MinPoolSize`; the pool starts empty, and the first acquire on a fully empty
   pool creates its object on demand. Background scaling never grows toward `MinPoolSize = 0`.
+- **A disposed pool is not guarded against further use.** `Dispose()` drains the objects the pool
+  holds and releases the background timer and wake-up gate, but keeps no disposed flag, so a
+  later `Acquire` is not rejected with `ObjectDisposedException` the way
+  `Microsoft.Extensions.ObjectPool.DisposableObjectPool<T>` rejects it. On a drained pool the
+  cold-boot path simply hands out a newly created object. Treat a disposed pool as unusable.
+  Related: `IHayateObjectPolicy.OnDestroy` is not invoked for objects released by
+  `Clear()` / `Dispose()` on the general-purpose engine, unlike every other destroy path. See
+  [`disposal.md`](disposal.md).

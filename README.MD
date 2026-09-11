@@ -540,6 +540,35 @@ pool.ReloadConfig(config =>
 pool.Clear();
 ```
 
+### Releasing objects and disposing the pool
+
+Disposing the pool releases everything the pool is holding — a host does **not** have to
+dispose each pooled object itself. This matches the contract of
+`Microsoft.Extensions.ObjectPool.DisposableObjectPool<T>`.
+
+```csharp
+using var pool = new HayatePoolBuilder<MyResource>()
+    .WithMaxSize(32)
+    .Build();
+
+var resource = pool.Acquire();
+try { /* use resource */ }
+finally { pool.Release(resource); }   // always return what you borrow
+// leaving the using block disposes the pool and releases everything still in it
+```
+
+| Call | Effect |
+| :--- | :--- |
+| `Clear()` | Disposes the objects the pool holds right now, leaving the pool usable |
+| `Dispose()` | `Clear()` plus releasing the background timer and the return-signal gate |
+
+Three points worth knowing: checked-out objects are left alone and remain the caller's
+responsibility; a user `Dispose` that throws is caught and logged so the drain continues;
+and a pool that has been disposed is not guarded against further use, so treat it as
+unusable. [`docs/disposal.md`](docs/disposal.md) covers the ownership model, the exact
+behaviour of the drain on both engines, the side-by-side comparison with
+`DisposableObjectPool<T>`, and the two differences from it.
+
 ### OpenTelemetry metrics (optional package)
 
 `DotNetCore.HayateOP.Extensions.OpenTelemetry` bridges `IHayateMetrics` onto
