@@ -65,10 +65,23 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     // The suspended-wait slice used when no signal arrives. A signal wakes immediately; the slice merely caps the re-check interval when no signal arrives.
     private const int BlockWaitSliceMs = 100;
 
-    // Background tasks
-    private Timer _evictionTimer;
-    private Timer _scalingTimer;
-    private Timer _validationTimer;
+    // Background tasks.
+    // Eviction, auto-scaling and idle validation share a single timer. The timer ticks at the smallest
+    // enabled period and each loop fires only when its own deadline has elapsed, so every concern keeps
+    // its configured cadence while the pool holds one timer handle instead of three. When all three are
+    // disabled no timer is created at all — an idle pool with no background features never wakes up.
+    // The schedule is fixed at construction, exactly like the three creation-time captures it replaces.
+    private Timer _backgroundTimer;
+    private long _evictionPeriodTicks;
+    private long _scalingPeriodTicks;
+    private long _validationPeriodTicks;
+    private long _nextEvictionDue;
+    private long _nextScalingDue;
+    private long _nextValidationDue;
+    // Re-entrancy guard: a tick that overruns its period must not overlap the next one. The three loops
+    // mutate shared shard state (claim + destroy), and the previous one-timer-per-concern layout never
+    // ran a single concern concurrently with itself.
+    private int _backgroundTickBusy;
 
     // Scale-up/down cooldown control to prevent thrashing
     // Stopwatch timestamp (0 = never scaled, equivalent to the original DateTime.MinValue semantics)
@@ -288,21 +301,90 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         }
     }
 
+    /// <summary>
+    /// Starts the single background timer that drives eviction, auto-scaling and idle validation.
+    /// Returns without creating a timer when all three concerns are disabled, so a pool that needs no
+    /// background work holds no timer handle and performs no periodic wake-ups.
+    /// </summary>
     private void StartBackgroundTasks()
     {
-        if (_enableEviction)
-        {
-            _evictionTimer = new Timer(EvictionCallback, null, _options.EvictionIntervalMs, _options.EvictionIntervalMs);
-        }
+        // The concerns keep their own periods; the shared timer ticks at the smallest of them.
+        var evictionMs = _enableEviction ? Math.Max(1, _options.EvictionIntervalMs) : 0;
+        var scalingMs = _enableAutoScaling ? Math.Max(1, _options.ScalingIntervalMs) : 0;
+        var validationMs = _enableValidation ? Math.Max(1, _options.ValidateIntervalMs) : 0;
 
-        if (_enableAutoScaling)
-        {
-            _scalingTimer = new Timer(ScalingCallback, null, _options.ScalingIntervalMs, _options.ScalingIntervalMs);
-        }
+        var tickMs = 0;
+        if (evictionMs > 0) tickMs = evictionMs;
+        if (scalingMs > 0 && (tickMs == 0 || scalingMs < tickMs)) tickMs = scalingMs;
+        if (validationMs > 0 && (tickMs == 0 || validationMs < tickMs)) tickMs = validationMs;
 
-        if (_enableValidation)
+        // All three disabled: no background work, therefore no timer.
+        if (tickMs == 0) return;
+
+        _evictionPeriodTicks = MillisecondsToStopwatchTicks(evictionMs);
+        _scalingPeriodTicks = MillisecondsToStopwatchTicks(scalingMs);
+        _validationPeriodTicks = MillisecondsToStopwatchTicks(validationMs);
+
+        // First run of each concern happens one full period after construction, mirroring the original
+        // Timer(..., dueTime: interval, period: interval) layout.
+        var now = Stopwatch.GetTimestamp();
+        if (_evictionPeriodTicks > 0) _nextEvictionDue = now + _evictionPeriodTicks;
+        if (_scalingPeriodTicks > 0) _nextScalingDue = now + _scalingPeriodTicks;
+        if (_validationPeriodTicks > 0) _nextValidationDue = now + _validationPeriodTicks;
+
+        _backgroundTimer = new Timer(BackgroundTick, null, tickMs, tickMs);
+    }
+
+    /// <summary>
+    /// Converts a millisecond period to a Stopwatch tick count (0 for a disabled concern), with a floor
+    /// of one tick so an enabled concern can never end up with a zero period and spin.
+    /// </summary>
+    private static long MillisecondsToStopwatchTicks(int milliseconds)
+    {
+        if (milliseconds <= 0) return 0;
+        var ticks = (long)(milliseconds / 1000.0 * Stopwatch.Frequency);
+        return ticks < 1 ? 1 : ticks;
+    }
+
+    /// <summary>
+    /// Single dispatch point for the merged background timer. Each concern runs only when its own period
+    /// has elapsed; because the timer period equals the smallest enabled period, every concern fires on
+    /// schedule.
+    /// </summary>
+    private void BackgroundTick(object state)
+    {
+        // Skip rather than overlap: a slow eviction pass must not run concurrently with the next tick.
+        if (Interlocked.CompareExchange(ref _backgroundTickBusy, 1, 0) != 0) return;
+
+        try
         {
-            _validationTimer = new Timer(ValidateCallback, null, _options.ValidateIntervalMs, _options.ValidateIntervalMs);
+            var now = Stopwatch.GetTimestamp();
+
+            if (_evictionPeriodTicks > 0 && now >= _nextEvictionDue)
+            {
+                _nextEvictionDue = now + _evictionPeriodTicks;
+                EvictionCallback(null);
+            }
+
+            if (_scalingPeriodTicks > 0 && now >= _nextScalingDue)
+            {
+                _nextScalingDue = now + _scalingPeriodTicks;
+                ScalingCallback(null);
+            }
+
+            if (_validationPeriodTicks > 0 && now >= _nextValidationDue)
+            {
+                _nextValidationDue = now + _validationPeriodTicks;
+                ValidateCallback(null);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Background tick failed");
+        }
+        finally
+        {
+            Volatile.Write(ref _backgroundTickBusy, 0);
         }
     }
 
@@ -1859,9 +1941,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     public void Dispose()
     {
         Clear();
-        _evictionTimer?.Dispose();
-        _scalingTimer?.Dispose();
-        _validationTimer?.Dispose();
+        // Release the shared background timer and drop the reference so a disposed pool retains no timer handle.
+        _backgroundTimer?.Dispose();
+        _backgroundTimer = null;
 
         // Release the return-signal gate (same precondition as the timers: no in-flight Acquire waiters at Dispose time)
         _blockGate.Dispose();

@@ -410,6 +410,26 @@
             <exception cref="T:System.ArgumentNullException">Thrown if policy, options, scalingStrategy, metrics, logger, or poolName is null.</exception>
             <exception cref="T:System.InvalidOperationException">Thrown if the configured options are invalid.</exception>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.StartBackgroundTasks">
+            <summary>
+            Starts the single background timer that drives eviction, auto-scaling and idle validation.
+            Returns without creating a timer when all three concerns are disabled, so a pool that needs no
+            background work holds no timer handle and performs no periodic wake-ups.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.MillisecondsToStopwatchTicks(System.Int32)">
+            <summary>
+            Converts a millisecond period to a Stopwatch tick count (0 for a disabled concern), with a floor
+            of one tick so an enabled concern can never end up with a zero period and spin.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.BackgroundTick(System.Object)">
+            <summary>
+            Single dispatch point for the merged background timer. Each concern runs only when its own period
+            has elapsed; because the timer period equals the smallest enabled period, every concern fires on
+            schedule.
+            </summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.WaitForWarmupIfNeeded">
             <summary>
             Pre-warm readiness gate. Under the default configuration (<see cref="P:DotNetCore.HayateOP.HayatePoolOptions.WaitForWarmup"/> = false)

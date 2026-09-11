@@ -39,6 +39,13 @@ See the release planning notes in the project workspace for the full breakdown.
   and a parked wrapper holds no reference to its destroyed pooled value. When a destroy's cleanup
   fails partway, the wrapper is not parked, so a stale registry entry can never survive onto a
   reused wrapper. The release-rejection path also drops a now-redundant registry removal.
+- **Single background timer**: eviction, auto-scaling and idle validation are now driven by one timer
+  instead of one timer per concern. The shared timer ticks at the smallest enabled period and each
+  concern still fires on its own configured interval, so cadence is unchanged while the pool holds one
+  timer handle instead of three. A pool whose three background features are all disabled — including
+  the lean path, where they are normalized off — creates no timer at all and performs no periodic
+  wake-ups. Overrunning ticks are skipped rather than overlapped, and `Dispose` releases the handle and
+  drops the reference to it.
 - `CHANGELOG.md` and [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md): release
   notes and migration guidance now live in dedicated documents, and the README links
   to them instead of duplicating them.
