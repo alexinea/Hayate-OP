@@ -62,6 +62,19 @@ See the release planning notes in the project workspace for the full breakdown.
   on. Neither profile touches pool sizing, timeouts or the reject policy, so a profile can be applied and
   then tuned in either call order. The profiles are order-deterministic against each other (the last one
   wins), and a later feature call still overrides a profile.
+- **Pool-level availability circuit breaker**: `HayatePoolOptions.EnableCircuitBreaker` (default off) with
+  `HayateCircuitBreakerOptions` (failure threshold 3, 30 s reset timeout, 5 s probe interval, optional
+  health probe) and the `OnAvailable` / `OnUnavailable` callbacks. The application reports dependency
+  failures with `pool.SetUnavailable(reason)`; the `FailureThreshold`-th consecutive report opens the
+  breaker and every further `Acquire` / `AcquireAsync` throws the new `HayatePoolUnavailableException`
+  (derived from `InvalidOperationException`, so existing catch blocks keep working) before doing any pool
+  work, instead of handing out objects that are likely to be broken. `pool.CheckAvailable()` reports the
+  state with a single volatile read. Recovery is automatic when a probe is configured — it runs on a timer
+  that is created on the trip and disposed on the recovery, so an available pool holds no extra handle —
+  or manual through `pool.SetAvailable()`, which is also how a pending failure streak is cleared. The
+  feature is fixed at build time (the lean profile forces it off and `ReloadConfig` cannot toggle it),
+  and the API surface (`CheckAvailable` / `SetUnavailable` / `SetAvailable`) aligns with
+  SafeObjectPool's availability model.
 - `CHANGELOG.md` and [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md): release
   notes and migration guidance now live in dedicated documents, and the README links
   to them instead of duplicating them.

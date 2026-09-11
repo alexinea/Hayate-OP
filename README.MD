@@ -569,6 +569,42 @@ unusable. [`docs/disposal.md`](docs/disposal.md) covers the ownership model, the
 behaviour of the drain on both engines, the side-by-side comparison with
 `DisposableObjectPool<T>`, and the two differences from it.
 
+### Pool-level circuit breaker (optional)
+
+Pools whose objects front a network dependency (database, message broker, remote service)
+can take themselves out of service when that dependency keeps failing, instead of handing
+out objects that are likely to be broken and letting every caller discover the outage on
+its own. The feature is opt-in (`EnableCircuitBreaker = false` by default), so a pool that
+does not ask for it behaves exactly as before, and the lean profile always forces it off.
+
+```csharp
+var pool = new HayatePoolBuilder<MyDbConnection>()
+    .WithCircuitBreaker(failureThreshold: 3,
+                        resetTimeout: TimeSpan.FromSeconds(30),
+                        probeInterval: TimeSpan.FromSeconds(5),
+                        probe: () => database.Ping())
+    .WithOnUnavailable(args => logger.LogError("pool down: {Reason}", args.Reason))
+    .WithOnAvailable(_ => logger.LogInformation("pool recovered"))
+    .Build();
+```
+
+| Member | Role |
+| :--- | :--- |
+| `SetUnavailable(reason)` | The application reports a dependency failure; the `FailureThreshold`-th consecutive report opens the breaker |
+| `SetAvailable()` | Reports the dependency is healthy again: closes the breaker and clears a pending failure streak — the manual recovery path when no probe is configured |
+| `CheckAvailable()` | Cheap availability probe: a single volatile read, `false` while the breaker is open |
+| `OnAvailable` / `OnUnavailable` | Fire exactly once per availability transition, never on a state that does not change |
+
+While the breaker is open every `Acquire` / `AcquireAsync` throws
+`HayatePoolUnavailableException` (derived from `InvalidOperationException`, so existing
+catch blocks keep working) **before** doing any pool work — no shard scan, no wait, no
+create. Recovery is automatic when a `probe` is configured: the first probe runs one
+`ResetTimeout` after the trip, then one per `ProbeInterval`, and a throwing probe counts
+as a failed probe. Without a probe no background work is created at all and the pool
+stays unavailable until the application calls `SetAvailable()`. The probe timer exists
+only while the pool is unavailable — an available pool holds no extra handle and pays a
+single predictable branch per borrow.
+
 ### OpenTelemetry metrics (optional package)
 
 `DotNetCore.HayateOP.Extensions.OpenTelemetry` bridges `IHayateMetrics` onto

@@ -111,6 +111,24 @@
             The default leak-trace sampling denominator (used by <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.LeakTraceSampleRate"/>; only effective in Sampled mode).
             </summary>
         </member>
+        <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_CIRCUIT_BREAKER_FAILURE_THRESHOLD">
+            <summary>
+            Default number of consecutive reported failures before the pool-level circuit breaker trips
+            (corresponds to <see cref="P:DotNetCore.HayateOP.HayateCircuitBreakerOptions.FailureThreshold"/>).
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS">
+            <summary>
+            Default wait before the background probe starts, in seconds
+            (corresponds to <see cref="P:DotNetCore.HayateOP.HayateCircuitBreakerOptions.ResetTimeout"/>).
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_CIRCUIT_BREAKER_PROBE_INTERVAL_SECONDS">
+            <summary>
+            Default interval between background probes, in seconds
+            (corresponds to <see cref="P:DotNetCore.HayateOP.HayateCircuitBreakerOptions.ProbeInterval"/>).
+            </summary>
+        </member>
         <member name="T:DotNetCore.HayateOP.Common.ValueStopwatch">
             <summary>
             High-performance value-type stopwatch for accurately measuring elapsed time intervals.
@@ -161,6 +179,195 @@
             Gets the time elapsed from when the stopwatch started to now.
             </summary>
             <value>The time span elapsed from start to now.</value>
+        </member>
+        <member name="T:DotNetCore.HayateOP.HayateCircuitBreakerOptions">
+            <summary>
+            Circuit-breaker settings for the pool-level availability guard, used when
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableCircuitBreaker"/> is on.
+            </summary>
+            <remarks>
+            The breaker protects the pool as a whole rather than an individual object. When the dependency behind
+            the pool fails, the application reports it with <c>SetUnavailable</c>; once the configured number of
+            consecutive failures has accumulated, the pool marks itself unavailable and every further acquire fails
+            immediately instead of handing out objects that are likely to be broken. While unavailable, a background
+            probe runs on the pool's shared timer — the probe is the only background work the breaker adds, it starts
+            only when the breaker trips and stops as soon as the pool recovers.
+            </remarks>
+            <example>
+            <code>
+            var options = new HayatePoolOptions
+            {
+                EnableCircuitBreaker = true,
+                CircuitBreaker = new HayateCircuitBreakerOptions
+                {
+                    FailureThreshold = 3,
+                    ResetTimeout = TimeSpan.FromSeconds(30),
+                    ProbeInterval = TimeSpan.FromSeconds(5),
+                    Probe = () =&gt; database.Ping()
+                }
+            };
+            </code>
+            </example>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateCircuitBreakerOptions.FailureThreshold">
+            <summary>
+            Number of consecutive reported dependency failures that trips the breaker.<br />
+            Default value: <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_CIRCUIT_BREAKER_FAILURE_THRESHOLD"/> (3).
+            </summary>
+            <remarks>
+            Purpose: absorbs transient hiccups — a single failure report does not take the pool out of service.<br />
+            Special case: the streak counts consecutive reports without an intervening recovery. It is reset to 0
+            by <c>SetAvailable</c> (explicitly, or through a successful probe), so a pool that recovered needs
+            repeated fresh failures before it trips again; sporadic failures spread over a healthy lifetime also
+            accumulate, and an application that knows the dependency is fine can call <c>SetAvailable</c> at any
+            time to clear the pending streak. Set it to 1 to trip on the first report.<br />
+            Boundary: values below 1 are normalized to 1 by <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/>.
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateCircuitBreakerOptions.ResetTimeout">
+            <summary>
+            How long the pool stays unavailable before the background probe starts.<br />
+            Default value: <c>TimeSpan.FromSeconds(30)</c> (constructed from
+            <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS"/>).
+            </summary>
+            <remarks>
+            Purpose: gives the failing dependency room to recover without being probed on every tick. No probe
+            runs during this window, so a short value is safe but increases the probe rate against a dependency
+            that is still down.<br />
+            Boundary: values &lt;= <see cref="F:System.TimeSpan.Zero"/> are normalized to the default.
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateCircuitBreakerOptions.ProbeInterval">
+            <summary>
+            Interval between background probes once <see cref="P:DotNetCore.HayateOP.HayateCircuitBreakerOptions.ResetTimeout"/> has elapsed.<br />
+            Default value: <c>TimeSpan.FromSeconds(5)</c> (constructed from
+            <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_CIRCUIT_BREAKER_PROBE_INTERVAL_SECONDS"/>).
+            </summary>
+            <remarks>
+            Purpose: bounds how long the pool stays unavailable after the dependency recovers. This is also the
+            resolution at which the probe is scheduled, because it is the only period the breaker contributes to
+            the shared background timer.<br />
+            Boundary: values &lt;= <see cref="F:System.TimeSpan.Zero"/> are normalized to the default.
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateCircuitBreakerOptions.Probe">
+            <summary>
+            The background probe that decides whether the dependency is healthy again. Default <c>null</c>.
+            </summary>
+            <remarks>
+            Return <c>true</c> to bring the pool back into service — the pool then closes the breaker and raises
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.OnAvailable"/>; return <c>false</c> to stay unavailable and be probed
+            again after the next <see cref="P:DotNetCore.HayateOP.HayateCircuitBreakerOptions.ProbeInterval"/>. The delegate runs on the pool's background timer,
+            never on a borrow or return path, and an exception it throws is caught and logged as a failed probe.<br />
+            When this is <c>null</c> no automatic recovery happens: the pool stays unavailable until the
+            application calls <c>SetAvailable</c>, which is the right choice when only the caller can know that
+            the dependency is back.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateCircuitBreakerOptions.CopyTo">
+            <summary>
+            Creates a new <see cref="T:DotNetCore.HayateOP.HayateCircuitBreakerOptions"/> and copies all current settings into it.
+            </summary>
+            <returns>A new options instance with the same settings as this one.</returns>
+            <example>
+            <code>
+            var copy = options.CircuitBreaker.CopyTo();
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateCircuitBreakerOptions.CopyTo(DotNetCore.HayateOP.HayateCircuitBreakerOptions)">
+            <summary>
+            Copies all current settings into the supplied <paramref name="options"/> instance.
+            </summary>
+            <param name="options">The target options instance to copy values into.</param>
+            <returns>The same <paramref name="options"/> instance, updated with the current settings.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="options"/> is <c>null</c>.</exception>
+            <example>
+            <code>
+            var target = new HayateCircuitBreakerOptions();
+            options.CircuitBreaker.CopyTo(target);
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateCircuitBreakerOptions.Equals(DotNetCore.HayateOP.HayateCircuitBreakerOptions)">
+            <summary>
+            Determines whether the supplied options are structurally equal to this instance.
+            </summary>
+            <param name="other">The instance to compare with.</param>
+            <returns><c>true</c> when every setting matches; the <see cref="P:DotNetCore.HayateOP.HayateCircuitBreakerOptions.Probe"/> delegates are compared by
+            reference. <c>false</c> when <paramref name="other"/> is <c>null</c> or any setting differs.</returns>
+            <remarks>
+            Value equality keeps the options comparable as plain data — a deep copy produced by
+            <see cref="M:DotNetCore.HayateOP.HayateCircuitBreakerOptions.CopyTo"/> equals its source — which is also what makes the reflection-based
+            configuration-equivalence tests work when the breaker settings are nested inside
+            <see cref="T:DotNetCore.HayateOP.HayatePoolOptions"/>.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateCircuitBreakerOptions.Equals(System.Object)">
+            <summary>Determines whether the supplied object is a structurally equal options instance.</summary>
+            <param name="obj">The object to compare with.</param>
+            <returns><c>true</c> when <paramref name="obj"/> is a <see cref="T:DotNetCore.HayateOP.HayateCircuitBreakerOptions"/> with the same settings.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateCircuitBreakerOptions.GetHashCode">
+            <summary>Returns a hash code combining all settings.</summary>
+            <returns>A hash code consistent with <see cref="M:DotNetCore.HayateOP.HayateCircuitBreakerOptions.Equals(DotNetCore.HayateOP.HayateCircuitBreakerOptions)"/>; the probe delegate contributes its own hash (0 when <c>null</c>).</returns>
+        </member>
+        <member name="T:DotNetCore.HayateOP.HayatePoolAvailabilityEventArgs">
+            <summary>
+            Event arguments for the pool availability callbacks
+            (<see cref="P:DotNetCore.HayateOP.HayatePoolOptions.OnAvailable"/> and <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.OnUnavailable"/>).
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolAvailabilityEventArgs.PoolName">
+            <summary>The name of the pool whose availability changed.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolAvailabilityEventArgs.Reason">
+            <summary>
+            The reason reported with the failure, when there is one. It is the value passed to
+            <c>SetUnavailable</c> that tripped the breaker, or the message of the exception thrown by a probe;
+            it is <c>null</c> on a recovery, and when the breaker was tripped without a reason.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolAvailabilityEventArgs.#ctor(System.String,System.String)">
+            <summary>
+            Initializes a new instance of the <see cref="T:DotNetCore.HayateOP.HayatePoolAvailabilityEventArgs"/> class.
+            </summary>
+            <param name="poolName">The name of the pool whose availability changed.</param>
+            <param name="reason">The reported failure reason, or <c>null</c> when there is none.</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolAvailabilityEventArgs.ToString">
+            <summary>
+            Returns a human-readable description of the availability event.
+            </summary>
+            <returns>A formatted description of the pool and the reported reason.</returns>
+        </member>
+        <member name="T:DotNetCore.HayateOP.HayatePoolUnavailableException">
+            <summary>
+            The exception thrown by <c>Acquire</c> / <c>AcquireAsync</c> while the pool-level circuit breaker is
+            open (<see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableCircuitBreaker"/>), i.e. the pool has been taken out of
+            service because the dependency behind it keeps failing.
+            </summary>
+            <remarks>
+            Derives from <see cref="T:System.InvalidOperationException"/> so existing catch blocks keep working, while code
+            that needs to tell "the pool is out of service" apart from an abort-policy rejection or a timeout can
+            catch this type specifically. Semantic counterpart of SAFEOP's <c>UnavailableException</c>.
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolUnavailableException.PoolName">
+            <summary>The name of the pool that is currently unavailable.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolUnavailableException.Reason">
+            <summary>
+            The reason reported with the failure that tripped the breaker, or <c>null</c> when the failure was
+            reported without one. Matches <see cref="P:DotNetCore.HayateOP.HayatePoolAvailabilityEventArgs.Reason"/>.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolUnavailableException.#ctor(System.String,System.String)">
+            <summary>
+            Initializes a new instance of the <see cref="T:DotNetCore.HayateOP.HayatePoolUnavailableException"/> class.
+            </summary>
+            <param name="poolName">The name of the pool that is unavailable.</param>
+            <param name="reason">The reported failure reason, or <c>null</c> when there is none.</param>
         </member>
         <member name="T:DotNetCore.HayateOP.HayateEvictReason">
             <summary>
@@ -518,6 +725,91 @@
             <example><code>
             int n = pool.Evict(HayateEvictReason.Idle);
             </code></example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.CheckAvailable">
+            <summary>
+            Reports whether the pool is currently able to serve borrow requests.
+            </summary>
+            <returns><c>true</c> when the pool is available; <c>false</c> while the pool-level circuit breaker
+            is open.</returns>
+            <remarks>
+            Always <c>true</c> when <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableCircuitBreaker"/> is off, because nothing
+            can take such a pool out of service. Cheap enough to call on a request path: a single volatile read
+            when the feature is on, and a constant when it is off.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.SetUnavailable(System.String)">
+            <summary>
+            Reports that the dependency behind the pool failed, and takes the pool out of service once
+            <see cref="P:DotNetCore.HayateOP.HayateCircuitBreakerOptions.FailureThreshold"/> consecutive failures have been reported.
+            </summary>
+            <param name="reason">An optional description of the failure, surfaced through
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.OnUnavailable"/> and the logs.</param>
+            <remarks>
+            The intended caller is the application code that discovers the failure — a connection attempt that
+            timed out, a remote call that failed — not the pool. Calling this on a pool whose circuit breaker is
+            disabled does nothing, so instrumentation can call it unconditionally.<br />
+            Each call counts as one consecutive failure; an explicit <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.SetAvailable"/> (or a successful
+            probe) resets the streak, so sporadic failures that survive a recovery are counted from scratch again.
+            Once the threshold is reached the pool becomes unavailable, a further failure report changes nothing,
+            and recovery happens either through the configured probe or through <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.SetAvailable"/>.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.SetAvailable">
+            <summary>
+            Reports that the dependency behind the pool is healthy again, and brings the pool back into service.
+            </summary>
+            <remarks>
+            Closes the circuit breaker and raises <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.OnAvailable"/> — but only when the
+            pool was actually unavailable; calling it on a pool that is already available just clears the pending
+            failure streak and raises nothing. This is the recovery path when no
+            <see cref="P:DotNetCore.HayateOP.HayateCircuitBreakerOptions.Probe"/> is configured. Calling it on a pool whose circuit
+            breaker is disabled does nothing.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.ThrowIfCircuitOpen">
+            <summary>Borrow-path fail-fast. Throws before any pool work while the breaker is open.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TripBreaker(System.String)">
+            <summary>
+            Opens the breaker: flips the pool to unavailable, announces the trip through the callback and the
+            log, and starts the probe timer when a probe is configured. Concurrent trips collapse into one.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.RecoverBreaker(System.Boolean,System.Int64)">
+            <summary>
+            Closes the breaker: flips the pool back to available, stops the probe timer, resets the failure
+            streak and announces the recovery through the callback and the log. Concurrent recoveries — a
+            racing probe and SetAvailable, or two racing probes — collapse into one announcement.
+            </summary>
+            <param name="fromProbe">Whether the recovery was triggered by the background probe (affects the log wording only).</param>
+            <param name="expectedTrippedAt">
+            The trip timestamp the caller observed before acting, or a negative value to skip the staleness
+            check (SetAvailable). The timestamp is stable while the breaker stays open, so a mismatch means the
+            caller is a probe that started before a re-trip and must not close the newer breaker.
+            </param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.StartBreakerProbeTimer">
+            <summary>
+            Starts the transient probe timer: the first probe runs one ResetTimeout after the trip, then one
+            probe per ProbeInterval. Called only from the trip path, so there is no create/create race; the
+            timer exists only while the pool is unavailable and is disposed on recovery.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.StopBreakerProbeTimer">
+            <summary>Stops and releases the transient probe timer; idempotent and race-free by exchange.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.BreakerProbeTick(System.Object)">
+            <summary>
+            Probe tick. Runs the configured probe and recovers the pool when it reports healthy; a throwing
+            probe is a failed probe and leaves the pool unavailable for the next interval.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.ClampToTimerMilliseconds(System.Nullable{System.TimeSpan})">
+            <summary>
+            Clamps a TimeSpan to the int-millisecond range accepted by Timer (a value beyond ~24.8 days
+            saturates instead of overflowing); <c>null</c> lets the caller apply its own default.
+            </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryColdBootAcquire(System.Int64)">
             <summary>
@@ -1046,6 +1338,88 @@
             <code>
             var builder = new HayatePoolBuilder&lt;MyResource&gt;()
                 .WithOnCapacityCritical(args =&gt; Log.Error("pool at capacity"));
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEnableCircuitBreaker(System.Boolean)">
+            <summary>
+            Enables or disables the pool-level availability circuit breaker.
+            </summary>
+            <param name="enable">Whether to enable the circuit breaker; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <remarks>
+            When enabled, the application reports dependency failures with <c>SetUnavailable</c>; after
+            <see cref="P:DotNetCore.HayateOP.HayateCircuitBreakerOptions.FailureThreshold"/> consecutive reports the pool marks itself
+            unavailable and every further <c>Acquire</c> / <c>AcquireAsync</c> fails immediately with a
+            <see cref="T:DotNetCore.HayateOP.HayatePoolUnavailableException"/> instead of handing out objects that are likely to be
+            broken. Recovery happens through the configured probe or through an explicit <c>SetAvailable</c>.
+            The switch is fixed at build time: it cannot be turned on or off through <c>ReloadConfig</c>.
+            </remarks>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableCircuitBreaker();
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithCircuitBreaker(System.Int32,System.TimeSpan,System.TimeSpan,System.Func{System.Boolean})">
+            <summary>
+            Configures the circuit breaker in one call: threshold, trip windows and the recovery probe.
+            </summary>
+            <param name="failureThreshold">Consecutive failure reports that trip the breaker (values below 1 are normalized to the default by configuration normalization).</param>
+            <param name="resetTimeout">How long the pool stays unavailable before the first probe runs.</param>
+            <param name="probeInterval">Interval between probes once <paramref name="resetTimeout"/> has elapsed.</param>
+            <param name="probe">The background probe deciding whether the dependency is healthy again; <c>null</c> keeps recovery manual through <c>SetAvailable</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <remarks>
+            Assigns a fresh <see cref="T:DotNetCore.HayateOP.HayateCircuitBreakerOptions"/> built from the arguments, replacing the
+            default instance; it also enables the feature, so <c>WithEnableCircuitBreaker</c> is not required
+            before it. The overload taking an options instance preserves the given object instead.
+            </remarks>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithCircuitBreaker(3, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(5), () => database.Ping());
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithCircuitBreaker(DotNetCore.HayateOP.HayateCircuitBreakerOptions)">
+            <summary>
+            Assigns the circuit-breaker settings and enables the feature.
+            </summary>
+            <param name="options">The settings to assign; <c>null</c> restores the default settings (threshold 3, 30 s reset timeout, 5 s probe interval, no probe).</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithCircuitBreaker(new HayateCircuitBreakerOptions { FailureThreshold = 1 });
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithOnAvailable(System.Action{DotNetCore.HayateOP.HayatePoolAvailabilityEventArgs})">
+            <summary>
+            Sets the callback invoked when the pool becomes available again (the breaker closes).
+            </summary>
+            <param name="handler">The callback invoked once per recovery transition.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="handler"/> is <c>null</c>.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithOnAvailable(args => Log.Information("pool recovered"));
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithOnUnavailable(System.Action{DotNetCore.HayateOP.HayatePoolAvailabilityEventArgs})">
+            <summary>
+            Sets the callback invoked when the pool becomes unavailable (the breaker trips).
+            </summary>
+            <param name="handler">The callback invoked once per trip transition.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="handler"/> is <c>null</c>.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithOnUnavailable(args => Log.Error("pool out of service: {Reason}", args.Reason));
             </code>
             </example>
         </member>
@@ -2243,6 +2617,67 @@
             not affect the borrow/return main flow.
             </remarks>
         </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableCircuitBreaker">
+            <summary>
+            Whether to enable the pool-level availability circuit breaker.<br />
+            Default value: <c>false</c> (the feature is opt-in, so a pool that does not ask for it behaves
+            exactly as before).
+            </summary>
+            <remarks>
+            Purpose: when the dependency behind the pool fails, the application reports it with
+            <c>SetUnavailable</c>; after <see cref="P:DotNetCore.HayateOP.HayateCircuitBreakerOptions.FailureThreshold"/> consecutive
+            reports the pool marks itself unavailable and every further <c>Acquire</c> / <c>AcquireAsync</c> fails
+            immediately instead of handing out objects that are likely to be broken — the whole pool is taken out
+            of service rather than each caller discovering the failure on its own. A background probe then decides
+            when the dependency is healthy again and brings the pool back automatically.<br />
+            Special case: the feature is switched off by the lean fast path during normalization, which keeps the
+            lean borrow/return path byte-identical to the published measurement. It is also fixed at build time:
+            the pool snapshots the setting in its constructor, so <c>ReloadConfig</c> cannot turn it on or off.<br />
+            Cost: when disabled, the borrow path pays one perfectly predicted branch. When enabled, an available
+            pool pays one volatile read per borrow, and an unavailable pool fails before doing any work at all.<br />
+            Boundary: boolean switch.<br />
+            Recommended range: enable for pools whose objects come from a network dependency (database, message
+            broker, remote service) so a dependency outage degrades into fast failures instead of a queue of
+            timeouts. Leave it disabled for in-memory objects, which cannot fail as a group.
+            </remarks>
+            <example>
+            <code>
+            var options = new HayatePoolOptions { EnableCircuitBreaker = true };
+            </code>
+            </example>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.CircuitBreaker">
+            <summary>
+            The circuit-breaker settings, used when <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableCircuitBreaker"/> is on.
+            </summary>
+            <remarks>
+            Never <c>null</c>; the defaults keep the pool unavailable for 30 seconds and then probe every 5
+            seconds, and no probe is configured — so out of the box recovery is manual via <c>SetAvailable</c>.
+            Assign a configured instance to change the thresholds, or set the individual members on the instance
+            that is already there.
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.OnAvailable">
+            <summary>
+            Callback invoked when the pool becomes available again (the breaker closes). Default <c>null</c>.
+            </summary>
+            <remarks>
+            Fires once per transition, either from a successful probe or from an explicit <c>SetAvailable</c>; it
+            does not fire when the pool was already available. The callback runs on whichever thread performed the
+            transition — the background timer for a probe, the caller's thread for <c>SetAvailable</c> — and
+            should stay lightweight; exceptions thrown inside it are caught and logged by the pool.
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.OnUnavailable">
+            <summary>
+            Callback invoked when the pool becomes unavailable (the breaker trips). Default <c>null</c>.
+            </summary>
+            <remarks>
+            Fires once per transition, on the thread whose <c>SetUnavailable</c> call tripped the breaker; it does
+            not fire again while the pool stays unavailable, and it does not fire for failure reports made before
+            the threshold was reached. Exceptions thrown inside it are caught and logged by the pool.
+            </remarks>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableMetrics">
             <summary>
             Whether to enable metrics collection.<br />
@@ -2660,6 +3095,65 @@
         <member name="M:DotNetCore.HayateOP.IHayateObjectPool.GetOptions">
             <summary>Returns the live configuration options for this pool.</summary>
             <returns>The pool's <see cref="T:DotNetCore.HayateOP.HayatePoolOptions"/>.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPool.CheckAvailable">
+            <summary>
+            Reports whether the pool is currently able to serve borrow requests.
+            </summary>
+            <returns><c>true</c> when the pool is available; <c>false</c> while the pool-level circuit breaker
+            is open.</returns>
+            <remarks>
+            Always <c>true</c> when <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableCircuitBreaker"/> is off, because nothing
+            can take such a pool out of service. Cheap enough to call on a request path: a single volatile read
+            when the feature is on, and a constant when it is off.
+            </remarks>
+            <example>
+            <code>
+            if (pool.CheckAvailable()) { /* use the pool */ }
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPool.SetUnavailable(System.String)">
+            <summary>
+            Reports that the dependency behind the pool failed, and takes the pool out of service once
+            <see cref="P:DotNetCore.HayateOP.HayateCircuitBreakerOptions.FailureThreshold"/> consecutive failures have been reported.
+            </summary>
+            <param name="reason">An optional description of the failure, surfaced through
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.OnUnavailable"/> and the logs.</param>
+            <remarks>
+            The intended caller is the application code that discovers the failure — a connection attempt that
+            timed out, a remote call that failed — not the pool. Calling this on a pool whose circuit breaker is
+            disabled does nothing, so instrumentation can call it unconditionally.<br />
+            Each call counts as one consecutive failure; an explicit <see cref="M:DotNetCore.HayateOP.IHayateObjectPool.SetAvailable"/> (or a successful
+            probe) resets the streak, so sporadic failures that survive a recovery are counted from scratch again,
+            and an application that knows the dependency is fine can call <see cref="M:DotNetCore.HayateOP.IHayateObjectPool.SetAvailable"/> at any time
+            to clear a pending streak before it trips. Once the threshold is reached the pool becomes unavailable,
+            a further failure report changes nothing, and recovery happens either through the configured probe or
+            through <see cref="M:DotNetCore.HayateOP.IHayateObjectPool.SetAvailable"/>.
+            </remarks>
+            <example>
+            <code>
+            try { database.Ping(); }
+            catch (Exception ex) { pool.SetUnavailable(ex.Message); }
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPool.SetAvailable">
+            <summary>
+            Reports that the dependency behind the pool is healthy again, and brings the pool back into service.
+            </summary>
+            <remarks>
+            Closes the circuit breaker and raises <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.OnAvailable"/> — but only when the
+            pool was actually unavailable; calling it on a pool that is already available just clears the pending
+            failure streak and raises nothing. This is the recovery path when no
+            <see cref="P:DotNetCore.HayateOP.HayateCircuitBreakerOptions.Probe"/> is configured. Calling it on a pool whose circuit
+            breaker is disabled does nothing.
+            </remarks>
+            <example>
+            <code>
+            pool.SetAvailable();   // the dependency is back; resume serving
+            </code>
+            </example>
         </member>
         <member name="T:DotNetCore.HayateOP.IHayateObjectPool`1">
             <summary>

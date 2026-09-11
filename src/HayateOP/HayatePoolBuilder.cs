@@ -342,6 +342,124 @@ public class HayatePoolBuilder<T> where T : class, new()
 
     #endregion
 
+    #region Circuit breaker
+
+    /// <summary>
+    /// Enables or disables the pool-level availability circuit breaker.
+    /// </summary>
+    /// <param name="enable">Whether to enable the circuit breaker; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <remarks>
+    /// When enabled, the application reports dependency failures with <c>SetUnavailable</c>; after
+    /// <see cref="HayateCircuitBreakerOptions.FailureThreshold"/> consecutive reports the pool marks itself
+    /// unavailable and every further <c>Acquire</c> / <c>AcquireAsync</c> fails immediately with a
+    /// <see cref="HayatePoolUnavailableException"/> instead of handing out objects that are likely to be
+    /// broken. Recovery happens through the configured probe or through an explicit <c>SetAvailable</c>.
+    /// The switch is fixed at build time: it cannot be turned on or off through <c>ReloadConfig</c>.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableCircuitBreaker();
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithEnableCircuitBreaker(bool enable = true)
+    {
+        _options.EnableCircuitBreaker = enable;
+        return this;
+    }
+
+    /// <summary>
+    /// Configures the circuit breaker in one call: threshold, trip windows and the recovery probe.
+    /// </summary>
+    /// <param name="failureThreshold">Consecutive failure reports that trip the breaker (values below 1 are normalized to the default by configuration normalization).</param>
+    /// <param name="resetTimeout">How long the pool stays unavailable before the first probe runs.</param>
+    /// <param name="probeInterval">Interval between probes once <paramref name="resetTimeout"/> has elapsed.</param>
+    /// <param name="probe">The background probe deciding whether the dependency is healthy again; <c>null</c> keeps recovery manual through <c>SetAvailable</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <remarks>
+    /// Assigns a fresh <see cref="HayateCircuitBreakerOptions"/> built from the arguments, replacing the
+    /// default instance; it also enables the feature, so <c>WithEnableCircuitBreaker</c> is not required
+    /// before it. The overload taking an options instance preserves the given object instead.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithCircuitBreaker(3, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(5), () => database.Ping());
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithCircuitBreaker(
+        int failureThreshold,
+        TimeSpan resetTimeout,
+        TimeSpan probeInterval,
+        Func<bool> probe = null)
+    {
+        _options.CircuitBreaker = new HayateCircuitBreakerOptions
+        {
+            FailureThreshold = failureThreshold,
+            ResetTimeout = resetTimeout,
+            ProbeInterval = probeInterval,
+            Probe = probe
+        };
+        _options.EnableCircuitBreaker = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Assigns the circuit-breaker settings and enables the feature.
+    /// </summary>
+    /// <param name="options">The settings to assign; <c>null</c> restores the default settings (threshold 3, 30 s reset timeout, 5 s probe interval, no probe).</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithCircuitBreaker(new HayateCircuitBreakerOptions { FailureThreshold = 1 });
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithCircuitBreaker(HayateCircuitBreakerOptions options)
+    {
+        _options.CircuitBreaker = options ?? new HayateCircuitBreakerOptions();
+        _options.EnableCircuitBreaker = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the callback invoked when the pool becomes available again (the breaker closes).
+    /// </summary>
+    /// <param name="handler">The callback invoked once per recovery transition.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="handler"/> is <c>null</c>.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithOnAvailable(args => Log.Information("pool recovered"));
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithOnAvailable(Action<HayatePoolAvailabilityEventArgs> handler)
+    {
+        _options.OnAvailable = handler ?? throw new ArgumentNullException(nameof(handler));
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the callback invoked when the pool becomes unavailable (the breaker trips).
+    /// </summary>
+    /// <param name="handler">The callback invoked once per trip transition.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="handler"/> is <c>null</c>.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithOnUnavailable(args => Log.Error("pool out of service: {Reason}", args.Reason));
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithOnUnavailable(Action<HayatePoolAvailabilityEventArgs> handler)
+    {
+        _options.OnUnavailable = handler ?? throw new ArgumentNullException(nameof(handler));
+        return this;
+    }
+
+    #endregion
+
     #region Basic configuration
 
     /// <summary>

@@ -557,6 +557,71 @@ public class HayatePoolOptions
 
     #endregion
 
+    #region Circuit breaker
+
+    /// <summary>
+    /// Whether to enable the pool-level availability circuit breaker.<br />
+    /// Default value: <c>false</c> (the feature is opt-in, so a pool that does not ask for it behaves
+    /// exactly as before).
+    /// </summary>
+    /// <remarks>
+    /// Purpose: when the dependency behind the pool fails, the application reports it with
+    /// <c>SetUnavailable</c>; after <see cref="HayateCircuitBreakerOptions.FailureThreshold"/> consecutive
+    /// reports the pool marks itself unavailable and every further <c>Acquire</c> / <c>AcquireAsync</c> fails
+    /// immediately instead of handing out objects that are likely to be broken — the whole pool is taken out
+    /// of service rather than each caller discovering the failure on its own. A background probe then decides
+    /// when the dependency is healthy again and brings the pool back automatically.<br />
+    /// Special case: the feature is switched off by the lean fast path during normalization, which keeps the
+    /// lean borrow/return path byte-identical to the published measurement. It is also fixed at build time:
+    /// the pool snapshots the setting in its constructor, so <c>ReloadConfig</c> cannot turn it on or off.<br />
+    /// Cost: when disabled, the borrow path pays one perfectly predicted branch. When enabled, an available
+    /// pool pays one volatile read per borrow, and an unavailable pool fails before doing any work at all.<br />
+    /// Boundary: boolean switch.<br />
+    /// Recommended range: enable for pools whose objects come from a network dependency (database, message
+    /// broker, remote service) so a dependency outage degrades into fast failures instead of a queue of
+    /// timeouts. Leave it disabled for in-memory objects, which cannot fail as a group.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var options = new HayatePoolOptions { EnableCircuitBreaker = true };
+    /// </code>
+    /// </example>
+    public bool EnableCircuitBreaker { get; set; } = false;
+
+    /// <summary>
+    /// The circuit-breaker settings, used when <see cref="EnableCircuitBreaker"/> is on.
+    /// </summary>
+    /// <remarks>
+    /// Never <c>null</c>; the defaults keep the pool unavailable for 30 seconds and then probe every 5
+    /// seconds, and no probe is configured — so out of the box recovery is manual via <c>SetAvailable</c>.
+    /// Assign a configured instance to change the thresholds, or set the individual members on the instance
+    /// that is already there.
+    /// </remarks>
+    public HayateCircuitBreakerOptions CircuitBreaker { get; set; } = new HayateCircuitBreakerOptions();
+
+    /// <summary>
+    /// Callback invoked when the pool becomes available again (the breaker closes). Default <c>null</c>.
+    /// </summary>
+    /// <remarks>
+    /// Fires once per transition, either from a successful probe or from an explicit <c>SetAvailable</c>; it
+    /// does not fire when the pool was already available. The callback runs on whichever thread performed the
+    /// transition — the background timer for a probe, the caller's thread for <c>SetAvailable</c> — and
+    /// should stay lightweight; exceptions thrown inside it are caught and logged by the pool.
+    /// </remarks>
+    public Action<HayatePoolAvailabilityEventArgs> OnAvailable { get; set; }
+
+    /// <summary>
+    /// Callback invoked when the pool becomes unavailable (the breaker trips). Default <c>null</c>.
+    /// </summary>
+    /// <remarks>
+    /// Fires once per transition, on the thread whose <c>SetUnavailable</c> call tripped the breaker; it does
+    /// not fire again while the pool stays unavailable, and it does not fire for failure reports made before
+    /// the threshold was reached. Exceptions thrown inside it are caught and logged by the pool.
+    /// </remarks>
+    public Action<HayatePoolAvailabilityEventArgs> OnUnavailable { get; set; }
+
+    #endregion
+
     #region Metrics
 
     /// <summary>
@@ -807,6 +872,13 @@ public class HayatePoolOptions
         options.OnCapacityWarning = this.OnCapacityWarning;
         options.OnCapacityCritical = this.OnCapacityCritical;
 
+        // Circuit breaker (the settings object is copied, not shared, so mutating the copy cannot
+        // reconfigure the pool it came from)
+        options.EnableCircuitBreaker = this.EnableCircuitBreaker;
+        options.CircuitBreaker = this.CircuitBreaker?.CopyTo();
+        options.OnAvailable = this.OnAvailable;
+        options.OnUnavailable = this.OnUnavailable;
+
         // Metrics
         options.EnableMetrics = this.EnableMetrics;
 
@@ -871,6 +943,7 @@ public class HayatePoolOptions
             EnableLeakDetection = false;
             EnableMetrics = false;
             EnableAllocationTracking = false;
+            EnableCircuitBreaker = false;
             WarnAtRatio = 0;
             CriticalAtRatio = 0;
             ShardAffinityMode = HayateShardAffinityMode.None;
@@ -936,6 +1009,29 @@ public class HayatePoolOptions
         if (WarnAtRatio > 0 && CriticalAtRatio > 0 && CriticalAtRatio < WarnAtRatio)
         {
             CriticalAtRatio = WarnAtRatio;
+        }
+
+        // Circuit-breaker normalization: a threshold below 1 would trip on a report that was never made, and a
+        // non-positive window would either probe the failing dependency on every tick or never probe it —
+        // all three fall back to their defaults rather than making the pool unusable.
+        if (EnableCircuitBreaker)
+        {
+            var breaker = CircuitBreaker ??= new HayateCircuitBreakerOptions();
+
+            if (breaker.FailureThreshold < 1)
+            {
+                breaker.FailureThreshold = HayateConstant.DEFAULT_CIRCUIT_BREAKER_FAILURE_THRESHOLD;
+            }
+
+            if (breaker.ResetTimeout <= TimeSpan.Zero)
+            {
+                breaker.ResetTimeout = TimeSpan.FromSeconds(HayateConstant.DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS);
+            }
+
+            if (breaker.ProbeInterval <= TimeSpan.Zero)
+            {
+                breaker.ProbeInterval = TimeSpan.FromSeconds(HayateConstant.DEFAULT_CIRCUIT_BREAKER_PROBE_INTERVAL_SECONDS);
+            }
         }
     }
 

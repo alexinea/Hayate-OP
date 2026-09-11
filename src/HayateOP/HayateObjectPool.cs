@@ -155,6 +155,39 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private long _acquireAllocationSamples;
     private long _releaseAllocationSamples;
 
+    // Pool-level availability circuit breaker (off by default → constant branch, JIT-eliminable).
+    // The enable switch and the failure threshold are snapshotted at construction like every other feature
+    // switch, so ReloadConfig cannot turn the breaker on or off on a live pool. While the breaker is open,
+    // every further borrow fails before doing any pool work at all; the probe is the only background work
+    // the feature adds, and its timer exists only while the pool is unavailable (created on the trip,
+    // disposed on the recovery), so an available pool holds no extra handle and pays one predicted branch.
+    private readonly bool _enableCircuitBreaker;
+    private readonly int _breakerFailureThreshold;
+    private readonly Func<bool> _breakerProbe;
+    private readonly Action<HayatePoolAvailabilityEventArgs> _onAvailable;
+    private readonly Action<HayatePoolAvailabilityEventArgs> _onUnavailable;
+
+    // 0 = available, 1 = tripped. The borrow path reads this with a volatile read when the feature is on;
+    // every transition goes through a CAS, so concurrent reports/recoveries collapse into one announcement.
+    private int _breakerTripped;
+
+    // Consecutive SetUnavailable reports without an intervening recovery; reset by SetAvailable and by a
+    // successful probe. Deliberately NOT reset by a successful borrow: the pool cannot observe whether the
+    // borrowed object's use succeeded (the typical usage reports the failure after the borrow), so a
+    // borrow-side reset would make the breaker unreachable.
+    private int _breakerFailureStreak;
+
+    // Stopwatch timestamp of the trip (0 = never tripped) and the reason of the trip. Stable while the
+    // breaker stays open; the timestamp lets a probe that started before a re-trip recognize stale results.
+    private long _breakerTrippedAt;
+    private string _breakerReason;
+
+    // Transient probe timer. Created when the breaker trips with a probe configured, disposed on recovery,
+    // null the rest of the time. Deliberately separate from the merged background timer so a breaker-only
+    // pool performs no periodic wake-ups until it actually trips — no resident overhead, exactly like the
+    // timer-less state of a pool with every background concern off.
+    private Timer _breakerTimer;
+
     /// <exception cref="ArgumentNullException">Thrown if policy, options, scalingStrategy, metrics, logger, or poolName is null.</exception>
     /// <exception cref="InvalidOperationException">Thrown if the configured options are invalid.</exception>
     internal HayatePoolBasic(
@@ -222,6 +255,15 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         _waitForWarmup = _options.WaitForWarmup;
         _enableAllocationTracking = _options.EnableAllocationTracking;
+
+        // Circuit-breaker config is snapshotted at construction (lean normalization has already forced the
+        // switch off in lean mode). The enable switch is fixed for the pool's lifetime, exactly like every
+        // other feature switch; the trip windows stay live on _options so ReloadConfig can tune them.
+        _enableCircuitBreaker = _options.EnableCircuitBreaker;
+        _breakerFailureThreshold = _options.CircuitBreaker?.FailureThreshold ?? HayateConstant.DEFAULT_CIRCUIT_BREAKER_FAILURE_THRESHOLD;
+        _breakerProbe = _options.CircuitBreaker?.Probe;
+        _onAvailable = _options.OnAvailable;
+        _onUnavailable = _options.OnUnavailable;
         if (_waitForWarmup)
         {
             var completion = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -462,6 +504,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     {
         if (timeout < TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be non-negative");
+
+        // Pool-level circuit breaker (off by default → constant branch, JIT-eliminable). While the breaker
+        // is open the whole pool is out of service: fail before touching any shard, wait gate or policy.
+        if (_enableCircuitBreaker) ThrowIfCircuitOpen();
 
         // Wait for pre-warm readiness if not yet done (off by default → constant branch, zero overhead)
         WaitForWarmupIfNeeded();
@@ -714,6 +760,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     {
         // Lean fast path dispatch (off by default → constant branch, JIT-eliminable for the caller).
         if (_enableLean) return await AcquireLeanAsync(cancellationToken).ConfigureAwait(false);
+
+        // Pool-level circuit breaker (off by default → constant branch, JIT-eliminable); the same
+        // fail-fast as the synchronous core — the whole pool is out of service while the breaker is open.
+        if (_enableCircuitBreaker) ThrowIfCircuitOpen();
 
         // Wait for pre-warm readiness if not yet done (off by default → constant branch, zero overhead)
         if (_waitForWarmup) await _warmupCompletion.Task.ConfigureAwait(false);
@@ -1107,6 +1157,236 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _logger.LogInformation("Manual evict ({Reason}) on pool [{PoolName}] evicted {Count} objects",
             reason, _name, evicted);
         return evicted;
+    }
+
+    #endregion
+
+    #region Availability (circuit breaker)
+
+    /// <summary>
+    /// Reports whether the pool is currently able to serve borrow requests.
+    /// </summary>
+    /// <returns><c>true</c> when the pool is available; <c>false</c> while the pool-level circuit breaker
+    /// is open.</returns>
+    /// <remarks>
+    /// Always <c>true</c> when <see cref="HayatePoolOptions.EnableCircuitBreaker"/> is off, because nothing
+    /// can take such a pool out of service. Cheap enough to call on a request path: a single volatile read
+    /// when the feature is on, and a constant when it is off.
+    /// </remarks>
+    public bool CheckAvailable()
+    {
+        if (!_enableCircuitBreaker) return true;
+        return Volatile.Read(ref _breakerTripped) == 0;
+    }
+
+    /// <summary>
+    /// Reports that the dependency behind the pool failed, and takes the pool out of service once
+    /// <see cref="HayateCircuitBreakerOptions.FailureThreshold"/> consecutive failures have been reported.
+    /// </summary>
+    /// <param name="reason">An optional description of the failure, surfaced through
+    /// <see cref="HayatePoolOptions.OnUnavailable"/> and the logs.</param>
+    /// <remarks>
+    /// The intended caller is the application code that discovers the failure — a connection attempt that
+    /// timed out, a remote call that failed — not the pool. Calling this on a pool whose circuit breaker is
+    /// disabled does nothing, so instrumentation can call it unconditionally.<br />
+    /// Each call counts as one consecutive failure; an explicit <see cref="SetAvailable"/> (or a successful
+    /// probe) resets the streak, so sporadic failures that survive a recovery are counted from scratch again.
+    /// Once the threshold is reached the pool becomes unavailable, a further failure report changes nothing,
+    /// and recovery happens either through the configured probe or through <see cref="SetAvailable"/>.
+    /// </remarks>
+    public void SetUnavailable(string reason = null)
+    {
+        if (!_enableCircuitBreaker) return;
+
+        // Count the report. A report below the threshold changes nothing but the streak; the recovery path
+        // resets it, so the streak only ever reaches the threshold through fresh consecutive failures.
+        if (Interlocked.Increment(ref _breakerFailureStreak) < _breakerFailureThreshold) return;
+
+        TripBreaker(reason);
+    }
+
+    /// <summary>
+    /// Reports that the dependency behind the pool is healthy again, and brings the pool back into service.
+    /// </summary>
+    /// <remarks>
+    /// Closes the circuit breaker and raises <see cref="HayatePoolOptions.OnAvailable"/> — but only when the
+    /// pool was actually unavailable; calling it on a pool that is already available just clears the pending
+    /// failure streak and raises nothing. This is the recovery path when no
+    /// <see cref="HayateCircuitBreakerOptions.Probe"/> is configured. Calling it on a pool whose circuit
+    /// breaker is disabled does nothing.
+    /// </remarks>
+    public void SetAvailable()
+    {
+        if (!_enableCircuitBreaker) return;
+
+        // Clearing the streak is the documented escape hatch for sporadic failures: an application that
+        // knows the dependency is fine calls this before the threshold is reached, on an available pool.
+        Interlocked.Exchange(ref _breakerFailureStreak, 0);
+        RecoverBreaker(fromProbe: false, expectedTrippedAt: -1);
+    }
+
+    /// <summary>Borrow-path fail-fast. Throws before any pool work while the breaker is open.</summary>
+    private void ThrowIfCircuitOpen()
+    {
+        if (Volatile.Read(ref _breakerTripped) != 0)
+        {
+            throw new HayatePoolUnavailableException(_name, Volatile.Read(ref _breakerReason));
+        }
+    }
+
+    /// <summary>
+    /// Opens the breaker: flips the pool to unavailable, announces the trip through the callback and the
+    /// log, and starts the probe timer when a probe is configured. Concurrent trips collapse into one.
+    /// </summary>
+    private void TripBreaker(string reason)
+    {
+        // Only the thread that flips 0 → 1 announces the trip. Once open, further failure reports are
+        // no-ops: the pool is already out of service, and the announcement must stay one-per-transition.
+        if (Interlocked.CompareExchange(ref _breakerTripped, 1, 0) != 0) return;
+
+        Volatile.Write(ref _breakerTrippedAt, Stopwatch.GetTimestamp());
+        Volatile.Write(ref _breakerReason, reason);
+
+        try
+        {
+            _logger.LogWarning(
+                "Pool [{PoolName}] taken out of service after {Threshold} consecutive failure reports: {Reason}",
+                _name, _breakerFailureThreshold, reason ?? "(no reason reported)");
+            _onUnavailable?.Invoke(new HayatePoolAvailabilityEventArgs(_name, reason));
+        }
+        catch (Exception ex)
+        {
+            // A user callback exception must not affect the failure-report flow
+            _logger.LogError(ex, "OnUnavailable callback failed for pool [{PoolName}]", _name);
+        }
+
+        // Only a configured probe needs background work. With no probe the pool stays unavailable until
+        // the application calls SetAvailable, so no timer is created at all — the breaker adds zero
+        // resident overhead on a pool that never trips.
+        if (_breakerProbe is null) return;
+
+        StartBreakerProbeTimer();
+    }
+
+    /// <summary>
+    /// Closes the breaker: flips the pool back to available, stops the probe timer, resets the failure
+    /// streak and announces the recovery through the callback and the log. Concurrent recoveries — a
+    /// racing probe and SetAvailable, or two racing probes — collapse into one announcement.
+    /// </summary>
+    /// <param name="fromProbe">Whether the recovery was triggered by the background probe (affects the log wording only).</param>
+    /// <param name="expectedTrippedAt">
+    /// The trip timestamp the caller observed before acting, or a negative value to skip the staleness
+    /// check (SetAvailable). The timestamp is stable while the breaker stays open, so a mismatch means the
+    /// caller is a probe that started before a re-trip and must not close the newer breaker.
+    /// </param>
+    private void RecoverBreaker(bool fromProbe, long expectedTrippedAt)
+    {
+        if (expectedTrippedAt >= 0 && Volatile.Read(ref _breakerTrippedAt) != expectedTrippedAt) return;
+
+        // Only the thread that flips 1 → 0 announces the recovery; everyone else lost the race and returns.
+        if (Interlocked.CompareExchange(ref _breakerTripped, 0, 1) != 1) return;
+
+        StopBreakerProbeTimer();
+        Interlocked.Exchange(ref _breakerFailureStreak, 0);
+
+        try
+        {
+            _logger.LogInformation("Pool [{PoolName}] back in service ({Trigger}).",
+                _name, fromProbe ? "availability probe succeeded" : "recovery reported by the application");
+            _onAvailable?.Invoke(new HayatePoolAvailabilityEventArgs(_name, null));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "OnAvailable callback failed for pool [{PoolName}]", _name);
+        }
+    }
+
+    /// <summary>
+    /// Starts the transient probe timer: the first probe runs one ResetTimeout after the trip, then one
+    /// probe per ProbeInterval. Called only from the trip path, so there is no create/create race; the
+    /// timer exists only while the pool is unavailable and is disposed on recovery.
+    /// </summary>
+    private void StartBreakerProbeTimer()
+    {
+        var breaker = _options.CircuitBreaker;
+        var dueMs = ClampToTimerMilliseconds(breaker?.ResetTimeout)
+                    ?? (int)TimeSpan.FromSeconds(HayateConstant.DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS).TotalMilliseconds;
+        var periodMs = ClampToTimerMilliseconds(breaker?.ProbeInterval)
+                       ?? (int)TimeSpan.FromSeconds(HayateConstant.DEFAULT_CIRCUIT_BREAKER_PROBE_INTERVAL_SECONDS).TotalMilliseconds;
+
+        try
+        {
+            _breakerTimer = new Timer(BreakerProbeTick, null, dueMs, periodMs);
+        }
+        catch (Exception ex)
+        {
+            // A failed timer creation must not undo the trip — the pool is still correctly out of
+            // service; only the automatic recovery is lost, which the log makes visible.
+            _logger.LogError(ex, "Failed to start the availability probe for pool [{PoolName}]; automatic recovery is unavailable until the pool recovers through SetAvailable", _name);
+        }
+    }
+
+    /// <summary>Stops and releases the transient probe timer; idempotent and race-free by exchange.</summary>
+    private void StopBreakerProbeTimer()
+    {
+        Interlocked.Exchange(ref _breakerTimer, null)?.Dispose();
+    }
+
+    /// <summary>
+    /// Probe tick. Runs the configured probe and recovers the pool when it reports healthy; a throwing
+    /// probe is a failed probe and leaves the pool unavailable for the next interval.
+    /// </summary>
+    private void BreakerProbeTick(object state)
+    {
+        // A tick scheduled before a recovery can still fire after it; such a tick only cleans up — the
+        // recovery path has already disposed the timer, so nothing is left behind afterwards.
+        var trippedAt = Volatile.Read(ref _breakerTrippedAt);
+        if (Volatile.Read(ref _breakerTripped) == 0)
+        {
+            StopBreakerProbeTimer();
+            return;
+        }
+
+        var probe = _breakerProbe;
+        if (probe is null)
+        {
+            // Unreachable through the trip path (the timer is only started when a probe is configured);
+            // pure defense — stop probing instead of ticking forever on a null delegate.
+            StopBreakerProbeTimer();
+            return;
+        }
+
+        bool healthy;
+        try
+        {
+            healthy = probe();
+        }
+        catch (Exception ex)
+        {
+            // A throwing probe is a failed probe: the pool stays unavailable and is probed again after
+            // the next interval; the exception is logged, never allowed to escape into the timer.
+            _logger.LogWarning("Availability probe for pool [{PoolName}] threw {ExceptionType}: {ExceptionMessage}; the pool stays unavailable",
+                _name, ex.GetType().Name, ex.Message);
+            return;
+        }
+
+        if (healthy)
+        {
+            RecoverBreaker(fromProbe: true, expectedTrippedAt: trippedAt);
+        }
+    }
+
+    /// <summary>
+    /// Clamps a TimeSpan to the int-millisecond range accepted by Timer (a value beyond ~24.8 days
+    /// saturates instead of overflowing); <c>null</c> lets the caller apply its own default.
+    /// </summary>
+    private static int? ClampToTimerMilliseconds(TimeSpan? value)
+    {
+        if (value is null) return null;
+
+        var ms = (long)value.Value.TotalMilliseconds;
+        if (ms < 1) return 1;
+        return ms > int.MaxValue ? int.MaxValue : (int)ms;
     }
 
     #endregion
@@ -1970,6 +2250,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         // Release the shared background timer and drop the reference so a disposed pool retains no timer handle.
         _backgroundTimer?.Dispose();
         _backgroundTimer = null;
+
+        // The probe timer only exists while the breaker is open; dispose it here so a disposed pool
+        // retains no handle either (same precondition as the timers: no in-flight probe at Dispose time).
+        StopBreakerProbeTimer();
 
         // Release the return-signal gate (same precondition as the timers: no in-flight Acquire waiters at Dispose time)
         _blockGate.Dispose();

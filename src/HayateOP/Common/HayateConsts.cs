@@ -154,4 +154,26 @@ public static class HayateConstant
     public const int DEFAULT_LEAK_TRACE_SAMPLE_RATE = 1024;
 
     #endregion
+
+    #region Circuit Breaker
+
+    /// <summary>
+    /// Default number of consecutive reported failures before the pool-level circuit breaker trips
+    /// (corresponds to <see cref="HayateCircuitBreakerOptions.FailureThreshold"/>).
+    /// </summary>
+    public const int DEFAULT_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
+
+    /// <summary>
+    /// Default wait before the background probe starts, in seconds
+    /// (corresponds to <see cref="HayateCircuitBreakerOptions.ResetTimeout"/>).
+    /// </summary>
+    public const int DEFAULT_CIRCUIT_BREAKER_RESET_TIMEOUT_SECONDS = 30;
+
+    /// <summary>
+    /// Default interval between background probes, in seconds
+    /// (corresponds to <see cref="HayateCircuitBreakerOptions.ProbeInterval"/>).
+    /// </summary>
+    public const int DEFAULT_CIRCUIT_BREAKER_PROBE_INTERVAL_SECONDS = 5;
+
+    #endregion
 }

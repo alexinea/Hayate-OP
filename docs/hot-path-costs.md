@@ -67,6 +67,7 @@ Two caveats that matter when reading any absolute number here:
 | `EnableMetrics` | A min/max CAS-loop update, an `IHayateMetrics.RecordObjectAcquired` call and a debug log entry | Shares the already-running stopwatch for the wait time |
 | `EnableAllocationTracking` | Two `GC.GetAllocatedBytesForCurrentThread()` calls (one before, one after) plus a counter pair | Unavailable on `net48` / `netstandard2.0`, where the counters stay 0 |
 | `WarnAtRatio` / `CriticalAtRatio` | When either is non-zero, `CheckCapacityAlarm` runs on every borrow **and** every return and walks every shard to compute the utilization ratio | The walk takes one `SpinLock` per shard (`_shards.Sum(s => s.Count)`), so this is the most expensive optional switch per operation. At the default 0 it is one branch |
+| `EnableCircuitBreaker` | One predicted branch when off (and in lean mode, which forces it off); one volatile read when on and the pool is available; while the breaker is open the borrow throws before touching any shard, wait gate or policy | The probe side is a timer that exists only while the pool is unavailable — see the background workers table |
 | `WaitForWarmup` | One branch when off; when on, borrows block on the warm-up signal until pre-warm finishes | The block is one-time per pool |
 | `MinPoolSize` / `MaxPoolSize` | No per-operation cost | Sizing only; `MinPoolSize` is paid once during pre-warm |
 | `RejectPolicy` | Consulted only after a miss | Behavioural, not a cost knob: `Block` / `BlockTimeout` wake on a ~100 ms slice, `CreateOnDemand` turns a miss into a synchronous creation |
@@ -93,6 +94,7 @@ A pool with all of them disabled creates **no timer at all**.
 | `EnableEviction` | `EvictionIntervalMs` (30 s) | Scans `NumTestsPerEvictionRun` samples per shard and claims + destroys the matches (`OnDestroy`, then the object's own `Dispose`) |
 | `EnableAutoScaling` | `ScalingIntervalMs` (5 s) | Compares utilisation against the up/down thresholds and grows or shrinks the shard capacities |
 | `ValidateWhileIdle` | `ValidateIntervalMs` (30 s) | Walks the whole idle list of every shard, calls `Validate` per idle object, claims + destroys the failures |
+| `EnableCircuitBreaker` (probe) | Only while the pool is unavailable: first run one `ResetTimeout` after the trip, then one per `ProbeInterval` | Runs the configured probe and closes the breaker on a healthy verdict. The timer is created on the trip and disposed on the recovery — an available pool holds no handle for it, and a pool without a configured probe never creates one |
 
 > `EnableValidation` contributes its interval to the shared timer's tick period even when
 > `ValidateWhileIdle` is off and the idle pass therefore returns immediately. Since
