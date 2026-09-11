@@ -35,7 +35,7 @@ public class ThreadFuzzTests
         const int workers = 8;
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("fuzz-sync")
-            .WithEnableMetrics(true)   // TotalAcquired/TotalReleased counters are gated by metrics; assertions require it enabled
+            .WithEnableMetrics(true)   // TotalReleased is metrics-gated, so the balance assertions need it on (TotalAcquired is not gated)
             .WithEnableAutoScaling(false)
             .WithMinSize(4)
             .WithMaxSize(12)

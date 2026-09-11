@@ -125,7 +125,9 @@ four cumulative counters are written at all. With metrics off, `TotalCreated`,
 `TotalReleased` and `TotalMissed` stop being maintained (they report 0), while
 `TotalAcquired` keeps being incremented unconditionally on every borrow. Turning metrics
 off therefore buys back those counter writes, and anything reading the statistics object
-has to know which of the two groups it is reading.
+has to know which of the two groups it is reading. The full audit — including why
+`TotalAcquired` is deliberately left unconditional — is in
+[`docs/metrics-gating.md`](metrics-gating.md).
 
 ## See also
 
