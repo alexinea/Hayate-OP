@@ -449,6 +449,38 @@ var options = new HayatePoolOptions
 };
 ```
 
+### Hot-path cost of each feature switch
+
+Every optional feature above buys something and costs something. Measured on .NET 10.0,
+single-threaded `Acquire+Release` round trip, 250 pre-warmed objects, one run
+(2026-09-10):
+
+| Configuration | Mean | Allocated |
+| :--- | ---: | ---: |
+| `Microsoft.Extensions.ObjectPool` (reference) | 26.950 ns | 0 B |
+| HayateOP lean fast path (`WithLean()`) | 27.063 ns | 0 B |
+| HayateOP general engine, every feature off | 286.773 ns | 384 B |
+| HayateOP general engine, sharding only | 285.857 ns | 384 B |
+| HayateOP general engine, every feature on | 414.987 ns | 0 B |
+
+The short version of how to trim:
+
+| Switch | Where the cost lands |
+| :--- | :--- |
+| `EnableLean` | Removes the wrapper allocation, the shard lock, the return-side registry probe and every diagnostic write — about 10.6x against the same feature set |
+| `EnableSharding` | One extra idle-list probe per shard on a miss; free in single-threaded steady state |
+| `EnableGenerationOptimization` | One extra `Stopwatch.GetTimestamp()` per borrow — the only switch that adds a QPC read to the borrow path |
+| `ValidateOnBorrow` / `ValidateOnReturn` | One `IHayateObjectPolicy.Validate` call per borrow / return; the policy's own work (often a health probe) dominates |
+| `LeakTraceCaptureMode` | The real cost of the leak-detection surface: `EveryAcquire` captures a call stack on every borrow; `Off` (the default) costs two branches |
+| `WarnAtRatio` / `CriticalAtRatio` | The most expensive optional switch: when non-zero it walks every shard, taking one lock per shard, on **every** borrow and return |
+| `EnableMetrics` | A min/max CAS loop, a metrics callback and a debug log per operation — and it is also what keeps `TotalCreated` / `TotalReleased` / `TotalMissed` alive |
+| `EnableAllocationTracking` | Two `GC.GetAllocatedBytesForCurrentThread()` calls per operation; unavailable on `net48` / `netstandard2.0` |
+| `EnableEviction`, `EnableAutoScaling`, `ValidateWhileIdle` | Background only: they drive the shared timer and never touch the borrow or return path. A pool with all of them off creates no timer at all |
+
+The full per-switch reference — including which switches are pure background work, which
+diagnostic members are paid for only when called, and a trim-by-scenario table — is in
+[`docs/hot-path-costs.md`](docs/hot-path-costs.md).
+
 ### Breaking changes
 
 HayateOP follows Semantic Versioning. Breaking changes so far:
