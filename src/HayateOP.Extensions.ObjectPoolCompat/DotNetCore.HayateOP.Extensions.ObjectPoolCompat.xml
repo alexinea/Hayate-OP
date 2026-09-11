@@ -94,8 +94,9 @@
         </member>
         <member name="P:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatOptions.MinSize">
             <summary>
-            Pre-warm count. Defaults to 0 (MEOP DefaultObjectPool also lazily creates); set it to the
-            expected concurrency to avoid the first-borrow cold-start latency (see <see cref="P:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatOptions.AcquireTimeout"/>).
+            Pre-warm count. Defaults to 0 (MEOP DefaultObjectPool also lazily creates). Pre-warming is now
+            purely a warm-up optimisation: a pool below capacity creates synchronously on a miss, so a cold
+            pool no longer pays a borrow delay (see <see cref="P:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatOptions.AcquireTimeout"/>).
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatOptions.MaxSize">
@@ -106,11 +107,11 @@
         </member>
         <member name="P:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatOptions.AcquireTimeout">
             <summary>
-            Borrow timeout for an empty pool. Defaults to 1s.
-            HayateOP's current CreateNew semantics are "create after waiting out this timeout", so the
-            first-borrow latency of a cold pool is approximately this value — which differs from MEOP's
-            "synchronously create immediately on an empty pool, never block" behavior. Lowering this value
-            reduces cold-start latency, or pre-warm using <see cref="P:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatOptions.MinSize"/>.
+            Borrow timeout for a request that finds no idle object. Defaults to 1s.
+            It bounds only the one case the pool cannot serve by creating: every capacity slot is already
+            taken and every object is lent out. A miss below <see cref="P:DotNetCore.HayateOP.ObjectPoolCompat.HayateCompatOptions.MaxSize"/> — including the very first
+            borrow of a cold pool — creates synchronously and returns immediately, so this value is not part
+            of the cold-start path.
             </summary>
         </member>
         <member name="T:DotNetCore.HayateOP.ObjectPoolCompat.HayateObjectPoolCompatProvider">

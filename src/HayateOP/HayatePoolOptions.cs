@@ -60,11 +60,12 @@ public class HayatePoolOptions
     /// </summary>
     /// <remarks>
     /// Purpose: defines the action taken after the wait times out.<br />
-    /// Special case: the current implementation has explicit branches for <c>Abort</c> and
-    /// <c>CreateNew</c>; other values throw <see cref="InvalidOperationException"/>.<br />
+    /// Special case: the current implementation has explicit branches for <c>Abort</c>, <c>CreateNew</c>
+    /// and <c>CreateOnDemand</c>; other values throw <see cref="InvalidOperationException"/>.<br />
     /// Boundary: must be a valid enum value.<br />
-    /// Recommended range: use <c>BlockTimeout</c> for general scenarios; <c>CreateNew</c> is an
-    /// option for graceful-degradation fallbacks.
+    /// Recommended range: use <c>BlockTimeout</c> for general scenarios; <c>CreateNew</c> is an option for
+    /// graceful-degradation fallbacks, and <c>CreateOnDemand</c> for callers that expect the reference
+    /// <c>DefaultObjectPool</c> behaviour of "create on a miss instead of blocking".
     /// </remarks>
     public HayatePoolRejectPolicy RejectPolicy { get; set; } = HayatePoolRejectPolicy.BlockTimeout;
 

@@ -14,8 +14,9 @@ public sealed class HayateCompatOptions
     public string PoolNamePrefix { get; set; } = "HayateCompat.";
 
     /// <summary>
-    /// Pre-warm count. Defaults to 0 (MEOP DefaultObjectPool also lazily creates); set it to the
-    /// expected concurrency to avoid the first-borrow cold-start latency (see <see cref="AcquireTimeout"/>).
+    /// Pre-warm count. Defaults to 0 (MEOP DefaultObjectPool also lazily creates). Pre-warming is now
+    /// purely a warm-up optimisation: a pool below capacity creates synchronously on a miss, so a cold
+    /// pool no longer pays a borrow delay (see <see cref="AcquireTimeout"/>).
     /// </summary>
     public int MinSize { get; set; } = 0;
 
@@ -26,11 +27,11 @@ public sealed class HayateCompatOptions
     public int MaxSize { get; set; } = Environment.ProcessorCount * 2;
 
     /// <summary>
-    /// Borrow timeout for an empty pool. Defaults to 1s.
-    /// HayateOP's current CreateNew semantics are "create after waiting out this timeout", so the
-    /// first-borrow latency of a cold pool is approximately this value — which differs from MEOP's
-    /// "synchronously create immediately on an empty pool, never block" behavior. Lowering this value
-    /// reduces cold-start latency, or pre-warm using <see cref="MinSize"/>.
+    /// Borrow timeout for a request that finds no idle object. Defaults to 1s.
+    /// It bounds only the one case the pool cannot serve by creating: every capacity slot is already
+    /// taken and every object is lent out. A miss below <see cref="MaxSize"/> — including the very first
+    /// borrow of a cold pool — creates synchronously and returns immediately, so this value is not part
+    /// of the cold-start path.
     /// </summary>
     public TimeSpan AcquireTimeout { get; set; } = TimeSpan.FromSeconds(1);
 }
@@ -104,16 +105,18 @@ public sealed class HayateObjectPoolCompatProvider : ObjectPoolProvider
             .WithMinSize(options.MinSize)
             .WithMaxSize(Math.Max(options.MaxSize, options.MinSize))
             .WithPolicy(new HayateCompatPooledObjectPolicy<TP>(policy))
-            // MEOP semantics: create (rather than block and throw) when the pool is empty.
-            // Note that CreateNew in HayateOP means "create after waiting out AcquireTimeout".
-            .WithRejectPolicy(HayatePoolRejectPolicy.CreateNew)
+            // MEOP semantics: create (rather than block and throw) when no idle object is available.
+            // CreateOnDemand delivers that synchronously while the pool has room to grow — including the
+            // first borrow of a cold pool — instead of waiting out AcquireTimeout the way CreateNew does.
+            // The timeout now bounds only the at-capacity request.
+            .WithRejectPolicy(HayatePoolRejectPolicy.CreateOnDemand)
             .WithAcquireTimeout(options.AcquireTimeout)
             // autoScaling must stay enabled: HayatePoolOptions.ApplyFeatureSwitches() forces
             // MaxPoolSize = MinPoolSize when EnableAutoScaling=false (see :487-490), and with Min=0
             // the capacity collapses to 0 -> all shards max=0 -> every return is rejected and pooling
             // is completely disabled. Min=0 preserves the lazy-creation semantics; the scaling cycle
-            // may reclaim long-idle objects (HayateOP semantics), after which Get() incurs one
-            // AcquireTimeout cold-start delay — see the HayateCompatOptions remarks.
+            // may reclaim long-idle objects (HayateOP semantics), after which the next Get creates a
+            // fresh object synchronously — no cold-start delay.
             .WithEnableAutoScaling(true)
             .WithEnableValidation(false)       // validation/reset is already handled by the Return hook (policy layer)
             .WithEnableEviction(false)         // MEOP has no background eviction

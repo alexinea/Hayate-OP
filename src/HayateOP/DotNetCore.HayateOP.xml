@@ -529,6 +529,25 @@
             </summary>
             <returns>Object borrowed via cold boot; returns <c>null</c> when this call did not claim the boot (pool non-empty / at capacity / another thread is creating), and the caller should continue normal waiting.</returns>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryCreateOnDemand(System.Int64)">
+            <summary>
+            Create-on-miss path of the create-on-demand policy. Serves a miss synchronously whenever the pool
+            can still grow: an empty pool is delegated to the cold-boot routine (the same synchronous
+            first-object creation the block policies use, so concurrent first borrows still create only one),
+            and a non-empty pool with room left creates an object directly.
+            </summary>
+            <returns>The borrowed object, or <c>null</c> when the pool already holds <c>MaxPoolSize</c> objects
+            — the caller then waits for a return exactly as the create-after-timeout policy does.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.CreateBorrowedOnDemand(System.Int64)">
+            <summary>
+            Creates one object and hands it out already borrowed: picks the next shard by the round-robin
+            cursor, creates and registers the wrapper (a fresh object is registered as borrowed, never placed
+            in the idle list, so no other waiter can claim it through a take), runs the policy acquire hook,
+            and updates the counters, the capacity alarm and the metrics.
+            Shared by the cold-boot path and both create-on-miss paths so they all allocate identically.
+            </summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.SelectStartShardIndex">
             <summary>
             Computes the starting shard index for this borrow.
@@ -1730,11 +1749,12 @@
             </summary>
             <remarks>
             Purpose: defines the action taken after the wait times out.<br />
-            Special case: the current implementation has explicit branches for <c>Abort</c> and
-            <c>CreateNew</c>; other values throw <see cref="T:System.InvalidOperationException"/>.<br />
+            Special case: the current implementation has explicit branches for <c>Abort</c>, <c>CreateNew</c>
+            and <c>CreateOnDemand</c>; other values throw <see cref="T:System.InvalidOperationException"/>.<br />
             Boundary: must be a valid enum value.<br />
-            Recommended range: use <c>BlockTimeout</c> for general scenarios; <c>CreateNew</c> is an
-            option for graceful-degradation fallbacks.
+            Recommended range: use <c>BlockTimeout</c> for general scenarios; <c>CreateNew</c> is an option for
+            graceful-degradation fallbacks, and <c>CreateOnDemand</c> for callers that expect the reference
+            <c>DefaultObjectPool</c> behaviour of "create on a miss instead of blocking".
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.CreationRetryCount">
@@ -2308,6 +2328,18 @@
             <summary>
             Wait for a return first and only create a new object once the acquire timeout has elapsed (contrary to what the name suggests, it does not immediately bypass the pool to create a new one).
             The created object is registered into the pool and can be returned and reused; on a cold-start first call against an empty pool, it pays at most one full-timeout delay.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolRejectPolicy.CreateOnDemand">
+            <summary>
+            Create on demand: a request that finds no idle object is served by creating one straight away
+            while the pool still has room to grow, without waiting out the acquire timeout. An empty pool
+            goes through the same synchronous first-object creation the block policies use, so the first
+            borrow of a cold pool returns immediately; the timeout is only ever paid when the pool already
+            holds <c>MaxPoolSize</c> objects and every one of them is lent out, where the request waits for a
+            return and then creates one anyway.
+            This matches the reference <c>DefaultObjectPool</c> behaviour of "create on a miss instead of
+            blocking" while keeping creation bounded by the configured capacity.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.Timestamp">

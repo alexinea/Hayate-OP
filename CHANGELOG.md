@@ -17,6 +17,13 @@ See the release planning notes in the project workspace for the full breakdown.
 
 ### Added
 
+- **`CreateOnDemand` reject policy**: a request that finds no idle object is served by creating one
+  straight away while the pool still has room to grow, without waiting out the acquire timeout. An empty
+  pool goes through the same synchronous first-object creation the block policies use, so the first
+  borrow of a cold pool returns immediately; the timeout is only paid when the pool already holds
+  `MaxPoolSize` objects and every one of them is lent out, where the request waits for a return and then
+  creates one anyway rather than throwing. This matches the reference `DefaultObjectPool` contract of
+  "create on a miss instead of blocking", with creation bounded by the configured capacity.
 - **Lean (wrapper-free) fast path**: `HayatePoolOptions.EnableLean` — plus the
   `HayatePoolBuilder.WithLean()` shortcut — stores the pooled value directly in a bounded array and
   moves it through `Interlocked` compare-exchange, removing the per-object wrapper allocation, the
@@ -57,6 +64,13 @@ See the release planning notes in the project workspace for the full breakdown.
 
 ### Changed
 
+- **`HayateObjectPoolCompatProvider` cold start no longer waits.** The provider now builds its pool with
+  the `CreateOnDemand` policy instead of `CreateNew`, so a `Get` that finds no idle object creates one
+  synchronously while the pool has room — including the very first `Get` of a cold pool, which used to
+  pay up to `HayateCompatOptions.AcquireTimeout` (1s by default) before an object appeared. `AcquireTimeout`
+  now bounds only the at-capacity request. A pool below capacity therefore serves concurrent misses by
+  creating an object per request, exactly as `DefaultObjectPool` does, instead of making callers wait for
+  a return.
 - **All runtime text is now English.** Exception messages, OpenTelemetry metric
   descriptions and `HayatePoolStats.ToString()` section labels previously emitted
   Chinese text. Code that matches on message content — for example

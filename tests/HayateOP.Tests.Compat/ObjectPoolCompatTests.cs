@@ -56,7 +56,7 @@ public class ObjectPoolCompatTests
     public void HayateCompatProvider_MatchesMeopParity()
         => RunParityScenario(new HayateObjectPoolCompatProvider(new HayateCompatOptions
         {
-            AcquireTimeout = TimeSpan.FromMilliseconds(50)   // the bounded cold-start latency keeps this test short
+            AcquireTimeout = TimeSpan.FromMilliseconds(50)   // this bound only applies to at-capacity requests; the scenario stays below capacity
         }));
 
     /// <summary>
@@ -91,15 +91,18 @@ public class ObjectPoolCompatTests
     }
 
     // ─────────────────────────────────────────────────────────────
-    // 3. Cold-start latency is bounded (CreateNew creates only after AcquireTimeout elapses; this guards that behavior)
+    // 3. Cold start is synchronous: a miss below capacity creates immediately instead of waiting out
+    //    AcquireTimeout, matching MEOP's "create on a miss, never block" contract.
     // ─────────────────────────────────────────────────────────────
 
     [Fact]
-    public void HayateCompatProvider_ColdStartLatencyBounded()
+    public void HayateCompatProvider_ColdStartCreatesSynchronously()
     {
         var provider = new HayateObjectPoolCompatProvider(new HayateCompatOptions
         {
-            AcquireTimeout = TimeSpan.FromMilliseconds(50)
+            // Deliberately far above any plausible creation cost: if the first Get waited this timeout out,
+            // the elapsed check below could not pass.
+            AcquireTimeout = TimeSpan.FromSeconds(2)
         });
         var pool = provider.Create(new DefaultPooledObjectPolicy<CompatResource>());
 
@@ -108,11 +111,55 @@ public class ObjectPoolCompatTests
         sw.Stop();
 
         Assert.NotNull(obj);
-        Assert.True(sw.ElapsedMilliseconds < 2000,
-            $"cold Get took {sw.ElapsedMilliseconds}ms — CreateNew should create right after AcquireTimeout(50ms)");
+        Assert.True(sw.ElapsedMilliseconds < 500,
+            $"cold Get took {sw.ElapsedMilliseconds}ms — an empty pool must create synchronously, not wait out AcquireTimeout(2000ms)");
 
         pool.Return(obj);
-        pool.Get(); // Immediately reusable after return; no longer triggers the cold-start path
+        pool.Get(); // Immediately reusable after return; no cold-start path involved
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 3b. Concurrent misses below capacity all succeed: each request creates instead of blocking on a
+    //     return (the case a pure block-until-timeout policy cannot serve).
+    // ─────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void HayateCompatProvider_ConcurrentMissesBelowCapacity_AllServed()
+    {
+        const int requests = 4;
+
+        var provider = new HayateObjectPoolCompatProvider(new HayateCompatOptions
+        {
+            MinSize = 0,
+            MaxSize = 8,                                   // comfortably above the request count
+            AcquireTimeout = TimeSpan.FromMilliseconds(100)
+        });
+        var policy = new CountingPolicy();
+        var pool = provider.Create(policy);
+
+        var results = new CompatResource[requests];
+        using var barrier = new Barrier(requests);
+        var sw = Stopwatch.StartNew();
+
+        var tasks = new Task[requests];
+        for (var i = 0; i < requests; i++)
+        {
+            var index = i;
+            tasks[index] = Task.Run(() =>
+            {
+                barrier.SignalAndWait();
+                results[index] = pool.Get();
+            });
+        }
+
+        Task.WaitAll(tasks);
+        sw.Stop();
+
+        Assert.All(results, Assert.NotNull);
+        Assert.Equal(requests, results.Distinct().Count());     // one object per request, no double lending
+        Assert.Equal(requests, policy.Created);                 // every miss created its own object
+        Assert.True(sw.ElapsedMilliseconds < 500,
+            $"concurrent cold Gets took {sw.ElapsedMilliseconds}ms — below capacity each miss must create without waiting");
     }
 
     // ─────────────────────────────────────────────────────────────

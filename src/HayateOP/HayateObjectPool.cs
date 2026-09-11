@@ -661,7 +661,18 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     }
 
                 case HayatePoolRejectPolicy.CreateNew:
+                case HayatePoolRejectPolicy.CreateOnDemand:
                     {
+                        // Create-on-demand: while the pool can still grow, a miss is served by creating an
+                        // object right away instead of making the caller wait out the timeout for a return
+                        // that may never come. At capacity the request falls through to the wait-then-create
+                        // timing below, which is what CreateNew does in every case.
+                        if (_options.RejectPolicy == HayatePoolRejectPolicy.CreateOnDemand)
+                        {
+                            var onDemand = TryCreateOnDemand((long)sw.Elapsed.TotalMilliseconds);
+                            if (onDemand is not null) return onDemand;
+                        }
+
                         // Create a new object after the timeout
                         if (elapsed >= timeout)
                         {
@@ -676,27 +687,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                             // list — preventing other waiters from claiming it via TryTake and causing a double borrow); on Release
                             // it returns to the pool normally by ShardIndex for reuse. The old implementation returned an unregistered bare object, and Release
                             // failed the reverse lookup and destroyed it as a foreign object — every borrow/return created and destroyed a new object, fully defeating pooling.
-                            var shard = _shards[(int)(Interlocked.Increment(ref _createCursor) - 1) % _shards.Length];
-                            var w = CreateWrappedObject(shard);   // TryTrack registration is already done internally
-                            w.Location = HayateObjectLocation.Borrowed;
-                            // The borrow timestamp is recorded unconditionally (same as the Acquire main path, keeping leak recheck usable)
-                            w.LastBorrowedAt = Stopwatch.GetTimestamp();
-                            // Cumulative borrow count (newly created means already borrowed; the wrapper is exclusively owned by this thread now)
-                            w.LeaseCount++;
-                            _policy.OnAcquire(w.Value);
-                            Interlocked.Increment(ref _totalAcquired);
-
-                            // Capacity-alarm probe (returns immediately internally when disabled)
-                            CheckCapacityAlarm();
-
-                            var waitTime = (long)sw.Elapsed.TotalMilliseconds;
-                            if (_enableMetrics)
-                            {
-                                UpdateWaitTimeStats(waitTime);
-                                _metrics.RecordObjectAcquired(_name, w.Value, waitTime);
-                            }
-
-                            return w.Value;
+                            return CreateBorrowedOnDemand((long)sw.Elapsed.TotalMilliseconds);
                         }
 
                         // Wait for a return signal; if none arrives within the slice, wake and re-check the timeout and the shard.
@@ -782,7 +773,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
             // Cold boot: when the pool is completely empty, create the first object on demand. The async path originally waited indefinitely
             // for the return signal, so a Min=0 empty pool's first borrow would hang forever until cancellation; cold boot is the only deterministic exit.
-            var coldBoot = TryColdBootAcquire(0);
+            // The create-on-demand policy goes one step further and also creates while the pool still has room, so an async borrow of a
+            // fully lent-out pool does not have to wait for a return either.
+            var coldBoot = _options.RejectPolicy == HayatePoolRejectPolicy.CreateOnDemand
+                ? TryCreateOnDemand(0)
+                : TryColdBootAcquire(0);
             if (coldBoot is not null) return coldBoot;
 
             await _blockGate.WaitAsync(cancellationToken);
@@ -1243,27 +1238,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             // Double-check: during the CAS, a concurrent return / scale-up may make the pool non-empty — just fall back to the normal wait path then.
             if (TrackedObjectCount != 0) return null;
 
-            var shard = _shards[(int)(Interlocked.Increment(ref _createCursor) - 1) % _shards.Length];
-            var w = CreateWrappedObject(shard);   // TryTrack registration is already done internally (includes the _totalCreated counter)
-            w.Location = HayateObjectLocation.Borrowed;
-            // The borrow timestamp is recorded unconditionally (same as the Acquire main path, keeping leak recheck usable)
-            w.LastBorrowedAt = Stopwatch.GetTimestamp();
-            // Cumulative borrow count (cold boot means borrowed; the wrapper is exclusively owned by this thread now)
-            w.LeaseCount++;
-            _policy.OnAcquire(w.Value);
-            Interlocked.Increment(ref _totalAcquired);
-
-            // Capacity-alarm probe (returns immediately internally when disabled)
-            CheckCapacityAlarm();
-
-            if (_enableMetrics)
-            {
-                UpdateWaitTimeStats(waitTimeMs);
-                _metrics.RecordObjectAcquired(_name, w.Value, waitTimeMs);
-            }
-
+            var value = CreateBorrowedOnDemand(waitTimeMs);
             _logger.LogInformation("Pool [{PoolName}] cold-boot acquired on demand (pool was empty)", _name);
-            return w.Value;
+            return value;
         }
         finally
         {
@@ -1271,6 +1248,55 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             // when CreateWrappedObject throws, the exception propagates to the caller (consistent with the CreateNew path behavior).
             Interlocked.Exchange(ref _coldBootClaimed, 0);
         }
+    }
+
+    /// <summary>
+    /// Create-on-miss path of the create-on-demand policy. Serves a miss synchronously whenever the pool
+    /// can still grow: an empty pool is delegated to the cold-boot routine (the same synchronous
+    /// first-object creation the block policies use, so concurrent first borrows still create only one),
+    /// and a non-empty pool with room left creates an object directly.
+    /// </summary>
+    /// <returns>The borrowed object, or <c>null</c> when the pool already holds <c>MaxPoolSize</c> objects
+    /// — the caller then waits for a return exactly as the create-after-timeout policy does.</returns>
+    private T TryCreateOnDemand(long waitTimeMs)
+    {
+        var coldBoot = TryColdBootAcquire(waitTimeMs);
+        if (coldBoot is not null) return coldBoot;
+
+        if (TrackedObjectCount >= _options.MaxPoolSize) return null;
+
+        return CreateBorrowedOnDemand(waitTimeMs);
+    }
+
+    /// <summary>
+    /// Creates one object and hands it out already borrowed: picks the next shard by the round-robin
+    /// cursor, creates and registers the wrapper (a fresh object is registered as borrowed, never placed
+    /// in the idle list, so no other waiter can claim it through a take), runs the policy acquire hook,
+    /// and updates the counters, the capacity alarm and the metrics.
+    /// Shared by the cold-boot path and both create-on-miss paths so they all allocate identically.
+    /// </summary>
+    private T CreateBorrowedOnDemand(long waitTimeMs)
+    {
+        var shard = _shards[(int)(Interlocked.Increment(ref _createCursor) - 1) % _shards.Length];
+        var w = CreateWrappedObject(shard);   // TryTrack registration is already done internally (includes the _totalCreated counter)
+        w.Location = HayateObjectLocation.Borrowed;
+        // The borrow timestamp is recorded unconditionally (same as the Acquire main path, keeping leak recheck usable)
+        w.LastBorrowedAt = Stopwatch.GetTimestamp();
+        // Cumulative borrow count (a freshly created object is borrowed by definition; the wrapper is exclusively owned by this thread now)
+        w.LeaseCount++;
+        _policy.OnAcquire(w.Value);
+        Interlocked.Increment(ref _totalAcquired);
+
+        // Capacity-alarm probe (returns immediately internally when disabled)
+        CheckCapacityAlarm();
+
+        if (_enableMetrics)
+        {
+            UpdateWaitTimeStats(waitTimeMs);
+            _metrics.RecordObjectAcquired(_name, w.Value, waitTimeMs);
+        }
+
+        return w.Value;
     }
 
     private void UpdateShardMaxSizes()

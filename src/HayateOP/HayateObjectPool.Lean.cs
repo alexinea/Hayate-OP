@@ -369,11 +369,14 @@ public partial class HayatePoolBasic<T>
                     }
 
                 case HayatePoolRejectPolicy.CreateNew:
+                case HayatePoolRejectPolicy.CreateOnDemand:
                 case HayatePoolRejectPolicy.BlockTimeout:
                     {
                         // CreateNew cannot deliver on its promise here: the pool is already at
                         // MaxPoolSize, which is a hard ceiling in lean mode exactly as it is in the
                         // general-purpose engine. It therefore degrades to the timeout behaviour.
+                        // CreateOnDemand is in the same position — its storage is a fixed buffer sized at
+                        // construction, so "create while the pool has room" is never satisfiable here.
                         if (sw.Elapsed >= timeout)
                         {
                             throw new TimeoutException($"HayatePool [{_name}] timed out acquiring an object after {timeout.TotalSeconds}s.");
