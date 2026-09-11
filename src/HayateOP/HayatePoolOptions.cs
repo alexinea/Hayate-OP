@@ -613,6 +613,100 @@ public class HayatePoolOptions
 
     #endregion
 
+    #region Profiles
+
+    /// <summary>
+    /// Applies the lean profile in one call: the wrapper-free fast path with every bookkeeping feature
+    /// switched off, so a pure pooling workload runs at the reference <c>DefaultObjectPool</c> cost.
+    /// </summary>
+    /// <remarks>
+    /// The profile only sets the execution mode together with the feature switches — the same normalized
+    /// state <see cref="ApplyFeatureSwitches"/> derives from <see cref="EnableLean"/>, written out
+    /// explicitly so the collapsed configuration is visible on the options object itself. Pool sizing
+    /// (<see cref="MinPoolSize"/>, <see cref="MaxPoolSize"/>), the timeouts and the reject policy are
+    /// deliberately <i>not</i> part of the profile: they describe the workload rather than the feature
+    /// set, so a profile can be applied and then tuned, in either call order.<br />
+    /// Because the profile pins <see cref="EnableLean"/>, it wins over any feature toggle enabled before
+    /// it, and a later explicit <c>EnableXxx = true</c> is still normalized away by
+    /// <see cref="ApplyFeatureSwitches"/> — lean is a mode, not a knob. Use
+    /// <see cref="UseFullProfile"/> to leave the mode.
+    /// </remarks>
+    /// <returns>The same options instance, for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var options = new HayatePoolOptions { MinPoolSize = 16, MaxPoolSize = 64 }.UseLeanProfile();
+    /// </code>
+    /// </example>
+    public HayatePoolOptions UseLeanProfile()
+    {
+        EnableLean = true;
+
+        EnableSharding = false;
+        EnableAutoScaling = false;
+
+        EnableValidation = false;
+        ValidateOnBorrow = false;
+        ValidateOnReturn = false;
+        ValidateWhileIdle = false;
+
+        EnableEviction = false;
+        EnableGenerationOptimization = false;
+        EnableLeakDetection = false;
+
+        EnableMetrics = false;
+        EnableAllocationTracking = false;
+
+        WarnAtRatio = 0;
+        CriticalAtRatio = 0;
+        ShardAffinityMode = HayateShardAffinityMode.None;
+
+        return this;
+    }
+
+    /// <summary>
+    /// Applies the full profile in one call: every optional feature switch is turned on, so the pool runs
+    /// with sharding, auto-scaling, validation, eviction, generation optimization, leak detection, metrics
+    /// and allocation tracking all active.
+    /// </summary>
+    /// <remarks>
+    /// "Full" means every feature <i>switch</i>. The numeric thresholds, the intervals and the validation
+    /// sub-switches keep their documented defaults, so <see cref="WarnAtRatio"/> and
+    /// <see cref="CriticalAtRatio"/> stay at 0 (the capacity alarm stays disabled),
+    /// <see cref="ValidateOnBorrow"/>, <see cref="ValidateOnReturn"/> and
+    /// <see cref="ValidateWhileIdle"/> stay <c>false</c>, and sizing plus reject semantics are untouched.
+    /// The profile is the exact opposite of <see cref="UseLeanProfile"/>: it clears
+    /// <see cref="EnableLean"/>, so applying it after the lean profile leaves a full-featured pool.<br />
+    /// Note that the shipped defaults already enable the six core features, so the profile differs from a
+    /// default-configured pool by switching the two observability features
+    /// (<see cref="EnableMetrics"/>, <see cref="EnableAllocationTracking"/>) on as well. Both can be
+    /// turned back off afterwards with a normal feature call.
+    /// </remarks>
+    /// <returns>The same options instance, for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var options = new HayatePoolOptions { MaxPoolSize = 256 }.UseFullProfile();
+    /// </code>
+    /// </example>
+    public HayatePoolOptions UseFullProfile()
+    {
+        EnableLean = false;
+
+        EnableSharding = true;
+        EnableAutoScaling = true;
+
+        EnableValidation = true;
+        EnableEviction = true;
+        EnableGenerationOptimization = true;
+        EnableLeakDetection = true;
+
+        EnableMetrics = true;
+        EnableAllocationTracking = true;
+
+        return this;
+    }
+
+    #endregion
+
     /// <summary>
     /// Creates a new <see cref="HayatePoolOptions"/> and copies all current settings into it.
     /// </summary>

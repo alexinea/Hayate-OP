@@ -64,6 +64,60 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
+    /// Applies the lean profile: the wrapper-free fast path with every bookkeeping feature switched off,
+    /// so a pure pooling workload runs at the reference <c>DefaultObjectPool</c> cost.
+    /// </summary>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <remarks>
+    /// The one-call equivalent of <see cref="WithLean"/> plus the explicit suppression of sharding,
+    /// auto-scaling, validation, eviction, generation optimization, leak detection, metrics, allocation
+    /// tracking and the capacity alarm. Pool sizing, timeouts and the reject policy are not part of the
+    /// profile, so they can be configured before or after it, and the profile deliberately loses to a
+    /// later <see cref="WithFullProfile"/> call. See
+    /// <see cref="HayatePoolOptions.UseLeanProfile"/> for the exact field set.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithLeanProfile()
+    ///     .WithMinSize(16)
+    ///     .WithMaxSize(64)
+    ///     .Build();
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithLeanProfile()
+    {
+        _options.UseLeanProfile();
+        return this;
+    }
+
+    /// <summary>
+    /// Applies the full profile: every optional feature switch turned on (sharding, auto-scaling,
+    /// validation, eviction, generation optimization, leak detection, metrics and allocation tracking).
+    /// </summary>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <remarks>
+    /// The exact opposite of <see cref="WithLeanProfile"/>: it clears the lean mode, so applying it after
+    /// the lean profile leaves a full-featured pool. Numeric thresholds, intervals and the validation
+    /// sub-switches keep their documented defaults. A later feature call still overrides the profile —
+    /// for example <c>WithFullProfile().WithEnableAllocationTracking(false)</c> leaves the diagnostic
+    /// switch off. See <see cref="HayatePoolOptions.UseFullProfile"/> for the exact field set.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithFullProfile()
+    ///     .WithMaxSize(256)
+    ///     .Build();
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithFullProfile()
+    {
+        _options.UseFullProfile();
+        return this;
+    }
+
+    /// <summary>
     /// Enables or disables sharding.
     /// </summary>
     /// <param name="enable">Whether to enable sharding; defaults to <c>true</c>.</param>

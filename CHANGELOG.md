@@ -53,6 +53,15 @@ See the release planning notes in the project workspace for the full breakdown.
   the lean path, where they are normalized off — creates no timer at all and performs no periodic
   wake-ups. Overrunning ticks are skipped rather than overlapped, and `Dispose` releases the handle and
   drops the reference to it.
+- **Configuration profiles**: `HayatePoolOptions.UseLeanProfile()` and `UseFullProfile()` — plus the
+  `HayatePoolBuilder.WithLeanProfile()` / `WithFullProfile()` shortcuts — land a complete feature set in
+  one call, removing the need to work through roughly forty options to express "minimal pooling" or
+  "everything on". The lean profile writes out the state the lean mode normalizes to (lean on; sharding,
+  auto-scaling, validation, eviction, generation optimization, leak detection, metrics, allocation
+  tracking and the capacity alarm all off), and the full profile turns every optional feature switch back
+  on. Neither profile touches pool sizing, timeouts or the reject policy, so a profile can be applied and
+  then tuned in either call order. The profiles are order-deterministic against each other (the last one
+  wins), and a later feature call still overrides a profile.
 - `CHANGELOG.md` and [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md): release
   notes and migration guidance now live in dedicated documents, and the README links
   to them instead of duplicating them.

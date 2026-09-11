@@ -842,6 +842,52 @@
             </code>
             </example>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLeanProfile">
+            <summary>
+            Applies the lean profile: the wrapper-free fast path with every bookkeeping feature switched off,
+            so a pure pooling workload runs at the reference <c>DefaultObjectPool</c> cost.
+            </summary>
+            <returns>The same builder instance for chaining.</returns>
+            <remarks>
+            The one-call equivalent of <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLean(System.Boolean)"/> plus the explicit suppression of sharding,
+            auto-scaling, validation, eviction, generation optimization, leak detection, metrics, allocation
+            tracking and the capacity alarm. Pool sizing, timeouts and the reject policy are not part of the
+            profile, so they can be configured before or after it, and the profile deliberately loses to a
+            later <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithFullProfile"/> call. See
+            <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.UseLeanProfile"/> for the exact field set.
+            </remarks>
+            <example>
+            <code>
+            var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithLeanProfile()
+                .WithMinSize(16)
+                .WithMaxSize(64)
+                .Build();
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithFullProfile">
+            <summary>
+            Applies the full profile: every optional feature switch turned on (sharding, auto-scaling,
+            validation, eviction, generation optimization, leak detection, metrics and allocation tracking).
+            </summary>
+            <returns>The same builder instance for chaining.</returns>
+            <remarks>
+            The exact opposite of <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLeanProfile"/>: it clears the lean mode, so applying it after
+            the lean profile leaves a full-featured pool. Numeric thresholds, intervals and the validation
+            sub-switches keep their documented defaults. A later feature call still overrides the profile —
+            for example <c>WithFullProfile().WithEnableAllocationTracking(false)</c> leaves the diagnostic
+            switch off. See <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.UseFullProfile"/> for the exact field set.
+            </remarks>
+            <example>
+            <code>
+            var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithFullProfile()
+                .WithMaxSize(256)
+                .Build();
+            </code>
+            </example>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEnableSharding(System.Boolean)">
             <summary>
             Enables or disables sharding.
@@ -2244,6 +2290,56 @@
             Recommended range: enable for services that can tolerate a small startup delay yet want zero
             creation cost on the first request.
             </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolOptions.UseLeanProfile">
+            <summary>
+            Applies the lean profile in one call: the wrapper-free fast path with every bookkeeping feature
+            switched off, so a pure pooling workload runs at the reference <c>DefaultObjectPool</c> cost.
+            </summary>
+            <remarks>
+            The profile only sets the execution mode together with the feature switches — the same normalized
+            state <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/> derives from <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLean"/>, written out
+            explicitly so the collapsed configuration is visible on the options object itself. Pool sizing
+            (<see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MinPoolSize"/>, <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/>), the timeouts and the reject policy are
+            deliberately <i>not</i> part of the profile: they describe the workload rather than the feature
+            set, so a profile can be applied and then tuned, in either call order.<br />
+            Because the profile pins <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLean"/>, it wins over any feature toggle enabled before
+            it, and a later explicit <c>EnableXxx = true</c> is still normalized away by
+            <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/> — lean is a mode, not a knob. Use
+            <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.UseFullProfile"/> to leave the mode.
+            </remarks>
+            <returns>The same options instance, for chaining.</returns>
+            <example>
+            <code>
+            var options = new HayatePoolOptions { MinPoolSize = 16, MaxPoolSize = 64 }.UseLeanProfile();
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolOptions.UseFullProfile">
+            <summary>
+            Applies the full profile in one call: every optional feature switch is turned on, so the pool runs
+            with sharding, auto-scaling, validation, eviction, generation optimization, leak detection, metrics
+            and allocation tracking all active.
+            </summary>
+            <remarks>
+            "Full" means every feature <i>switch</i>. The numeric thresholds, the intervals and the validation
+            sub-switches keep their documented defaults, so <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.WarnAtRatio"/> and
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.CriticalAtRatio"/> stay at 0 (the capacity alarm stays disabled),
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ValidateOnBorrow"/>, <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ValidateOnReturn"/> and
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ValidateWhileIdle"/> stay <c>false</c>, and sizing plus reject semantics are untouched.
+            The profile is the exact opposite of <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.UseLeanProfile"/>: it clears
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLean"/>, so applying it after the lean profile leaves a full-featured pool.<br />
+            Note that the shipped defaults already enable the six core features, so the profile differs from a
+            default-configured pool by switching the two observability features
+            (<see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableMetrics"/>, <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableAllocationTracking"/>) on as well. Both can be
+            turned back off afterwards with a normal feature call.
+            </remarks>
+            <returns>The same options instance, for chaining.</returns>
+            <example>
+            <code>
+            var options = new HayatePoolOptions { MaxPoolSize = 256 }.UseFullProfile();
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolOptions.CopyTo">
             <summary>
