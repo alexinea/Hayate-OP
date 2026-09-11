@@ -900,8 +900,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 _logger.LogWarning("Object rejected by shard on release. Removing from pool. Type: {Type}, shard: {ShardIndex}",
                     typeof(T).Name, shardIndex);
 
+                // Destroy untracks the object from the registry internally — no separate UntrackObject
+                // call is needed here (it would be a no-op anyway, since Destroy drops the value
+                // reference and UntrackObject short-circuits on a null value).
                 Destroy(w);
-                UntrackObject(w);
 
                 // Fix: the shard rejected and destroyed an object, so the pool total may drop below MinPoolSize
                 // (especially when the eviction thread first claims an InPool object, then this returned object is overflowed).
@@ -1036,16 +1038,32 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     private HayateObject<T> CreateWrappedObject(Shard targetShard)
     {
+        // Wrapper recycling: prefer a wrapper parked by a previous destroy (zero allocation on this
+        // path) and fall back to a fresh allocation only when the spare stack is empty. The wrapper
+        // is taken once for the whole retry loop and fully reset before its new value is observable,
+        // so the resulting state is indistinguishable from a brand-new wrapper.
+        var w = targetShard.TryTakeSpare();
+
         for (var retry = 0; retry < _options.CreationRetryCount; retry++)
         {
             try
             {
                 var o = _policy.Create();
+                if (o is null)
+                    throw new ArgumentNullException("value"); // keep the constructor's null-value contract
 
-                // Register into the target shard (ShardIndex is written synchronously as the owner).
-                // The object round-trips back to this shard forever; the registry entry and object lifetime stay in sync,
-                // so the sum of TrackedCount is the pool's true live object count.
-                var w = new HayateObject<T>(o) { ShardIndex = targetShard.Index, OwnerPoolName = _name };
+                if (w != null)
+                {
+                    w.PrepareForRecycle(o, _name, targetShard.Index);
+                }
+                else
+                {
+                    // Register into the target shard (ShardIndex is written synchronously as the owner).
+                    // The object round-trips back to this shard forever; the registry entry and object lifetime stay in sync,
+                    // so the sum of TrackedCount is the pool's true live object count.
+                    w = new HayateObject<T>(o) { ShardIndex = targetShard.Index, OwnerPoolName = _name };
+                }
+
                 if (targetShard.TryTrack(o, w))
                 {
                     if (_enableMetrics) Interlocked.Increment(ref _totalCreated);
@@ -1063,12 +1081,21 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 _logger.LogError(ex, "Error creating object. Retry {Retry}/{MaxRetries}", retry + 1, _options.CreationRetryCount);
 
                 if (retry == _options.CreationRetryCount - 1)
+                {
+                    // Park the taken wrapper before giving up so a future creation can still reuse it.
+                    // Safe even when w.Value references a failed candidate: spare wrappers are only
+                    // consumed here, and every consumption resets the wrapper before the value is read.
+                    if (w != null) targetShard.ReturnSpare(w);
                     throw new InvalidOperationException("Failed to create object after retries", ex);
+                }
 
                 Thread.Sleep(_options.CreationRetryDelay);
             }
         }
 
+        // Park the taken wrapper before giving up so a future creation can still reuse it (same
+        // reasoning as the retry-exhausted path above).
+        if (w != null) targetShard.ReturnSpare(w);
         throw new InvalidOperationException("Failed to create object after retries");
     }
 
@@ -1195,11 +1222,28 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             // On destruction, clear the lease context reference so the stack frames can be GC'd with the context (on the AsyncLocal flow side
             // each caller Detaches on its own Release; this code does not touch other flows' contexts — such is the AsyncLocal semantics.
             w.LeaseContext = null;
+            // Drop the value reference: the wrapper may be parked on the spare stack for reuse, and a
+            // parked wrapper must never keep a destroyed pooled object alive. UntrackObject has already
+            // removed the registry entry above, so nothing reads w.Value after this point.
+            w.Value = null;
             _logger.LogDebug("Wrapped object destroyed. Type: {Type}", typeof(T).Name);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during wrapped object destruction. Type: {Type}", typeof(T).Name);
+            // Do not park a half-cleaned wrapper: the destroy may have failed before the registry
+            // entry was removed (or before the value reference was dropped), and recycling it could
+            // leave a stale registry entry pointing at the reused wrapper. It is simply collected.
+            return;
+        }
+
+        // Wrapper recycling: park the fully destroyed wrapper on its home shard's spare stack
+        // (bounded by the shard's max size) so a future CreateWrappedObject can reuse it instead of
+        // allocating. The wrapper is only ever consumed through CreateWrappedObject, which resets it
+        // completely before the new value becomes observable.
+        if ((uint)w.ShardIndex < (uint)_shards.Length)
+        {
+            _shards[w.ShardIndex].ReturnSpare(w);
         }
     }
 

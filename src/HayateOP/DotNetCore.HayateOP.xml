@@ -365,6 +365,28 @@
             return-rejection may concurrently hit the same object, so a CAS guarantees it is destroyed only once.
             </summary>
         </member>
+        <member name="F:DotNetCore.HayateOP.HayateObject`1.SpareNext">
+            <summary>
+            Intrusive singly-linked link used by the per-shard spare-wrapper stack. When a wrapper is
+            destroyed, the pool parks it on its home shard's spare stack (bounded by the shard's max size)
+            so a future object creation can reuse it instead of allocating a new wrapper. While parked,
+            <see cref="P:DotNetCore.HayateOP.HayateObject`1.Value"/> is <c>null</c> (cleared by the destroy path) so the stack never keeps a
+            destroyed pooled object alive. Only the pool's create/destroy paths touch this field.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateObject`1.PrepareForRecycle(`0,System.String,System.Int32)">
+            <summary>
+            Resets every per-lease and per-object field so this wrapper can safely wrap a freshly created
+            pooled value (wrapper recycling). The resulting state is identical to a brand-new wrapper
+            produced by the constructor: lease bookkeeping, generations, timestamps and the shard-claim
+            protocol state all start from zero, and no reference to the previous pooled value is retained.
+            Called by the pool right after a spare wrapper is taken from the spare stack, before the new
+            value becomes observable — spare wrappers are consumed nowhere else.
+            </summary>
+            <param name="newValue">The freshly created pooled object to wrap; must not be <c>null</c>.</param>
+            <param name="ownerPoolName">The logical name of the owning pool.</param>
+            <param name="shardIndex">The index of the shard that will own the wrapped object.</param>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayateObject`1.#ctor(`0)">
             <summary>
             Initializes a new wrapper around the supplied pooled value.
@@ -671,6 +693,23 @@
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TrackedValues">
             <summary>All wrapper objects registered in this shard (including those currently borrowed).</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.SpareCount">
+            <summary>The number of wrappers currently parked on the spare stack (diagnostic use).</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.ReturnSpare(DotNetCore.HayateOP.HayateObject{`0})">
+            <summary>
+            Parks a fully destroyed wrapper on the spare stack for future reuse. The wrapper must have
+            gone through the pool's destroy path (value disposed and untracked, value reference cleared).
+            The stack is bounded by the shard's current max size: when full, the wrapper is simply dropped
+            for the garbage collector, so the stack can never exceed the shard capacity.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TryTakeSpare">
+            <summary>
+            Takes a wrapper from the spare stack, or returns <c>null</c> when the stack is empty.
+            The caller (the pool's create path only) must fully reset the wrapper before use.
+            </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.Add(DotNetCore.HayateOP.HayateObject{`0})">
             <summary>

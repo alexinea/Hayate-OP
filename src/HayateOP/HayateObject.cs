@@ -125,6 +125,47 @@ public class HayateObject<T> where T : class
     internal int Destroyed;
 
     /// <summary>
+    /// Intrusive singly-linked link used by the per-shard spare-wrapper stack. When a wrapper is
+    /// destroyed, the pool parks it on its home shard's spare stack (bounded by the shard's max size)
+    /// so a future object creation can reuse it instead of allocating a new wrapper. While parked,
+    /// <see cref="Value"/> is <c>null</c> (cleared by the destroy path) so the stack never keeps a
+    /// destroyed pooled object alive. Only the pool's create/destroy paths touch this field.
+    /// </summary>
+    internal HayateObject<T> SpareNext;
+
+    /// <summary>
+    /// Resets every per-lease and per-object field so this wrapper can safely wrap a freshly created
+    /// pooled value (wrapper recycling). The resulting state is identical to a brand-new wrapper
+    /// produced by the constructor: lease bookkeeping, generations, timestamps and the shard-claim
+    /// protocol state all start from zero, and no reference to the previous pooled value is retained.
+    /// Called by the pool right after a spare wrapper is taken from the spare stack, before the new
+    /// value becomes observable — spare wrappers are consumed nowhere else.
+    /// </summary>
+    /// <param name="newValue">The freshly created pooled object to wrap; must not be <c>null</c>.</param>
+    /// <param name="ownerPoolName">The logical name of the owning pool.</param>
+    /// <param name="shardIndex">The index of the shard that will own the wrapped object.</param>
+    internal void PrepareForRecycle(T newValue, string ownerPoolName, int shardIndex)
+    {
+        Value = newValue;
+        CreatedAt = Stopwatch.GetTimestamp();
+        LastBorrowedAt = 0;
+        LastReleasedAt = CreatedAt;
+        // Wall-clock creation time (snapshot output only; not used for duration calculation).
+        CreatedAtTick = DateTimeOffset.UtcNow.Ticks;
+        LeaseCount = 0;
+        OwnerPoolName = ownerPoolName;
+        LeaseContext = null;
+        Generation = 0;
+        ValidationSkipCount = 0;
+        LeaseTimeMs = 0;
+        ShardIndex = shardIndex;
+        Node = null;
+        Location = HayateObjectLocation.None;
+        Interlocked.Exchange(ref Destroyed, 0);
+        SpareNext = null;
+    }
+
+    /// <summary>
     /// Initializes a new wrapper around the supplied pooled value.
     /// </summary>
     /// <param name="value">The pooled object to wrap; must not be <c>null</c>.</param>

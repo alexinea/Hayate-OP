@@ -29,8 +29,16 @@ See the release planning notes in the project workspace for the full breakdown.
   configuration is observable through `GetOptions()`.
   Trade-offs to be aware of: the lean path keeps no cumulative counters (`HayatePoolStats.TotalCreated`
   and friends report `0`), `Evict` throws `InvalidOperationException`, `ReloadConfig` rejects a
-  `MaxPoolSize` change, and `Release` trusts the caller because there is no registry to verify
+  `MaxPoolSize` change, and   `Release` trusts the caller because there is no registry to verify
   ownership against.
+- **Wrapper recycling**: destroyed `HayateObject<T>` wrappers are parked on a bounded per-shard
+  spare stack and reused by the next object creation, removing the per-wrapper allocation from
+  create/destroy churn. No observable semantics change: pooled objects are still freshly created
+  and counted as before (`TotalCreated` counts objects, not wrappers), a recycled wrapper carries
+  pristine lease state (lease count, lease duration, generation and creation timestamps all reset),
+  and a parked wrapper holds no reference to its destroyed pooled value. When a destroy's cleanup
+  fails partway, the wrapper is not parked, so a stale registry entry can never survive onto a
+  reused wrapper. The release-rejection path also drops a now-redundant registry removal.
 - `CHANGELOG.md` and [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md): release
   notes and migration guidance now live in dedicated documents, and the README links
   to them instead of duplicating them.

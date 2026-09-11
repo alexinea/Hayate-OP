@@ -69,6 +69,61 @@ public partial class HayatePoolBasic<T>
 
         public int MaxSize => Volatile.Read(ref _maxSize);
 
+        // Spare-wrapper stack: an intrusive singly-linked list threaded through HayateObject<T>.SpareNext.
+        // Destroyed wrappers are parked here (bounded by the shard's current max size) and reused by the
+        // next object creation, removing the per-wrapper allocation from create/destroy churn. The stack
+        // is consumed only by the pool's create path, which fully resets a taken wrapper before its new
+        // value becomes observable, so a parked wrapper never leaks stale state.
+        // The stack is guarded by its own SpinLock (two pointer operations per side, no user code inside):
+        // a lock-free Treiber stack would be exposed to the classic ABA reuse hazard under concurrent
+        // destroy/create churn, and this lock is never held on the borrow/return hot path.
+        private SpinLock _spareLock = new(enableThreadOwnerTracking: false);
+        private HayateObject<T> _spareHead;
+        private int _spareCount;
+
+        /// <summary>The number of wrappers currently parked on the spare stack (diagnostic use).</summary>
+        internal int SpareCount => Volatile.Read(ref _spareCount);
+
+        /// <summary>
+        /// Parks a fully destroyed wrapper on the spare stack for future reuse. The wrapper must have
+        /// gone through the pool's destroy path (value disposed and untracked, value reference cleared).
+        /// The stack is bounded by the shard's current max size: when full, the wrapper is simply dropped
+        /// for the garbage collector, so the stack can never exceed the shard capacity.
+        /// </summary>
+        public void ReturnSpare(HayateObject<T> w)
+        {
+            var taken = false;
+            try
+            {
+                _spareLock.Enter(ref taken);
+                if (_spareCount >= Volatile.Read(ref _maxSize)) return;
+                w.SpareNext = _spareHead;
+                _spareHead = w;
+                _spareCount++;
+            }
+            finally { if (taken) _spareLock.Exit(); }
+        }
+
+        /// <summary>
+        /// Takes a wrapper from the spare stack, or returns <c>null</c> when the stack is empty.
+        /// The caller (the pool's create path only) must fully reset the wrapper before use.
+        /// </summary>
+        public HayateObject<T> TryTakeSpare()
+        {
+            var taken = false;
+            try
+            {
+                _spareLock.Enter(ref taken);
+                var head = _spareHead;
+                if (head is null) return null;
+                _spareHead = head.SpareNext;
+                _spareCount--;
+                head.SpareNext = null;
+                return head;
+            }
+            finally { if (taken) _spareLock.Exit(); }
+        }
+
         public Shard(HayatePoolOptions options, int index, int maxSize, IHayateLogger logger)
         {
             Index = index;
