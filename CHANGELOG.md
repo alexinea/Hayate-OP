@@ -10,10 +10,17 @@ Breaking changes are described in full — with migration guidance — in
 
 ## [Unreleased]
 
-Planned for 2.6: performance optimization (lean lock-free fast path, wrapper
-de-allocation, `ArrayPool`-backed storage backend) and ecosystem capability
-fill-ins (keyed pool, circuit breaker, unbounded pool, specialized pool package).
-See the release planning notes in the project workspace for the full breakdown.
+## [2.6.0] - 2026-09-12
+
+Performance and ecosystem release, no breaking API change. Highlights: a lock-free
+lean fast path that matches the Microsoft `DefaultObjectPool` reference on both
+latency and allocations (`EnableLean`), wrapper re-allocation elimination, one-call
+configuration profiles (`UseLeanProfile()` / `UseFullProfile()`), a create-on-demand
+reject policy for the `Microsoft.Extensions.ObjectPool` compatibility layer, an
+opt-in pool-level availability circuit breaker with automatic recovery, a merged
+single-timer background scheduler, per-switch hot-path cost documentation, a
+counter-gating contract, and a machine-readable performance baseline with a CI
+regression gate.
 
 ### Added
 

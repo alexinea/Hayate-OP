@@ -4,6 +4,23 @@ Migration guidance for every breaking change, newest first, plus the behavioural
 frequently surprise adopters. For a per-version summary of all changes see
 [`../CHANGELOG.md`](../CHANGELOG.md).
 
+## 2.6 — No breaking API change
+
+2.6 adds only opt-in features and documentation; existing code compiles and behaves as before.
+Two adoption notes nonetheless deserve attention:
+
+- **All runtime text is now English.** Exception messages, OpenTelemetry metric descriptions and
+  `HayatePoolStats.ToString()` section labels previously emitted Chinese text. Code that matches
+  on message content — for example `Assert.Contains` in a test, or log parsing — must be updated
+  to the English strings.
+- **New behaviours are opt-in only.** The lean fast path (`EnableLean`), the
+  `CreateOnDemand` reject policy, the configuration profiles and the availability circuit
+  breaker (`EnableCircuitBreaker`) all default to their pre-2.6 behaviour. The circuit breaker
+  adds `HayatePoolUnavailableException` (derived from `InvalidOperationException`, so existing
+  catch blocks keep working), thrown only when the breaker is enabled and open. See the
+  [behavioural notes](#behavioural-notes-non-breaking) for the disposal semantics documented
+  during this cycle.
+
 ## 2.5 — Structured lease context and lifecycle fields
 
 Two observability-facing breaking changes land in 2.5.
