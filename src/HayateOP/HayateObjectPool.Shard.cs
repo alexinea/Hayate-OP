@@ -34,7 +34,12 @@ public partial class HayatePoolBasic<T>
 
         internal bool TryTrack(T key, HayateObject<T> w) => _objects.TryAdd(key, w);
 
-        internal bool TryGetTracked(T key, out HayateObject<T> w) => _objects.TryGetValue(key, out w);
+        internal bool TryGetTracked(T key, out HayateObject<T> w)
+        {
+            var found = _objects.TryGetValue(key, out var value);
+            w = value!;
+            return found;
+        }
 
         internal bool Untrack(T key) => _objects.TryRemove(key, out _);
 
@@ -78,7 +83,7 @@ public partial class HayatePoolBasic<T>
         // a lock-free Treiber stack would be exposed to the classic ABA reuse hazard under concurrent
         // destroy/create churn, and this lock is never held on the borrow/return hot path.
         private SpinLock _spareLock = new(enableThreadOwnerTracking: false);
-        private HayateObject<T> _spareHead;
+        private HayateObject<T>? _spareHead;
         private int _spareCount;
 
         /// <summary>The number of wrappers currently parked on the spare stack (diagnostic use).</summary>
@@ -108,7 +113,7 @@ public partial class HayatePoolBasic<T>
         /// Takes a wrapper from the spare stack, or returns <c>null</c> when the stack is empty.
         /// The caller (the pool's create path only) must fully reset the wrapper before use.
         /// </summary>
-        public HayateObject<T> TryTakeSpare()
+        public HayateObject<T>? TryTakeSpare()
         {
             var taken = false;
             try
@@ -152,7 +157,7 @@ public partial class HayatePoolBasic<T>
             if (w is null) throw new ArgumentNullException(nameof(w));
 
             var currentMax = Volatile.Read(ref _maxSize);
-            HayateObject<T> overflow = null;
+            HayateObject<T>? overflow = null;
             var accepted = false;
             var size = 0;
 
@@ -211,7 +216,7 @@ public partial class HayatePoolBasic<T>
 
         public bool TryTake(out HayateObject<T> w)
         {
-            w = null;
+            w = null!;
 
             var taken = false;
             try

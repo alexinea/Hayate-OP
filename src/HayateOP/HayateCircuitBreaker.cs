@@ -85,7 +85,7 @@ public class HayateCircuitBreakerOptions : IEquatable<HayateCircuitBreakerOption
     /// application calls <c>SetAvailable</c>, which is the right choice when only the caller can know that
     /// the dependency is back.
     /// </remarks>
-    public Func<bool> Probe { get; set; }
+    public Func<bool>? Probe { get; set; }
 
     /// <summary>
     /// Creates a new <see cref="HayateCircuitBreakerOptions"/> and copies all current settings into it.
@@ -140,7 +140,7 @@ public class HayateCircuitBreakerOptions : IEquatable<HayateCircuitBreakerOption
     /// configuration-equivalence tests work when the breaker settings are nested inside
     /// <see cref="HayatePoolOptions"/>.
     /// </remarks>
-    public bool Equals(HayateCircuitBreakerOptions other)
+    public bool Equals(HayateCircuitBreakerOptions? other)
     {
         if (other is null) return false;
         if (ReferenceEquals(this, other)) return true;
@@ -154,7 +154,7 @@ public class HayateCircuitBreakerOptions : IEquatable<HayateCircuitBreakerOption
     /// <summary>Determines whether the supplied object is a structurally equal options instance.</summary>
     /// <param name="obj">The object to compare with.</param>
     /// <returns><c>true</c> when <paramref name="obj"/> is a <see cref="HayateCircuitBreakerOptions"/> with the same settings.</returns>
-    public override bool Equals(object obj)
+    public override bool Equals(object? obj)
     {
         return obj is HayateCircuitBreakerOptions other && this.Equals(other);
     }

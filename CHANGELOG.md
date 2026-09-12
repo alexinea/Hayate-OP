@@ -10,6 +10,23 @@ Breaking changes are described in full — with migration guidance — in
 
 ## [Unreleased]
 
+## [2.7.0] - Unreleased
+
+### Added
+
+- **Nullable reference types enabled across all `src` assemblies** (Q0). `<Nullable>enable</Nullable>`
+  is now set in `asset/props/target.feature.props`, and every nullable warning
+  (CS8618 / CS8601 / CS8603 / CS8625 / CS8600 / CS8602 / CS8604 / CS8622 / CS8765 / CS8767) in the
+  core pool and all seven extension packages has been resolved. The change is annotation-only: public
+  API nullability was corrected with additive `?` / `!` annotations, so existing consumers recompile
+  unchanged and no runtime behaviour differs (see `docs/BREAKING-CHANGES.md` §2.7). Builds are
+  warning-free on net6.0–net10.0.
+
+### Changed
+
+- Public API surface now carries accurate nullability annotations (non-breaking). See
+  `docs/BREAKING-CHANGES.md` §2.7.
+
 ## [2.6.0] - 2026-09-12
 
 Performance and ecosystem release, no breaking API change. Highlights: a lock-free

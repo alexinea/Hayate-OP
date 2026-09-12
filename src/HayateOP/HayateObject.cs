@@ -66,7 +66,7 @@ public class HayateObject<T> where T : class
     /// The logical name of the owning pool (written by the pool at creation, immutable for the object's
     /// lifetime). Used by cross-pool diagnostics / snapshot output to locate object ownership.
     /// </summary>
-    public string OwnerPoolName { get; set; }
+    public string OwnerPoolName { get; set; } = null!; // assigned by the pool right after construction
 
     /// <summary>
     /// Borrow lease context (lease id + borrow-call stack frames + borrow timestamp).
@@ -78,7 +78,7 @@ public class HayateObject<T> where T : class
     /// final form. The pre-2.5 <c>AcquireTrace: string</c> has been removed; obtain the text form via
     /// <c>TakeSnapshot().LeakTraces</c>.
     /// </summary>
-    public HayateLeaseContext LeaseContext { get; internal set; }
+    public HayateLeaseContext? LeaseContext { get; internal set; }
 
     /// <summary>
     /// Whether the object is currently borrowed, derived as a computed property of <see cref="Location"/>
@@ -116,7 +116,7 @@ public class HayateObject<T> where T : class
     /// shard list. May only be read/written inside the Shard spin lock; it downgrades Remove from an O(n)
     /// queue rebuild to an O(1) unlink.
     /// </summary>
-    internal LinkedListNode<HayateObject<T>> Node;
+    internal LinkedListNode<HayateObject<T>>? Node;
 
     /// <summary>
     /// Destruction idempotency flag (0 = not destroyed, 1 = destroyed). Eviction, idle validation, and
@@ -131,7 +131,7 @@ public class HayateObject<T> where T : class
     /// <see cref="Value"/> is <c>null</c> (cleared by the destroy path) so the stack never keeps a
     /// destroyed pooled object alive. Only the pool's create/destroy paths touch this field.
     /// </summary>
-    internal HayateObject<T> SpareNext;
+    internal HayateObject<T>? SpareNext;
 
     /// <summary>
     /// Resets every per-lease and per-object field so this wrapper can safely wrap a freshly created

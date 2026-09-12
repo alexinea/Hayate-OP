@@ -32,7 +32,7 @@ public static class HayatePrometheusServiceCollectionExtensions
     /// </example>
     public static IServiceCollection AddHayatePrometheusExporter(
         this IServiceCollection services,
-        Action<HayatePrometheusOptions> configure = null)
+        Action<HayatePrometheusOptions>? configure = null)
     {
         if (services is null) throw new ArgumentNullException(nameof(services));
 

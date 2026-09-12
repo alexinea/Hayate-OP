@@ -36,7 +36,7 @@ public class HayatePrometheusOptions
 /// </summary>
 public sealed class HayatePrometheusExporter
 {
-    private readonly IHayateObjectPoolRegistry _registry;
+    private readonly IHayateObjectPoolRegistry? _registry;
     private readonly HayatePrometheusOptions _options;
 
     /// <summary>
@@ -45,8 +45,8 @@ public sealed class HayatePrometheusExporter
     /// <param name="registry">The pool registry (data source). May be <c>null</c>, in which case the output is empty text.</param>
     /// <param name="options">Optional configuration (namespace prefix).</param>
     public HayatePrometheusExporter(
-        IHayateObjectPoolRegistry registry = null,
-        HayatePrometheusOptions options = null)
+        IHayateObjectPoolRegistry? registry = null,
+        HayatePrometheusOptions? options = null)
     {
         _registry = registry;
         _options = options ?? new HayatePrometheusOptions();
@@ -150,7 +150,7 @@ public sealed class HayatePrometheusExporter
     private static IReadOnlyList<HayatePrometheusSample> Map(
         List<(string Name, HayatePoolStats Stats)> pools,
         Func<HayatePoolStats, double> selector,
-        Func<HayatePoolStats, bool> onlyWhen = null)
+        Func<HayatePoolStats, bool>? onlyWhen = null)
     {
         var samples = new List<HayatePrometheusSample>(pools.Count);
         foreach (var (name, stats) in pools)

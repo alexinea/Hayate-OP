@@ -9,8 +9,16 @@
 
     <PropertyGroup>
         <LangVersion>latest</LangVersion>
-        <NoWarn>$(NoWarn);CS1591;NU1803</NoWarn>
-        <Nullable>disable</Nullable>
+        <!--
+             Q0 (2.7): nullable reference types are enabled for the test projects too, matching the
+             src setting in asset/props/target.feature.props. The test *code* itself is not yet
+             annotated; per the 2.7 plan ("common.tests.props 同步开启（或单列验收）") the test-code
+             nullable cleanup is deferred to a separate acceptance pass, so the NRT warning codes are
+             suppressed here to keep the test build warning-free. The library (src) build is fully
+             warning-free.
+        -->
+        <NoWarn>$(NoWarn);CS1591;NU1803;CS8600;CS8601;CS8602;CS8603;CS8604;CS8605;CS8606;CS8607;CS8608;CS8609;CS8610;CS8611;CS8612;CS8613;CS8614;CS8615;CS8616;CS8617;CS8618;CS8619;CS8620;CS8621;CS8622;CS8623;CS8624;CS8625;CS8626;CS8627;CS8628;CS8629;CS8630;CS8631;CS8632;CS8633;CS8634;CS8643;CS8644;CS8645;CS8653;CS8667;CS8669;CS8670;CS8764;CS8765;CS8766;CS8767;CS8768;CS8770</NoWarn>
+        <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
         <IsPackable>false</IsPackable>
     </PropertyGroup>

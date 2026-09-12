@@ -34,8 +34,8 @@ public partial class HayatePoolBasic<T>
     // steady-state borrow hits; _leanSlots carries the remaining capacity. The two together retain
     // at most MaxPoolSize idle objects, matching the ceiling of the general-purpose engine.
     // _leanSlots is sized MaxPoolSize - 1 precisely so the fast lane does not add an extra slot.
-    private readonly T[] _leanSlots;
-    private T _leanFirstItem;
+    private readonly T?[] _leanSlots;
+    private T? _leanFirstItem;
     private readonly int _leanCapacity;
     private readonly bool _leanRetentionEnabled;
 
@@ -87,7 +87,7 @@ public partial class HayatePoolBasic<T>
     /// </remarks>
     private bool TryGrowLean(out T item)
     {
-        item = null;
+        item = null!;
 
         while (true)
         {
@@ -141,7 +141,7 @@ public partial class HayatePoolBasic<T>
             }
         }
 
-        item = null;
+        item = null!;
         return false;
     }
 

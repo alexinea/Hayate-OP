@@ -48,7 +48,7 @@ public static class ConfigurationExtensions
     /// </example>
     public static IHayateServiceCollection RegisterHayatePool<T>(this IHayateServiceCollection services,
         IConfiguration configuration,
-        string poolName = null,
+        string? poolName = null,
         string configSectionPath = "HayatePool")
         where T : class, new()
     {
@@ -125,7 +125,7 @@ public static class ConfigurationExtensions
             });
 
             // Cache the change token so it can be unbound when the pool is disposed.
-            _changeTokenCache.TryAdd(poolName, changeToken);
+            _changeTokenCache.TryAdd(poolName, changeToken!);
 
             return pool;
         });

@@ -23,7 +23,7 @@ public class HayateDiagnostics : IHayateMetrics
     /// <c>volatile</c> ensures the rebuilt <see cref="EventNameSet"/> is safely published (the field
     /// is made coherently visible as a whole).
     /// </summary>
-    private volatile EventNameSet _cachedEventNames;
+    private volatile EventNameSet? _cachedEventNames;
 
     public HayateDiagnostics(IOptions<HayatePoolOptions> options)
     {

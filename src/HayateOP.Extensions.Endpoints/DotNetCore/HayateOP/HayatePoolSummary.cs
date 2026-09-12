@@ -11,7 +11,7 @@ namespace DotNetCore.HayateOP;
 /// <param name="BorrowedCount">The current number of borrowed objects.</param>
 public sealed record HayatePoolSummary(
     string PoolName,
-    string ElementType,
+    string? ElementType,
     System.DateTimeOffset RegisteredAt,
     int PooledCount,
     int BorrowedCount);

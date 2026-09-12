@@ -19,10 +19,10 @@ public sealed class HayatePoolMetadata
     public string PoolName { get; }
 
     /// <summary>The type of the pooled element (the T of <see cref="IHayateObjectPool{T}"/>); null for non-generic implementations.</summary>
-    public Type ElementType { get; }
+    public Type? ElementType { get; }
 
     /// <summary>The runtime type of the pool instance.</summary>
-    public Type PoolType { get; }
+    public Type? PoolType { get; }
 
     /// <summary>The registration (approximately the build) time.</summary>
     public DateTimeOffset RegisteredAt { get; }
@@ -44,7 +44,7 @@ public sealed class HayatePoolMetadata
     /// Returns null when it cannot be resolved (a non-generic custom implementation) — the metadata
     /// is still usable, it just lacks type information.
     /// </summary>
-    private static Type ResolveElementType(IHayateObjectPool pool)
+    private static Type? ResolveElementType(IHayateObjectPool? pool)
     {
         if (pool is null) return null;
 

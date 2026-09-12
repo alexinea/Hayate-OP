@@ -71,7 +71,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     // its configured cadence while the pool holds one timer handle instead of three. When all three are
     // disabled no timer is created at all — an idle pool with no background features never wakes up.
     // The schedule is fixed at construction, exactly like the three creation-time captures it replaces.
-    private Timer _backgroundTimer;
+    private Timer? _backgroundTimer;
     private long _evictionPeriodTicks;
     private long _scalingPeriodTicks;
     private long _validationPeriodTicks;
@@ -139,13 +139,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     // Shard-affinity mode (constructor-time snapshot). None is the default and has zero overhead (start index is always 0);
     // Thread maps the start shard stably by thread ID; Custom uses the user delegate (falling back to sequential scan on exception/out-of-range/null).
     private readonly HayateShardAffinityMode _affinityMode;
-    private readonly Func<int> _customShardAffinity;
+    private readonly Func<int>? _customShardAffinity;
 
     // Pre-warm readiness signal. false by default (synchronous pre-warm at construction, zero extra wait on borrow, consistent with 2.4);
     // when true, pre-warm runs in the background and the borrow path blocks on _warmupCompletion until pre-warm completes
     // (including on failure — the signal is always set, so there is no permanent block). During the wait the cold-start path yields.
     private readonly bool _waitForWarmup;
-    private readonly TaskCompletionSource<object> _warmupCompletion;
+    private readonly TaskCompletionSource<object> _warmupCompletion = null!; // assigned in constructor when WaitForWarmup is enabled
 
     // Allocation tracking (off by default). Counts the per-thread allocation delta (bytes) and sample count on the synchronous borrow/return paths;
     // diagnostic only, never affects pool behavior decisions. Under net48 / netstandard2.0 the API is unavailable, so the counters stay 0.
@@ -163,9 +163,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     // disposed on the recovery), so an available pool holds no extra handle and pays one predicted branch.
     private readonly bool _enableCircuitBreaker;
     private readonly int _breakerFailureThreshold;
-    private readonly Func<bool> _breakerProbe;
-    private readonly Action<HayatePoolAvailabilityEventArgs> _onAvailable;
-    private readonly Action<HayatePoolAvailabilityEventArgs> _onUnavailable;
+    private readonly Func<bool>? _breakerProbe;
+    private readonly Action<HayatePoolAvailabilityEventArgs>? _onAvailable;
+    private readonly Action<HayatePoolAvailabilityEventArgs>? _onUnavailable;
 
     // 0 = available, 1 = tripped. The borrow path reads this with a volatile read when the feature is on;
     // every transition goes through a CAS, so concurrent reports/recoveries collapse into one announcement.
@@ -180,13 +180,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     // Stopwatch timestamp of the trip (0 = never tripped) and the reason of the trip. Stable while the
     // breaker stays open; the timestamp lets a probe that started before a re-trip recognize stale results.
     private long _breakerTrippedAt;
-    private string _breakerReason;
+    private string _breakerReason = null!; // set before first use on breaker trip
 
     // Transient probe timer. Created when the breaker trips with a probe configured, disposed on recovery,
     // null the rest of the time. Deliberately separate from the merged background timer so a breaker-only
     // pool performs no periodic wake-ups until it actually trips — no resident overhead, exactly like the
     // timer-less state of a pool with every background concern off.
-    private Timer _breakerTimer;
+    private Timer? _breakerTimer;
 
     /// <exception cref="ArgumentNullException">Thrown if policy, options, scalingStrategy, metrics, logger, or poolName is null.</exception>
     /// <exception cref="InvalidOperationException">Thrown if the configured options are invalid.</exception>
@@ -281,7 +281,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 }
                 finally
                 {
-                    completion.TrySetResult(null);
+                    completion.TrySetResult(null!);
                 }
             });
         }
@@ -393,7 +393,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// has elapsed; because the timer period equals the smallest enabled period, every concern fires on
     /// schedule.
     /// </summary>
-    private void BackgroundTick(object state)
+    private void BackgroundTick(object? state)
     {
         // Skip rather than overlap: a slow eviction pass must not run concurrently with the next tick.
         if (Interlocked.CompareExchange(ref _backgroundTickBusy, 1, 0) != 0) return;
@@ -912,7 +912,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         // Find the corresponding wrapper object and verify it belongs to the pool.
         // After the registry is split by shard, reverse lookup by T requires probing each shard (read-only and lock-free; the shard count is single-digit,
         // so the cost is negligible). The same object is only registered in its creation shard; a hit in any shard confirms it belongs to this pool.
-        HayateObject<T> w = null;
+        HayateObject<T> w = null!;
         foreach (var shard in _shards)
         {
             if (shard.TryGetTracked(item, out w)) break;
@@ -1194,7 +1194,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// Once the threshold is reached the pool becomes unavailable, a further failure report changes nothing,
     /// and recovery happens either through the configured probe or through <see cref="SetAvailable"/>.
     /// </remarks>
-    public void SetUnavailable(string reason = null)
+    public void SetUnavailable(string? reason = null)
     {
         if (!_enableCircuitBreaker) return;
 
@@ -1238,21 +1238,21 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// Opens the breaker: flips the pool to unavailable, announces the trip through the callback and the
     /// log, and starts the probe timer when a probe is configured. Concurrent trips collapse into one.
     /// </summary>
-    private void TripBreaker(string reason)
+    private void TripBreaker(string? reason)
     {
         // Only the thread that flips 0 → 1 announces the trip. Once open, further failure reports are
         // no-ops: the pool is already out of service, and the announcement must stay one-per-transition.
         if (Interlocked.CompareExchange(ref _breakerTripped, 1, 0) != 0) return;
 
         Volatile.Write(ref _breakerTrippedAt, Stopwatch.GetTimestamp());
-        Volatile.Write(ref _breakerReason, reason);
+        Volatile.Write(ref _breakerReason, reason!);
 
         try
         {
             _logger.LogWarning(
                 "Pool [{PoolName}] taken out of service after {Threshold} consecutive failure reports: {Reason}",
                 _name, _breakerFailureThreshold, reason ?? "(no reason reported)");
-            _onUnavailable?.Invoke(new HayatePoolAvailabilityEventArgs(_name, reason));
+            _onUnavailable?.Invoke(new HayatePoolAvailabilityEventArgs(_name, reason!));
         }
         catch (Exception ex)
         {
@@ -1293,7 +1293,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         {
             _logger.LogInformation("Pool [{PoolName}] back in service ({Trigger}).",
                 _name, fromProbe ? "availability probe succeeded" : "recovery reported by the application");
-            _onAvailable?.Invoke(new HayatePoolAvailabilityEventArgs(_name, null));
+            _onAvailable?.Invoke(new HayatePoolAvailabilityEventArgs(_name, null!));
         }
         catch (Exception ex)
         {
@@ -1336,7 +1336,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// Probe tick. Runs the configured probe and recovers the pool when it reports healthy; a throwing
     /// probe is a failed probe and leaves the pool unavailable for the next interval.
     /// </summary>
-    private void BreakerProbeTick(object state)
+    private void BreakerProbeTick(object? state)
     {
         // A tick scheduled before a recovery can still fire after it; such a tick only cleans up — the
         // recovery path has already disposed the timer, so nothing is left behind afterwards.
@@ -1507,7 +1507,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// while Abort keeps the direct-reject semantics.
     /// </summary>
     /// <returns>Object borrowed via cold boot; returns <c>null</c> when this call did not claim the boot (pool non-empty / at capacity / another thread is creating), and the caller should continue normal waiting.</returns>
-    private T TryColdBootAcquire(long waitTimeMs)
+    private T? TryColdBootAcquire(long waitTimeMs)
     {
         if (_options.MaxPoolSize <= 0) return null;
         if (TrackedObjectCount != 0) return null;
@@ -1538,7 +1538,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// </summary>
     /// <returns>The borrowed object, or <c>null</c> when the pool already holds <c>MaxPoolSize</c> objects
     /// — the caller then waits for a return exactly as the create-after-timeout policy does.</returns>
-    private T TryCreateOnDemand(long waitTimeMs)
+    private T? TryCreateOnDemand(long waitTimeMs)
     {
         var coldBoot = TryColdBootAcquire(waitTimeMs);
         if (coldBoot is not null) return coldBoot;
@@ -1609,11 +1609,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             w.Location = HayateObjectLocation.Destroyed;
             // On destruction, clear the lease context reference so the stack frames can be GC'd with the context (on the AsyncLocal flow side
             // each caller Detaches on its own Release; this code does not touch other flows' contexts — such is the AsyncLocal semantics.
-            w.LeaseContext = null;
+            w.LeaseContext = null!;
             // Drop the value reference: the wrapper may be parked on the spare stack for reuse, and a
             // parked wrapper must never keep a destroyed pooled object alive. UntrackObject has already
             // removed the registry entry above, so nothing reads w.Value after this point.
-            w.Value = null;
+            w.Value = null!;
             _logger.LogDebug("Wrapped object destroyed. Type: {Type}", typeof(T).Name);
         }
         catch (Exception ex)
@@ -1720,9 +1720,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// Frames are joined by "&lt;-" (call direction: outermost frame first); the frame format is
     /// <c>Type.Method+0xoffset</c>; falls back to placeholder text when there is no context or no frames.
     /// </summary>
-    private static string FormatLeaseTrace(HayateLeaseContext ctx)
+    private static string FormatLeaseTrace(HayateLeaseContext? ctx)
     {
-        var frames = ctx?.Frames;
+        if (ctx is null) return "No stack trace available";
+        var frames = ctx.Frames;
         if (frames is null || frames.Length == 0)
             return "No stack trace available";
 
@@ -1836,7 +1837,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     #region Background Tasks
 
-    private void EvictionCallback(object state)
+    private void EvictionCallback(object? state)
     {
         //if (!_options.EnableEviction) return;
         if (!_enableEviction) return;
@@ -1894,7 +1895,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         }
     }
 
-    private void ScalingCallback(object state)
+    private void ScalingCallback(object? state)
     {
         if (!_enableAutoScaling) return;
         try
@@ -1991,7 +1992,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         }
     }
 
-    private void ValidateCallback(object state)
+    private void ValidateCallback(object? state)
     {
         //if (!_options.EnableValidation || !_options.ValidateWhileIdle) return;
         if (!_enableValidation || !_options.ValidateWhileIdle) return;

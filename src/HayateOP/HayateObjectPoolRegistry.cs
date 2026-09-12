@@ -33,7 +33,7 @@ public class HayateObjectPoolRegistry : IHayateObjectPoolRegistry
     /// <inheritdoc />
     public bool TryGet(string poolName, out IHayateObjectPool pool)
     {
-        pool = null;
+        pool = null!;   // meaningful only when TryGet returns true
         if (poolName is null) return false;
         if (_pools.TryGetValue(poolName, out var entry))
         {

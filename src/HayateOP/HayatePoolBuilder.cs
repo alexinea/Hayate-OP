@@ -19,7 +19,7 @@ public class HayatePoolBuilder<T> where T : class, new()
     // Pool-level logger factory and the "explicit logger" flag. Defaults to no factory plus the
     // built-in singleton logger, identical to the behavior before 2.4; an explicit WithLogger
     // takes precedence over the factory (see ResolveLogger).
-    private IHayateLoggerFactory _loggerFactory;
+    private IHayateLoggerFactory? _loggerFactory;
     private bool _loggerExplicitlySet;
 
     public HayatePoolBuilder()
@@ -391,14 +391,14 @@ public class HayatePoolBuilder<T> where T : class, new()
         int failureThreshold,
         TimeSpan resetTimeout,
         TimeSpan probeInterval,
-        Func<bool> probe = null)
+        Func<bool>? probe = null)
     {
         _options.CircuitBreaker = new HayateCircuitBreakerOptions
         {
             FailureThreshold = failureThreshold,
             ResetTimeout = resetTimeout,
             ProbeInterval = probeInterval,
-            Probe = probe
+            Probe = probe!
         };
         _options.EnableCircuitBreaker = true;
         return this;

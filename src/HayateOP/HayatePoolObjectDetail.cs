@@ -26,5 +26,5 @@ public sealed class HayatePoolObjectDetail
     public int Generation { get; set; }
 
     /// <summary>The logical name of the owning pool.</summary>
-    public string OwnerPoolName { get; set; }
+    public string OwnerPoolName { get; set; } = null!; // assigned during snapshot construction
 }

@@ -4,9 +4,9 @@ namespace DotNetCore.HayateOP.Logging;
 
 public class HayateMicrosoftLoggerAdapter<T> : IHayateLogger
 {
-    private readonly ILogger<T> _logger;
+    private readonly ILogger<T>? _logger;
 
-    public HayateMicrosoftLoggerAdapter(ILogger<T> logger)
+    public HayateMicrosoftLoggerAdapter(ILogger<T>? logger)
     {
         _logger = logger;
     }

@@ -187,7 +187,7 @@ public class HayatePoolOptions
     /// borrow fall back to a sequential scan. Only invoked when <see cref="ShardAffinityMode"/> is
     /// Custom (at most once per borrow).
     /// </summary>
-    public Func<int> CustomShardAffinity { get; set; }
+    public Func<int>? CustomShardAffinity { get; set; }
 
     #endregion
 
@@ -542,7 +542,7 @@ public class HayatePoolOptions
     /// within milliseconds); exceptions thrown inside it are caught and logged by the pool and do
     /// not affect the borrow/return main flow.
     /// </remarks>
-    public Action<HayatePoolCapacityAlarmEventArgs> OnCapacityWarning { get; set; }
+    public Action<HayatePoolCapacityAlarmEventArgs>? OnCapacityWarning { get; set; }
 
     /// <summary>
     /// Capacity critical callback (fires once on a state flip when utilization &gt;=
@@ -553,7 +553,7 @@ public class HayatePoolOptions
     /// within milliseconds); exceptions thrown inside it are caught and logged by the pool and do
     /// not affect the borrow/return main flow.
     /// </remarks>
-    public Action<HayatePoolCapacityAlarmEventArgs> OnCapacityCritical { get; set; }
+    public Action<HayatePoolCapacityAlarmEventArgs>? OnCapacityCritical { get; set; }
 
     #endregion
 
@@ -608,7 +608,7 @@ public class HayatePoolOptions
     /// transition — the background timer for a probe, the caller's thread for <c>SetAvailable</c> — and
     /// should stay lightweight; exceptions thrown inside it are caught and logged by the pool.
     /// </remarks>
-    public Action<HayatePoolAvailabilityEventArgs> OnAvailable { get; set; }
+    public Action<HayatePoolAvailabilityEventArgs>? OnAvailable { get; set; }
 
     /// <summary>
     /// Callback invoked when the pool becomes unavailable (the breaker trips). Default <c>null</c>.
@@ -618,7 +618,7 @@ public class HayatePoolOptions
     /// not fire again while the pool stays unavailable, and it does not fire for failure reports made before
     /// the threshold was reached. Exceptions thrown inside it are caught and logged by the pool.
     /// </remarks>
-    public Action<HayatePoolAvailabilityEventArgs> OnUnavailable { get; set; }
+    public Action<HayatePoolAvailabilityEventArgs>? OnUnavailable { get; set; }
 
     #endregion
 
@@ -875,7 +875,7 @@ public class HayatePoolOptions
         // Circuit breaker (the settings object is copied, not shared, so mutating the copy cannot
         // reconfigure the pool it came from)
         options.EnableCircuitBreaker = this.EnableCircuitBreaker;
-        options.CircuitBreaker = this.CircuitBreaker?.CopyTo();
+        options.CircuitBreaker = this.CircuitBreaker.CopyTo();
         options.OnAvailable = this.OnAvailable;
         options.OnUnavailable = this.OnUnavailable;
 

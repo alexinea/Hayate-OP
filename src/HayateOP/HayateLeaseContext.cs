@@ -32,7 +32,7 @@ public sealed class HayateLeaseContext
 {
     // Async-flow carrier. static readonly: each write to AsyncLocal copies the current execution context and
     // overwrites this flow's slot; sibling async flows are mutually invisible, giving natural concurrency isolation; the context instance itself is immutable.
-    internal static readonly AsyncLocal<HayateLeaseContext> Flow = new();
+    internal static readonly AsyncLocal<HayateLeaseContext?> Flow = new();
 
     private static long _leaseIdCounter;
 
@@ -46,7 +46,7 @@ public sealed class HayateLeaseContext
     public long BorrowedAt { get; }
 
     /// <summary>The lease context for the current async flow; null when not within a lease period (not captured, or already ended).</summary>
-    public static HayateLeaseContext Current => Flow.Value;
+    public static HayateLeaseContext? Current => Flow.Value;
 
     internal HayateLeaseContext(StackFrame[] frames, long borrowedAt)
     {

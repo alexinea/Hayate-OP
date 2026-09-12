@@ -4,6 +4,55 @@ Migration guidance for every breaking change, newest first, plus the behavioural
 frequently surprise adopters. For a per-version summary of all changes see
 [`../CHANGELOG.md`](../CHANGELOG.md).
 
+## 2.7 — Nullable reference type annotations (non-breaking)
+
+2.7 enables C# nullable reference type (NRT) analysis project-wide for every `src` assembly
+(`<Nullable>enable</Nullable>` in `asset/props/target.feature.props`). This is an additive,
+source-compatible change: every difference is the addition of `?` to a type, a null-forgiving
+`!`, or an initializer. No member was removed and no existing non-null contract was tightened.
+
+A consumer recompiling against 2.7 sees the *true* nullability of the API surface for the first
+time — previously everything was treated as non-nullable because NRT was off. No recompilation of
+callers is required and no runtime behaviour changed.
+
+### Public API signatures whose nullability was annotated in 2.7
+
+- `IHayateObjectPool.SetUnavailable(string? reason = null)` — parameter widened to nullable (the
+  implementation already accepted `null`).
+- `HayateObject<T>.LeaseContext` — now `HayateLeaseContext?` (it is `null` when lease capture is off).
+- The pool shard's `TryTakeSpare()` — now returns `HayateObject<T>?` (returns `null` when the spare
+  stack is empty).
+- `HayatePoolOptions.CustomShardAffinity` — now `Func<int>?` (optional delegate, defaults to `null`).
+- `HayatePoolOptions.OnCapacityWarning` / `OnCapacityCritical` / `OnAvailable` / `OnUnavailable` —
+  now `Action<HayatePoolCapacityAlarmEventArgs>?` (optional callbacks, default `null`).
+- `HayatePoolBuilder<T>.WithCircuitBreaker(..., Func<bool>? probe = null, ...)` — `probe` parameter
+  widened to nullable (a `null` probe keeps recovery manual).
+- `HayateCircuitBreakerOptions.Probe` — now `Func<bool>?`; its `Equals(HayateCircuitBreakerOptions? other)`
+  parameter widened to nullable (aligns with `IEquatable<T>.Equals`).
+- `HayateLeaseContext.Current` — now `HayateLeaseContext?` (null when not within a lease).
+- `HayatePoolMetadata.ElementType` / `HayatePoolMetadata.PoolType` — now `Type?` (null for
+  non-generic implementations).
+- `HayatePoolSummary.ElementType` — now `string?` (null for the non-generic implementation).
+- `HayatePrometheusExporter` constructor, and the DI / Configuration / Prometheus registration
+  helpers — optional parameters (`registry`, `options`, `configure`, `onlyWhen`, `poolName`) widened
+  to nullable. (The internal lazy fields (`HayateDiagnostics._cachedEventNames`,
+  `HayatePrometheusExporter._registry`) were also annotated, but these are not part of the public
+  surface.)
+- `HayateMicrosoftLoggerAdapter<T>(ILogger<T>? logger)` — constructor parameter widened to nullable
+  (the adapter already defends against a null logger internally).
+
+### Adoption notes
+
+- **Nothing to change for existing callers.** These are annotations only; a project that compiled
+  against 2.6 continues to compile against 2.7. Callers with NRT enabled now receive accurate
+  nullability feedback for the members listed above.
+- **Build matrix.** With NRT on, the core pool and all seven extension packages compile with zero
+  nullable warnings on net6.0–net10.0.
+- **Test projects.** `common.tests.props` also enables `<Nullable>enable</Nullable>` for Q0, but the
+  test code itself is not yet annotated; the `CS86xx` / `CS876x` warning codes are suppressed in the
+  test props so the test build stays warning-free. Annotating the test code is tracked as a separate
+  acceptance pass (the 2.7 plan permits "单列验收" for this item).
+
 ## 2.6 — No breaking API change
 
 2.6 adds only opt-in features and documentation; existing code compiles and behaves as before.

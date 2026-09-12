@@ -44,7 +44,7 @@ public static class ServiceCollectionExtensions
     /// </code>
     /// </example>
     public static IHayateServiceCollection RegisterHayatePool<T>(this IHayateServiceCollection services,
-        Action<HayatePoolOptions> configure = null)
+        Action<HayatePoolOptions>? configure = null)
         where T : class, new()
     {
         var poolRegisterName = typeof(T).Name;

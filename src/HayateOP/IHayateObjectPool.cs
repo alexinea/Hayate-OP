@@ -59,7 +59,7 @@ public interface IHayateObjectPool : IDisposable
     /// catch (Exception ex) { pool.SetUnavailable(ex.Message); }
     /// </code>
     /// </example>
-    void SetUnavailable(string reason = null);
+    void SetUnavailable(string? reason = null);
 
     /// <summary>
     /// Reports that the dependency behind the pool is healthy again, and brings the pool back into service.
