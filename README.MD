@@ -611,6 +611,31 @@ unusable. [`docs/disposal.md`](docs/disposal.md) covers the ownership model, the
 behaviour of the drain on both engines, the side-by-side comparison with
 `DisposableObjectPool<T>`, and the two differences from it.
 
+### Disposing with the process (optional)
+
+A pool owned by the process itself never gets its `Dispose` call, because nothing user-facing
+runs at that point. `WithAutoDisposeWithSystem()` closes that gap: the pool subscribes to
+process exit — and to a terminal Ctrl+C, since either can end a process — and releases its
+objects on the way out.
+
+```csharp
+var pool = new HayatePoolBuilder<MyResource>()
+    .WithAutoDisposeWithSystem()
+    .Build();   // released at process exit; still fine to dispose it yourself
+```
+
+Nothing on the borrow or return path takes part in it, and the subscription is removed on
+disposal, so a pool you dispose yourself never stays reachable from the process-wide hook.
+Hosted applications normally have a shutdown step of their own — prefer disposing there, or
+point the pool at that signal instead:
+
+```csharp
+var pool = new HayatePoolBuilder<MyResource>()
+    .WithShutdownHook(new MyHostLifetimeHook(lifetime))   // any IHayateShutdownHook
+    .WithAutoDisposeWithSystem()
+    .Build();
+```
+
 ### Pool-level circuit breaker (optional)
 
 Pools whose objects front a network dependency (database, message broker, remote service)

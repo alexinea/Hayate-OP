@@ -678,6 +678,38 @@ public class HayatePoolOptions
 
     #endregion
 
+    #region Lifetime
+
+    /// <summary>
+    /// Whether the pool disposes itself when the process is shutting down.<br />
+    /// Default value: <c>false</c> — disposal stays the owner's responsibility unless asked otherwise.
+    /// </summary>
+    /// <remarks>
+    /// Purpose: a pool whose owner is the process itself never gets its <c>Dispose</c> call, because
+    /// nothing user-facing runs at that point. Switching this on subscribes the pool to process exit (and
+    /// to a terminal Ctrl+C), so pooled objects are released on the way out — which matters when those
+    /// objects hold resources that outlive the process, such as file handles, connections or pooled
+    /// buffers pinned outside the GC's reach.<br />
+    /// Cost: nothing on the borrow or return path. The subscription is taken once at construction and
+    /// removed on disposal, so the only ongoing footprint is a single entry in the hook's handler list.<br />
+    /// Boundary: fixed at construction, like every other lifetime-affecting switch; <c>ReloadConfig</c>
+    /// neither subscribes nor unsubscribes. Disposal is idempotent, so it is safe whichever comes first —
+    /// the explicit call or the shutdown notification.<br />
+    /// Recommended range: leave off for short-lived pools whose owning scope can dispose them, which is
+    /// the normal case and keeps lifetime explicit. Turn on for long-lived process-wide pools whose
+    /// objects own unmanaged resources. Hosted applications that already have a shutdown step (an
+    /// application lifetime, a container) should dispose there instead, or supply that signal through
+    /// <c>WithShutdownHook</c>, and stay off the process-wide hook.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var options = new HayatePoolOptions { EnableAutoDisposeWithSystem = true };
+    /// </code>
+    /// </example>
+    public bool EnableAutoDisposeWithSystem { get; set; } = false;
+
+    #endregion
+
     #region Profiles
 
     /// <summary>
@@ -887,6 +919,9 @@ public class HayatePoolOptions
 
         // Warmup readiness
         options.WaitForWarmup = this.WaitForWarmup;
+
+        // Lifetime
+        options.EnableAutoDisposeWithSystem = this.EnableAutoDisposeWithSystem;
 
         return options;
     }

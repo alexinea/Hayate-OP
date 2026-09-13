@@ -36,6 +36,18 @@ Breaking changes are described in full — with migration guidance — in
   other option keeps its documented default. It is deliberately placed on `HayatePool` rather than on
   `HayatePoolBuilder<T>`: the builder constrains `T : class, new()`, which would demand a parameterless
   constructor even when a factory supplies creation.
+- **Process-shutdown auto-dispose** (S3): `HayatePoolOptions.EnableAutoDisposeWithSystem` (default
+  `false`), plus the `HayatePoolBuilder.WithAutoDisposeWithSystem()` shortcut. A pool whose owner is the
+  process never gets its `Dispose` call, so enabling this releases pooled objects — and the handles or
+  connections they hold — on the way out. Nothing changes on the borrow or return path: the subscription
+  is taken once at construction and removed on disposal, so a disposed pool never stays reachable from the
+  process-wide hook, and disposal stays idempotent whichever route it took. `HayateProcessShutdownHook`
+  subscribes to both `ProcessExit` and `Console.CancelKeyPress` (either can end a process), and each
+  handler is shielded so one failing disposal cannot abandon the pools behind it.
+- **Pluggable shutdown signal** (S3): `IHayateShutdownHook`, together with
+  `HayatePoolBuilder.WithShutdownHook(hook)`, replaces the process-wide hook with any host signal — an
+  application lifetime, a container, or a test double. Supplying a hook does not enable the feature on its
+  own; it is combined with `WithAutoDisposeWithSystem()`.
 
 ### Changed
 

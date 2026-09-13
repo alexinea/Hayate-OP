@@ -613,7 +613,7 @@
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.UntrackKey(`0)">
             <summary>When only a bare object reference (no wrapper) is available, scans all shards to remove the registry entry.</summary>
         </member>
-        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.#ctor(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0},DotNetCore.HayateOP.HayatePoolOptions,DotNetCore.HayateOP.Scaling.IHayateScalingStrategy,DotNetCore.HayateOP.Metrics.IHayateMetrics,DotNetCore.HayateOP.Logging.IHayateLogger,System.String)">
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.#ctor(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0},DotNetCore.HayateOP.HayatePoolOptions,DotNetCore.HayateOP.Scaling.IHayateScalingStrategy,DotNetCore.HayateOP.Metrics.IHayateMetrics,DotNetCore.HayateOP.Logging.IHayateLogger,System.String,DotNetCore.HayateOP.IHayateShutdownHook)">
             <exception cref="T:System.ArgumentNullException">Thrown if policy, options, scalingStrategy, metrics, logger, or poolName is null.</exception>
             <exception cref="T:System.InvalidOperationException">Thrown if the configured options are invalid.</exception>
         </member>
@@ -1958,6 +1958,52 @@
             </code>
             </example>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithAutoDisposeWithSystem(System.Boolean)">
+            <summary>
+            Disposes the pool automatically when the process is shutting down.
+            </summary>
+            <param name="enable">Whether to subscribe to process shutdown; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <remarks>
+            A pool whose owner is the process never gets its <c>Dispose</c> call, because nothing user-facing runs
+            at that point. Enabling this releases pooled objects -- and anything they hold, such as file handles or
+            connections -- on the way out. The subscription is taken at construction and removed on disposal, so
+            nothing accumulates and an explicitly disposed pool stays unreachable from the process-wide hook.<br />
+            Nothing else changes: disposal is idempotent, so a later explicit <c>Dispose</c> is still correct, and
+            neither the borrow nor the return path takes any part in it.<br />
+            In a hosted application prefer disposing from the host's own shutdown step, or point this at the host's
+            signal with <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithShutdownHook(DotNetCore.HayateOP.IHayateShutdownHook)"/>.
+            </remarks>
+            <example>
+            <code>
+            var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithAutoDisposeWithSystem()
+                .Build();
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithShutdownHook(DotNetCore.HayateOP.IHayateShutdownHook)">
+            <summary>
+            Supplies the shutdown signal used by auto-dispose, in place of the process-wide hook.
+            </summary>
+            <param name="hook">The hook to subscribe to.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="hook"/> is <c>null</c>.</exception>
+            <remarks>
+            Two reasons to supply one: hosts that own a richer shutdown signal (an application lifetime, a
+            container) can have the pool release itself at exactly that point instead of at raw process exit, and
+            tests can raise the signal without terminating anything. Supplying a hook does not enable the feature
+            on its own -- combine it with <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithAutoDisposeWithSystem(System.Boolean)"/>.
+            </remarks>
+            <example>
+            <code>
+            var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithShutdownHook(new MyHostLifetimeHook(lifetime))
+                .WithAutoDisposeWithSystem()
+                .Build();
+            </code>
+            </example>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLoggerFactory(DotNetCore.HayateOP.Logging.IHayateLoggerFactory)">
             <summary>
             Sets the pool-level logger factory. At build time, <see cref="M:DotNetCore.HayateOP.Logging.IHayateLoggerFactory.CreateLogger(System.String)"/>
@@ -2775,6 +2821,34 @@
             creation cost on the first request.
             </remarks>
         </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableAutoDisposeWithSystem">
+            <summary>
+            Whether the pool disposes itself when the process is shutting down.<br />
+            Default value: <c>false</c> — disposal stays the owner's responsibility unless asked otherwise.
+            </summary>
+            <remarks>
+            Purpose: a pool whose owner is the process itself never gets its <c>Dispose</c> call, because
+            nothing user-facing runs at that point. Switching this on subscribes the pool to process exit (and
+            to a terminal Ctrl+C), so pooled objects are released on the way out — which matters when those
+            objects hold resources that outlive the process, such as file handles, connections or pooled
+            buffers pinned outside the GC's reach.<br />
+            Cost: nothing on the borrow or return path. The subscription is taken once at construction and
+            removed on disposal, so the only ongoing footprint is a single entry in the hook's handler list.<br />
+            Boundary: fixed at construction, like every other lifetime-affecting switch; <c>ReloadConfig</c>
+            neither subscribes nor unsubscribes. Disposal is idempotent, so it is safe whichever comes first —
+            the explicit call or the shutdown notification.<br />
+            Recommended range: leave off for short-lived pools whose owning scope can dispose them, which is
+            the normal case and keeps lifetime explicit. Turn on for long-lived process-wide pools whose
+            objects own unmanaged resources. Hosted applications that already have a shutdown step (an
+            application lifetime, a container) should dispose there instead, or supply that signal through
+            <c>WithShutdownHook</c>, and stay off the process-wide hook.
+            </remarks>
+            <example>
+            <code>
+            var options = new HayatePoolOptions { EnableAutoDisposeWithSystem = true };
+            </code>
+            </example>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolOptions.UseLeanProfile">
             <summary>
             Applies the lean profile in one call: the wrapper-free fast path with every bookkeeping feature
@@ -3099,6 +3173,32 @@
             </code>
             </example>
         </member>
+        <member name="T:DotNetCore.HayateOP.HayatePoolShutdownRegistration">
+            <summary>
+            One pool's subscription to a <see cref="T:DotNetCore.HayateOP.IHayateShutdownHook"/>, held so the pool can detach itself on
+            disposal.
+            </summary>
+            <remarks>
+            Detaching is the point of this class. The process-wide hook lives as long as the process, so a
+            subscription that outlives its pool keeps that pool — and everything it holds — reachable for the rest
+            of the process lifetime. <see cref="M:DotNetCore.HayateOP.HayatePoolShutdownRegistration.Dispose"/> is therefore idempotent: whichever happens first, the
+            explicit disposal or the shutdown call, and however many of them happen, exactly one unregistration
+            takes place.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolShutdownRegistration.Register(DotNetCore.HayateOP.IHayateShutdownHook,System.Action)">
+            <summary>
+            Subscribes <paramref name="handler"/> to the supplied hook, falling back to the process-wide hook
+            when none is given.
+            </summary>
+            <param name="hook">The hook to subscribe to; when <c>null</c>, <see cref="T:DotNetCore.HayateOP.HayateProcessShutdownHook"/>
+            is used.</param>
+            <param name="handler">The shutdown callback.</param>
+            <returns>The subscription, which detaches on disposal.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolShutdownRegistration.Dispose">
+            <summary>Removes the subscription once, whatever route the disposal took.</summary>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.Timestamp">
             <summary>The UTC timestamp at which this snapshot was taken.</summary>
         </member>
@@ -3303,6 +3403,89 @@
             <summary>
             Custom delegate: the starting shard is decided by <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.CustomShardAffinity"/>.
             When the delegate returns null or an out-of-range value, the borrow falls back to sequential scanning (it does not throw, preserving borrow-path robustness).
+            </summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.IHayateShutdownHook">
+            <summary>
+            The event source behind process shutdown, so a pool can release itself when the process goes away.
+            </summary>
+            <remarks>
+            A pool normally relies on its owner calling its <c>Dispose</c> method; when the owner is
+            the process itself there is no such call, because nothing runs at that point. This interface supplies
+            the notification instead, and lets a host plug in its own shutdown signal — an application lifetime,
+            a container, or a test — rather than forcing the process-wide one.
+            </remarks>
+            <example>
+            <code>
+            pool = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithAutoDisposeWithSystem()
+                .Build();   // disposed automatically when the process exits
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateShutdownHook.Register(System.Action)">
+            <summary>
+            Subscribes <paramref name="handler"/> to the shutdown notification.
+            </summary>
+            <param name="handler">The callback invoked on shutdown; must not be <c>null</c>.</param>
+            <remarks>
+            Registering the same handler twice subscribes it once. Implementations must be safe to call from
+            several threads, because pools register and unregister as they are built and disposed.
+            </remarks>
+            <exception cref="T:System.ArgumentNullException"><paramref name="handler"/> is <c>null</c>.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateShutdownHook.Unregister(System.Action)">
+            <summary>
+            Removes <paramref name="handler"/> from the shutdown notification.
+            </summary>
+            <param name="handler">A handler previously passed to <see cref="M:DotNetCore.HayateOP.IHayateShutdownHook.Register(System.Action)"/>.</param>
+            <remarks>
+            Unregistering a handler that is not registered does nothing. Removing the subscription is what
+            stops the hook — which for the process-wide implementation lives as long as the process — from
+            keeping a disposed pool reachable.
+            </remarks>
+        </member>
+        <member name="T:DotNetCore.HayateOP.HayateProcessShutdownHook">
+            <summary>
+            The default <see cref="T:DotNetCore.HayateOP.IHayateShutdownHook"/>: process exit and a terminal Ctrl+C.
+            </summary>
+            <remarks>
+            Both notifications are subscribed, because either one can end a process: <c>ProcessExit</c> covers
+            ordinary termination, and <c>CancelKeyPress</c> covers a console application stopped from the
+            keyboard. Neither is cancelled by this hook — termination proceeds, the pool merely gets cleaned up on
+            the way out.<br />
+            One instance serves any number of handlers: each registration keeps its own adapter delegates, which
+            is what makes a later <see cref="M:DotNetCore.HayateOP.HayateProcessShutdownHook.Unregister(System.Action)"/> able to remove exactly one pool's subscription from the
+            process-wide events. Handlers run in subscription order, each shielded from the others, so one pool's
+            failed disposal cannot abandon the pools behind it — swallowing is the only option at this point,
+            because there is no caller left to observe the failure.<br />
+            Whatever work the handlers do shares the constraint of the events themselves: at process exit no
+            other thread is guaranteed to be idle, so disposal happens without any guarantee that no borrow is
+            still in flight.
+            </remarks>
+            <example>
+            <code>
+            var hook = new HayateProcessShutdownHook();
+            hook.Register(() =&gt; Console.WriteLine("exiting"));
+            </code>
+            </example>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateProcessShutdownHook.Subscription.ProcessExitHandler">
+            <summary>The adapted <c>ProcessExit</c> delegate — the identity needed to unsubscribe.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateProcessShutdownHook.Subscription.CancelKeyPressHandler">
+            <summary>The adapted <c>CancelKeyPress</c> delegate — the identity needed to unsubscribe.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateProcessShutdownHook.Register(System.Action)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateProcessShutdownHook.Unregister(System.Action)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateProcessShutdownHook.InvokeHandlers">
+            <summary>
+            Runs every subscribed handler, shielding each one so that a failure cannot stop handlers
+            subscribed after it.
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.IHayateObjectPool.GetStats">

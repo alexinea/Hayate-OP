@@ -188,6 +188,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     // timer-less state of a pool with every background concern off.
     private Timer? _breakerTimer;
 
+    // Process-shutdown auto-dispose (off by default). Held only while subscribed: a pool whose owner is the
+    // process itself can still release its objects when nothing else will, and the registration is dropped on
+    // disposal so the process-wide hook does not keep the pool reachable.
+    private readonly HayatePoolShutdownRegistration? _shutdownRegistration;
+
     /// <exception cref="ArgumentNullException">Thrown if policy, options, scalingStrategy, metrics, logger, or poolName is null.</exception>
     /// <exception cref="InvalidOperationException">Thrown if the configured options are invalid.</exception>
     internal HayatePoolBasic(
@@ -196,7 +201,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         IHayateScalingStrategy scalingStrategy,
         IHayateMetrics metrics,
         IHayateLogger logger,
-        string poolName)
+        string poolName,
+        IHayateShutdownHook? shutdownHook = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -291,6 +297,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         }
 
         StartBackgroundTasks();
+
+        // Process-shutdown auto-dispose is the last construction step, so a subscription only ever exists for
+        // a pool that is fully built and running.
+        if (_options.EnableAutoDisposeWithSystem)
+        {
+            _shutdownRegistration = HayatePoolShutdownRegistration.Register(shutdownHook, Dispose);
+        }
     }
 
     #region Initialized
@@ -2248,6 +2261,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     public void Dispose()
     {
         Clear();
+
+        // Detach the shutdown subscription first: whatever route disposal took -- an explicit call, or the
+        // process-exit notification itself -- the process-wide hook must not keep this pool reachable.
+        _shutdownRegistration?.Dispose();
+
         // Release the shared background timer and drop the reference so a disposed pool retains no timer handle.
         _backgroundTimer?.Dispose();
         _backgroundTimer = null;

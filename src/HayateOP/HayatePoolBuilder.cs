@@ -22,6 +22,10 @@ public class HayatePoolBuilder<T> where T : class, new()
     private IHayateLoggerFactory? _loggerFactory;
     private bool _loggerExplicitlySet;
 
+    // The shutdown signal used by auto-dispose. Null means "use the process-wide hook"; it is supplied to
+    // the pool once at construction and never re-read.
+    private IHayateShutdownHook? _shutdownHook;
+
     public HayatePoolBuilder()
     {
         _policy = new DefaultHayateObjectPolicy<T>();
@@ -1184,6 +1188,60 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
+    /// Disposes the pool automatically when the process is shutting down.
+    /// </summary>
+    /// <param name="enable">Whether to subscribe to process shutdown; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <remarks>
+    /// A pool whose owner is the process never gets its <c>Dispose</c> call, because nothing user-facing runs
+    /// at that point. Enabling this releases pooled objects -- and anything they hold, such as file handles or
+    /// connections -- on the way out. The subscription is taken at construction and removed on disposal, so
+    /// nothing accumulates and an explicitly disposed pool stays unreachable from the process-wide hook.<br />
+    /// Nothing else changes: disposal is idempotent, so a later explicit <c>Dispose</c> is still correct, and
+    /// neither the borrow nor the return path takes any part in it.<br />
+    /// In a hosted application prefer disposing from the host's own shutdown step, or point this at the host's
+    /// signal with <see cref="WithShutdownHook"/>.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithAutoDisposeWithSystem()
+    ///     .Build();
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithAutoDisposeWithSystem(bool enable = true)
+    {
+        _options.EnableAutoDisposeWithSystem = enable;
+        return this;
+    }
+
+    /// <summary>
+    /// Supplies the shutdown signal used by auto-dispose, in place of the process-wide hook.
+    /// </summary>
+    /// <param name="hook">The hook to subscribe to.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="hook"/> is <c>null</c>.</exception>
+    /// <remarks>
+    /// Two reasons to supply one: hosts that own a richer shutdown signal (an application lifetime, a
+    /// container) can have the pool release itself at exactly that point instead of at raw process exit, and
+    /// tests can raise the signal without terminating anything. Supplying a hook does not enable the feature
+    /// on its own -- combine it with <see cref="WithAutoDisposeWithSystem"/>.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithShutdownHook(new MyHostLifetimeHook(lifetime))
+    ///     .WithAutoDisposeWithSystem()
+    ///     .Build();
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithShutdownHook(IHayateShutdownHook hook)
+    {
+        _shutdownHook = hook ?? throw new ArgumentNullException(nameof(hook));
+        return this;
+    }
+
+    /// <summary>
     /// Sets the pool-level logger factory. At build time, <see cref="IHayateLoggerFactory.CreateLogger"/>
     /// is called once per pool name to create an independent logger for each pool.
     /// </summary>
@@ -1287,7 +1345,8 @@ public class HayatePoolBuilder<T> where T : class, new()
             _scalingStrategy,
             _metrics,
             logger,
-            _poolName);
+            _poolName,
+            _shutdownHook);
 
         logger.LogInformation("HayatePool [{PoolName}] initialized successfully", _poolName);
 
@@ -1383,7 +1442,8 @@ public class HayatePoolBuilder<T> where T : class, new()
             new ThresholdScalingStrategy(),
             EmptyHayateMetrics.Instance,
             logger,
-            _poolName);
+            _poolName,
+            _shutdownHook);
 
         logger.LogWarning(
             "HayatePool [{PoolName}] degraded to empty pool: Min=0/Max=0, all features off; " +
