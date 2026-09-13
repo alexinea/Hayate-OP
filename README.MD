@@ -106,6 +106,24 @@ pool.Release(obj);
 pool.Dispose();
 ```
 
+### One-call pools
+
+`HayatePool.Simple` builds a pool from nothing more than a size and a factory — no options object, no
+policy class. Objects keep every documented default, and the size you pass is the ceiling, not something
+to fill eagerly: nothing is created until the first borrow.
+
+```csharp
+using DotNetCore.HayateOP;
+
+using var pool = HayatePool.Simple<MyPooledObject>(32, () => new MyPooledObject());
+
+// Optional third argument: a callback run on every borrow (e.g. reopening a connection).
+using var connections = HayatePool.Simple<MyConnection>(8, () => new MyConnection(cs), c => c.Open());
+```
+
+When you need anything tuned — a minimum idle count, an interval, a single feature switch — reach for
+`HayatePoolBuilder<T>` instead; nothing set by the shortcut is hidden afterwards.
+
 ### Fluent Builder & Auto-Scaling
 
 Every option exposed by `HayatePoolOptions` has a matching `With*` method on `HayatePoolBuilder<T>`.
@@ -221,6 +239,30 @@ cancellation propagates `TaskCanceledException`):
 // wait at most 5 seconds, but abort early if the token fires
 var obj = await pool.AcquireAsync(TimeSpan.FromSeconds(5), cancellationToken);
 ```
+
+### Scoped borrows
+
+`AcquireScoped()` returns a lease that hands its object back when it is disposed, so a `using` block
+replaces the manual `try`/`finally` and cannot forget the return — including when the body throws:
+
+```csharp
+using DotNetCore.HayateOP;
+
+using (var lease = pool.AcquireScoped())
+{
+    lease.Value.Data = 42;
+}   // returned here, even if the body threw
+
+// Asynchronous equivalent
+using (var lease = await pool.AcquireScopeAsync(cancellationToken))
+{
+    lease.Value.Data = 42;
+}
+```
+
+The return happens exactly once: disposing a lease twice is a no-op, never a second return. One lease is
+allocated per borrow — the price of never dropping a borrowed object on an exception path — so this is a
+convenience for ordinary code rather than something to add to the hottest loop.
 
 ### With Dependency Injection
 

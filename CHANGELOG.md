@@ -22,6 +22,21 @@ Breaking changes are described in full — with migration guidance — in
   unchanged and no runtime behaviour differs (see `docs/BREAKING-CHANGES.md` §2.7). Builds are
   warning-free on net6.0–net10.0.
 
+- **Scoped borrows** (S2): `pool.AcquireScoped()` (plus a `TimeSpan` overload) and
+  `pool.AcquireScopeAsync(ct)` (plus a timeout overload) borrow an object together with a
+  `HayatePoolScope<T>` lease that returns it when disposed, so `using` replaces the manual
+  `try`/`finally` and the return cannot be forgotten — including when the body throws. Disposal is
+  exactly-once and idempotent: a second `Dispose` is a no-op instead of a duplicate return, confirmed
+  atomically so concurrent disposals collapse into one return. A failed borrow throws without producing
+  a lease, so there is nothing left unreturned. Implemented as **extension methods** on
+  `IHayateObjectPool<T>` — every existing implementation gets them without implementing anything, and
+  no existing call site needs to change. The cost is one allocation per borrow.
+- **One-call factory** (S2): `HayatePool.Simple<T>(poolSize, create, onGet)` builds a pool from a size
+  and a factory lambda, with no options object and no policy class. Nothing is pre-created, and every
+  other option keeps its documented default. It is deliberately placed on `HayatePool` rather than on
+  `HayatePoolBuilder<T>`: the builder constrains `T : class, new()`, which would demand a parameterless
+  constructor even when a factory supplies creation.
+
 ### Changed
 
 - Public API surface now carries accurate nullability annotations (non-breaking). See
