@@ -48,6 +48,17 @@ Breaking changes are described in full — with migration guidance — in
   `HayatePoolBuilder.WithShutdownHook(hook)`, replaces the process-wide hook with any host signal — an
   application lifetime, a container, or a test double. Supplying a hook does not enable the feature on its
   own; it is combined with `WithAutoDisposeWithSystem()`.
+- **Per-object metadata** (S4): `HayateObject<T>` now exposes `GetTimes` (cumulative borrow count, the
+  same value as `LeaseCount` under the name used by the pool libraries this type is compared against),
+  `LastGetThreadId` (managed thread id of the most recent borrow, `0` when never borrowed) and
+  `CreateTime` (creation instant derived from `CreatedAtTick`). The borrow path records the thread id
+  alongside the existing borrow timestamp and lease counter — one thread-id read and one field write
+  per borrow, no allocation and no synchronization, and costing the lean fast path nothing because it
+  stores the pooled value directly instead of a wrapper.
+- **Snapshot carries the borrowing thread** (S4): `HayatePoolObjectDetail.LastGetThreadId` mirrors the
+  wrapper field, so the per-object rows in `TakeSnapshot()` answer "which thread used this object last"
+  — whether a pool is handing objects across threads, or one thread is quietly monopolising a shard.
+  The id identifies the borrowing thread only, and the runtime recycles ids after a thread dies.
 
 ### Changed
 

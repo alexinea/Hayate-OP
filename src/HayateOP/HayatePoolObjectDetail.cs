@@ -16,6 +16,12 @@ public sealed class HayatePoolObjectDetail
     /// <summary>The cumulative number of times this object has been borrowed.</summary>
     public int LeaseCount { get; set; }
 
+    /// <summary>
+    /// The managed thread id of the most recent borrow, or <c>0</c> if the object has never been borrowed.
+    /// Mirrors <see cref="HayateObject{T}.LastGetThreadId"/>.
+    /// </summary>
+    public int LastGetThreadId { get; set; }
+
     /// <summary>The wall-clock timestamp at creation time (same basis as <c>DateTimeOffset.UtcNow.Ticks</c>).</summary>
     public long CreatedAtTick { get; set; }
 

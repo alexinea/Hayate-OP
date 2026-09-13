@@ -515,6 +515,65 @@
             validation cannot claim a borrowed object -- a plain increment suffices, no Interlocked needed).
             </summary>
         </member>
+        <member name="P:DotNetCore.HayateOP.HayateObject`1.GetTimes">
+            <summary>
+            How many times this object has been borrowed, in total.
+            </summary>
+            <remarks>
+            The pooled counterpart of the borrow counter: it is a read-only view of <see cref="P:DotNetCore.HayateOP.HayateObject`1.LeaseCount"/>,
+            kept under the name used by the pool libraries this class is compared against, so an object's
+            rotation can be read without knowing which of the two names to reach for.<br />
+            Incremented on the borrow path, where the wrapper is exclusively owned by the borrowing thread, so
+            no atomic operation is involved. Reset when a wrapper is recycled for a new object — a reused
+            wrapper starts counting its new object's leases from zero rather than inheriting the old ones.<br />
+            Objects handed out by the lean fast path carry no metadata at all, because that path stores the
+            pooled value directly instead of wrapping it.
+            </remarks>
+            <example>
+            <code>
+            if (wrapped.GetTimes &gt; 1000) { /* this object has done a lot of rotations */ }
+            </code>
+            </example>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateObject`1.LastGetThreadId">
+            <summary>
+            The managed thread id of the most recent borrow, or <c>0</c> for an object that has never been
+            borrowed.
+            </summary>
+            <remarks>
+            Recorded on every borrow alongside <see cref="P:DotNetCore.HayateOP.HayateObject`1.LastBorrowedAt"/>, which makes it the cheapest way to
+            see which thread last used an object: whether a pool is handing objects across threads (so state
+            left on an object is visible elsewhere), or whether one thread is quietly monopolising a shard.<br />
+            This is an id, not a handle: it identifies the thread that borrowed, and says nothing about what
+            that thread did. Ids are recycled by the runtime after a thread dies, so treat an id as stable only
+            while the thread that owns it is alive.<br />
+            Written unconditionally on the borrow path, like the borrow timestamp, and reset when a wrapper is
+            recycled. Cost is a single thread-id read plus a field write per borrow — no allocation and no
+            synchronization — and the lean fast path pays nothing because it has no wrappers.
+            </remarks>
+            <example>
+            <code>
+            Console.WriteLine($"last used by thread {wrapped.LastGetThreadId}");
+            </code>
+            </example>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateObject`1.CreateTime">
+            <summary>
+            When this object was created, as a UTC wall-clock instant.
+            </summary>
+            <remarks>
+            Derived from <see cref="P:DotNetCore.HayateOP.HayateObject`1.CreatedAtTick"/>, the timestamp captured at creation. It is for reading and
+            reporting — logs and snapshots — while <see cref="P:DotNetCore.HayateOP.HayateObject`1.CreatedAt"/> is the one to measure with, being a
+            monotonic Stopwatch timestamp that a clock adjustment cannot move backwards.<br />
+            Reset when a wrapper is recycled, so a reused wrapper reports the creation time of the object it now
+            holds, not of the one it wrapped before.
+            </remarks>
+            <example>
+            <code>
+            Console.WriteLine(wrapped.CreateTime);
+            </code>
+            </example>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayateObject`1.OwnerPoolName">
             <summary>
             The logical name of the owning pool (written by the pool at creation, immutable for the object's
@@ -2199,6 +2258,12 @@
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolObjectDetail.LeaseCount">
             <summary>The cumulative number of times this object has been borrowed.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolObjectDetail.LastGetThreadId">
+            <summary>
+            The managed thread id of the most recent borrow, or <c>0</c> if the object has never been borrowed.
+            Mirrors <see cref="P:DotNetCore.HayateOP.HayateObject`1.LastGetThreadId"/>.
+            </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolObjectDetail.CreatedAtTick">
             <summary>The wall-clock timestamp at creation time (same basis as <c>DateTimeOffset.UtcNow.Ticks</c>).</summary>

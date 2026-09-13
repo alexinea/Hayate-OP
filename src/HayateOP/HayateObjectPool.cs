@@ -630,6 +630,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                     // Cumulative borrow count. At the moment of borrow the wrapper is exclusively owned by this thread (TryTake already unlinked and claimed it,
                     // and eviction/validation cannot claim a Borrowed object), so a plain increment suffices — no Interlocked needed.
+                    // Which thread took this object (wrapper metadata, see HayateObject<T>.LastGetThreadId).
+                    w.LastGetThreadId = Environment.CurrentManagedThreadId;
                     w.LeaseCount++;
 
                     // Generational promotion, only when generational optimization is enabled
@@ -816,6 +818,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     w.LastBorrowedAt = Stopwatch.GetTimestamp();
 
                     // Cumulative borrow count (TryTake already unlinked and claimed, so the wrapper is exclusively owned by this thread now)
+                    // Which thread took this object (wrapper metadata, see HayateObject<T>.LastGetThreadId).
+                    w.LastGetThreadId = Environment.CurrentManagedThreadId;
                     w.LeaseCount++;
 
                     Interlocked.Increment(ref _totalAcquired);
@@ -1576,6 +1580,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         // The borrow timestamp is recorded unconditionally (same as the Acquire main path, keeping leak recheck usable)
         w.LastBorrowedAt = Stopwatch.GetTimestamp();
         // Cumulative borrow count (a freshly created object is borrowed by definition; the wrapper is exclusively owned by this thread now)
+        // Which thread took this object (wrapper metadata, see HayateObject<T>.LastGetThreadId).
+        w.LastGetThreadId = Environment.CurrentManagedThreadId;
         w.LeaseCount++;
         _policy.OnAcquire(w.Value);
         Interlocked.Increment(ref _totalAcquired);
@@ -2121,6 +2127,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     ShardIndex = w.ShardIndex,
                     IsBorrowed = w.IsBorrowed,
                     LeaseCount = w.LeaseCount,
+                    LastGetThreadId = w.LastGetThreadId,
                     CreatedAtTick = w.CreatedAtTick,
                     LeaseTimeMs = w.LeaseTimeMs,
                     Generation = w.Generation,

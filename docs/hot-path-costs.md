@@ -73,6 +73,13 @@ Two caveats that matter when reading any absolute number here:
 | `RejectPolicy` | Consulted only after a miss | Behavioural, not a cost knob: `Block` / `BlockTimeout` wake on a ~100 ms slice, `CreateOnDemand` turns a miss into a synchronous creation |
 | `DefaultAcquireTimeout` | No per-operation cost | Evaluated on the timeout path only |
 
+Per-object metadata is not in the table because it is not a switch. The borrow timestamp,
+`LeaseCount` and `LastGetThreadId` are written unconditionally on every borrow, together
+costing one `Environment.CurrentManagedThreadId` read, one `Stopwatch.GetTimestamp()` and
+three field writes — no allocation and no synchronization, because at that instant the
+wrapper is owned exclusively by the borrowing thread. The lean fast path pays none of it:
+it stores the pooled value directly instead of a wrapper.
+
 ### Return path
 
 | Switch | Effect on the return path | Source of the cost |

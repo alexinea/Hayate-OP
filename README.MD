@@ -566,6 +566,36 @@ foreach (var leakTrace in snapshot.LeakTraces)
 }
 ```
 
+### Inspect per-object metadata
+
+A snapshot carries one row per live object, idle and borrowed alike. Each row is a point-in-time
+copy for diagnostics — reading it does not borrow anything, and the rows carry no consistency
+guarantee between themselves.
+
+```csharp
+var snapshot = pool.TakeSnapshot();
+
+foreach (var detail in snapshot.ObjectDetails)
+{
+    // How many times this object has been handed out, and which thread took it last (0 = never borrowed).
+    Console.WriteLine($"leases={detail.LeaseCount} lastThread={detail.LastGetThreadId}");
+
+    // When the object was created. The field is raw ticks; wrap it to get an instant.
+    var created = new DateTimeOffset(detail.CreatedAtTick, TimeSpan.Zero);
+    Console.WriteLine($"created={created:O} borrowed={detail.IsBorrowed}");
+
+    // The most recent lease duration, and the shard that owns the object.
+    Console.WriteLine($"lastLeaseMs={detail.LeaseTimeMs} shard={detail.ShardIndex}");
+}
+```
+
+`LastGetThreadId` is an id, not a handle: it tells you which thread borrowed the object last,
+which is what you want when checking whether a pool is handing objects across threads (and so
+whether state left on an object is visible elsewhere), or whether one thread is monopolising a
+shard. The runtime recycles ids after a thread dies, so treat one as stable only while its
+thread is alive. Objects served by the lean fast path carry no metadata at all — that path
+stores the pooled value directly instead of wrapping it.
+
 ### Reload configuration at runtime
 
 ```csharp
