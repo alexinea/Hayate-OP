@@ -59,6 +59,21 @@ Breaking changes are described in full — with migration guidance — in
   wrapper field, so the per-object rows in `TakeSnapshot()` answer "which thread used this object last"
   — whether a pool is handing objects across threads, or one thread is quietly monopolising a shard.
   The id identifies the borrowing thread only, and the runtime recycles ids after a thread dies.
+- **Keyed pooling** (O-A): `ParameterizedHayatePool<TKey, TValue>` gives every key an ordinary pool of its
+  own, so objects are only ever reused by the key that created them and capacity, eviction, validation and
+  the circuit breaker are all per key — one tenant exhausting its connections cannot slow the next.
+  `GetObject(key)` / `GetObjectAsync(key)` borrow, `ReturnObject(key, value)` returns, and
+  `GetPool(key)` hands back the sub-pool itself for its statistics, snapshot or eviction. Sub-pools are
+  created on first use, registered in the pool registry under `Name[key]` so management endpoints and
+  metrics can address a single key, and disposed with the keyed pool; `KeysInPoolCount` reports how many
+  exist and `TryRemove(key)` retires one, which is how an open-ended key space stays bounded.
+- **Two defaults a sub-pool cannot inherit** (O-A): the convenience constructor sizes shards to the per-key
+  size (`min(default, maxSizePerKey)`), because sharding divides capacity across shards and a size of two
+  split four ways leaves shards that can hold nothing; and it creates on demand
+  (`RejectPolicy.CreateOnDemand`), because a sub-pool starts empty and holds nothing in reserve, so with the
+  default wait-then-timeout policy every borrow past the first would stall until the background scaler
+  caught up. Both are overridable through the `configure` callback, and the constructor that takes a
+  sub-pool factory changes nothing at all.
 
 ### Changed
 

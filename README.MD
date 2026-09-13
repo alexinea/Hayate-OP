@@ -264,6 +264,35 @@ The return happens exactly once: disposing a lease twice is a no-op, never a sec
 allocated per borrow — the price of never dropping a borrowed object on an exception path — so this is a
 convenience for ordinary code rather than something to add to the hottest loop.
 
+### Keyed pools
+
+When objects are not interchangeable — a connection per tenant, a client per endpoint — give every key
+its own pool with `ParameterizedHayatePool<TKey, TValue>`:
+
+```csharp
+using DotNetCore.HayateOP;
+
+var pools = new ParameterizedHayatePool<string, Connection>(
+    connectionString => new Connection(connectionString),
+    maxSizePerKey: 8);
+
+var connection = pools.GetObject("tenant-a");
+try { connection.Query("..."); }
+finally { pools.ReturnObject("tenant-a", connection); }
+```
+
+Each key gets an ordinary pool of its own, so objects are only ever reused by the key that created them,
+and capacity, eviction, validation and the circuit breaker are all per key: one tenant exhausting its
+eight connections does not slow down the next. Sub-pools are created on first use and disposed with the
+keyed pool; `KeysInPoolCount` tells you how many exist, and `TryRemove(key)` retires one — worth knowing
+if the key space is open-ended, because keys otherwise accumulate.
+
+`getObject` needs the key to return an object, because a keyed pool cannot tell which sub-pool owns one:
+the same object may exist under two keys, and searching every sub-pool would make returning cost more
+than borrowing. `GetPool(key)` hands back the sub-pool itself when you want its statistics, a snapshot or
+its own eviction, and every sub-pool is registered in the pool registry under `Name[key]`, so management
+endpoints and metrics can address a single key.
+
 ### With Dependency Injection
 
 ```csharp
