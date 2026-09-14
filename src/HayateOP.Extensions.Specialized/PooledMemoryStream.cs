@@ -101,8 +101,51 @@ public class PooledMemoryStream : MemoryStream
     /// </summary>
     public override string ToString() => $"{nameof(Position)}: {Position}, {nameof(Length)}: {Length}";
 
+    /// <summary>
+    /// Copies the stream's full content to a new byte array and returns the stream to its pool in one
+    /// call — CPL's <c>ToByteArrayReturn</c>: the conversion and the return are one operation, so the
+    /// borrow ends exactly where the bytes are produced.
+    /// </summary>
+    /// <returns>A new array with the stream's complete content, regardless of the current position.</returns>
+    /// <remarks>
+    /// The return is atomic with the conversion: it runs even when the conversion throws, so a failing
+    /// path can never leak the stream out of the pool. Like <see cref="Dispose"/>, the return happens
+    /// exactly once per borrow — a second call on an already-returned stream is a no-op return that
+    /// observes whatever the next borrower may have written, so treat the call as the end of the borrow,
+    /// exactly as the end of a <c>using</c> block.<br />
+    /// On a standalone stream (never handed out by a pool) the conversion runs and the return step is
+    /// the ordinary close.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var stream = MemoryStreamPool.Instance.GetObject();
+    /// stream.Write(payload, 0, payload.Length);
+    /// byte[] bytes = stream.ToByteArrayReturn();   // stream returned to the pool here
+    /// </code>
+    /// </example>
+    public byte[] ToByteArrayReturn()
+    {
+        try
+        {
+            return ToArray();
+        }
+        finally
+        {
+            // The conversion owns the borrow's outcome: whether it produced the bytes or threw, the
+            // stream goes back. Dispose is the exactly-once return path, identical to a using block.
+            Dispose();
+        }
+    }
+
     /// <summary>Registers the owning pool; called by the pool's policy at creation time.</summary>
     internal void BindOwner(IHayateObjectPool<PooledMemoryStream> owner) => _owner = owner;
+
+    /// <summary>
+    /// The pool this instance currently belongs to (its lending engine pool, or the wrapper pool until
+    /// the policy binds the engine); <c>null</c> for standalone or pool-destroyed instances. The pool
+    /// routes a manual <c>Release</c> through it so a borrowed stream returns to the tier it came from.
+    /// </summary>
+    internal IHayateObjectPool<PooledMemoryStream>? HomePool => _owner;
 
     /// <summary>Marks the stream as borrowed so the next dispose performs the return.</summary>
     internal void OnBorrowed() => Interlocked.Exchange(ref _idle, 0);

@@ -6,22 +6,46 @@ namespace DotNetCore.HayateOP.Specialized;
 /// The policy behind <see cref="MemoryStreamPool"/>: creates streams at the configured minimum capacity,
 /// guards the capacity window on the way back, and resets returned streams to empty.
 /// </summary>
+/// <remarks>
+/// Each capacity tier the pool runs gets its own policy instance. The base tier uses
+/// <c>tierCapacity = 0</c> and follows the pool's live minimum; a declared tier pins the capacity the
+/// tier serves, so the tier creates streams at that size and accepts them back even when the tier
+/// exceeds the pool's global maximum — the borrower declared the need, and parking the buffer is what
+/// keeps a mixed-size workload from destroying and recreating oversized streams on every use.
+/// </remarks>
 internal sealed class MemoryStreamPoolPolicy : IHayateObjectPolicy<PooledMemoryStream>
 {
     private readonly MemoryStreamPool _owner;
 
-    public MemoryStreamPoolPolicy(MemoryStreamPool owner)
+    // The capacity this tier creates streams at; 0 for the base tier, which follows the pool's live
+    // minimum instead. Never negative.
+    private readonly int _tierCapacity;
+
+    // The engine pool this policy creates objects for; attached right after Build() returns, before the
+    // tier is reachable for any acquire (see StringBuilderPoolPolicy for the full rationale).
+    private IHayateObjectPool<PooledMemoryStream>? _engine;
+
+    public MemoryStreamPoolPolicy(MemoryStreamPool owner, int tierCapacity = 0)
     {
         _owner = owner;
+        _tierCapacity = tierCapacity;
     }
+
+    /// <summary>Binds the engine pool created items are returned to; called right after the engine builds.</summary>
+    internal void AttachEngine(IHayateObjectPool<PooledMemoryStream> engine) => _engine = engine;
 
     public PooledMemoryStream Create()
     {
         // Pre-sized through the Capacity setter: the parameterless constructor is what the engine's
-        // builder constraint demands, the reservation is what P89OP's factory does.
+        // builder constraint demands, the reservation is what P89OP's factory does. A declared tier
+        // reserves its own capacity (which also covers a minimum that was raised past the tier after it
+        // was created); the base tier reserves the live minimum.
         var stream = new PooledMemoryStream();
-        stream.Capacity = _owner.MinimumMemoryStreamCapacity;
-        stream.BindOwner(_owner);
+        var capacity = _tierCapacity > _owner.MinimumMemoryStreamCapacity
+            ? _tierCapacity
+            : _owner.MinimumMemoryStreamCapacity;
+        stream.Capacity = capacity;
+        stream.BindOwner(_engine ?? _owner);
         return stream;
     }
 
@@ -38,9 +62,13 @@ internal sealed class MemoryStreamPoolPolicy : IHayateObjectPolicy<PooledMemoryS
 
         // The capacity window: streams that grew past the maximum (or sit below the minimum after a
         // configuration change) are destroyed on return instead of being parked with the wrong buffer.
+        // A declared tier accepts streams up to its own declared size even when that is above the
+        // global maximum, for the same reason the StringBuilder tier does.
+        var maximum = _tierCapacity > _owner.MaximumMemoryStreamCapacity
+            ? _tierCapacity
+            : _owner.MaximumMemoryStreamCapacity;
         var capacity = item.Capacity;
-        return capacity >= _owner.MinimumMemoryStreamCapacity
-            && capacity <= _owner.MaximumMemoryStreamCapacity;
+        return capacity >= _owner.MinimumMemoryStreamCapacity && capacity <= maximum;
     }
 
 

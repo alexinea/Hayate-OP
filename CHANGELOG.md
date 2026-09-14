@@ -10,6 +10,48 @@ Breaking changes are described in full — with migration guidance — in
 
 ## [Unreleased]
 
+### Added
+
+- **Declared-capacity borrows with tier routing** (Z-C-A, folding the 2.7 C-A convenience batch into
+  the specialized pools with ZString semantics): `StringBuilderPool.GetObject(int minCapacity)` /
+  `Acquire(int minCapacity)` (and the `MemoryStreamPool` equivalents) let the borrower declare how much
+  the object must hold. Requests within the creation capacity are served by the base tier as before;
+  anything larger routes to a lazily created internal capacity tier — one engine pool per bucket of the
+  exponential ladder anchored at the minimum, `ArrayPool`-style — so repeated borrows of the same size
+  reuse a parked builder instead of paying the grow ladder every time. A tier accepts its declared size
+  back even when that exceeds `MaximumStringBuilderCapacity` / `MaximumMemoryStreamCapacity`: the buffer
+  exists by declaration rather than by accidental growth, which is what stops a mixed-size workload
+  churning through grow → destroy → rebuild. Only growth beyond the declared envelope (and the global
+  maximum) destroys an object. `Clear`, `Dispose`, `Evict`, `CheckAvailable`, `SetAvailable` /
+  `SetUnavailable`, `ReloadConfig` and the stats/snapshot aggregation cover the tier engines, raising
+  the minimum capacity retires the tiers with the parked builders (P89OP setter parity), and a manual
+  `Release` routes the object back to the tier it came from. Each tier retains at most `maxPoolSize`
+  objects, the same budget as the base pool.
+- **Seeded borrows fill robustly** (Z-C-A): `GetObject(string)` now clears the builder before appending
+  the seed — CPL's append-only fill relied on every return path clearing, which breaks silently the day
+  one path forgets — and a seed longer than the creation capacity borrows through a capacity tier, so
+  the builder already fits the seed instead of growing to it. A failed fill disposes the builder back
+  to the pool instead of leaking it.
+- **Convert-and-return** (Z-C-A, CPL's `ToStringReturn` / `ToByteArrayReturn`):
+  `PooledStringBuilder.ToStringReturn()` and `PooledMemoryStream.ToByteArrayReturn()` produce the
+  result and end the borrow in one call. The return is atomic with the conversion — it runs even when
+  the conversion throws, so a failing path can never leak the object — and stays exactly-once per
+  borrow, like `Dispose`.
+- **Generic no-`params` formatting helpers** (Z-C-A, ZString's signature surface):
+  `StringBuilderPool.Format<T1..T8>` / `Concat<T2..T8>` / `Join<T>` (char and string separators over
+  `IEnumerable<T>`) borrow one builder from the shared pool, write the arguments through their concrete
+  types and return the finished string — no `object[]`, no boxing of the arguments, one borrow/return
+  cycle whose return is atomic with the conversion. The format parser implements the common
+  `string.Format` grammar (`{{`/`}}` escapes, `{index}`, `{index,alignment}`, `{index,alignment:spec}`)
+  with `string.Format`-matching current-culture semantics and the same `FormatException` behaviour for
+  malformed holes and out-of-range indexes; values with a format specifier format through
+  `IFormattable`. Allocation benchmarks live in `tests/HayateOP.Benchmarks`:
+  `SpecializedStringBuilderTierBenchmarks` quantifies the tiering benefit — on net10 a 300K-character
+  build that the default borrow cannot retain costs 1,229,426 B per operation, and the declared borrow
+  brings it to 614,843 B (the final string alone), halving both allocation and time — while
+  `SpecializedStringBuilderFormatBenchmarks` separates the helpers' own writes (no `object[]`, no
+  boxing) from the engine's fixed borrow-cycle bookkeeping floor.
+
 ## [2.7.0] - 2026-09-14
 
 Usability and ecosystem release, no breaking API change. Highlights: nullable

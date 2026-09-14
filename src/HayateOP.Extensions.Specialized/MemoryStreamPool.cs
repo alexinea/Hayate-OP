@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using DotNetCore.HayateOP;
@@ -20,13 +22,23 @@ namespace DotNetCore.HayateOP.Specialized;
 /// <see cref="MaximumMemoryStreamCapacity"/> window is destroyed instead of being parked, so buffers
 /// never linger larger than the configuration allows. Returned streams are reset to empty (position and
 /// length zero) before the next borrow.<br />
+/// <see cref="GetObject(int)"/> lets the borrower declare the capacity it needs up front. Declared sizes
+/// above the minimum are served by lazily created <b>capacity tiers</b> — one internal engine pool per
+/// bucket on the exponential ladder anchored at the minimum — so a mixed-size workload stops paying the
+/// grow ladder on every borrow and stops churning streams through grow-past-the-maximum-and-destroy:
+/// a tier accepts its declared size back even when that is above <see cref="MaximumMemoryStreamCapacity"/>,
+/// because the buffer exists by declaration rather than by accidental growth. Each tier holds up to the
+/// pool's stream budget itself, so every declared size retains at most <c>maxPoolSize</c> streams.<br />
 /// Tightening the window clears the pool, matching P89OP: raising the minimum or lowering the maximum
-/// destroys every parked stream, because none of them can pass the new window. Widening keeps them.
+/// destroys every parked stream, because none of them can pass the new window; raising the minimum also
+/// retires the existing tiers so everything is recreated at the new size.
 /// </remarks>
 /// <example>
 /// <code>
 /// using var stream = MemoryStreamPool.Instance.GetObject();
 /// stream.Write(payload, 0, payload.Length);   // returned to the pool at the end of the block
+///
+/// using var big = MemoryStreamPool.Instance.GetObject(200_000);   // pre-sized, no grow ladder
 /// </code>
 /// </example>
 public sealed class MemoryStreamPool : IHayateObjectPool<PooledMemoryStream>
@@ -54,6 +66,8 @@ public sealed class MemoryStreamPool : IHayateObjectPool<PooledMemoryStream>
 
     private readonly IHayateObjectPool<PooledMemoryStream> _pool;
     private readonly MemoryStreamPoolPolicy _policy;
+    private readonly ConcurrentDictionary<int, IHayateObjectPool<PooledMemoryStream>> _capacityTiers = new();
+    private readonly int _maximumPoolSize;
     private int _minimumCapacity = DefaultMinimumMemoryStreamCapacity;
     private int _maximumCapacity = DefaultMaximumMemoryStreamCapacity;
 
@@ -68,7 +82,7 @@ public sealed class MemoryStreamPool : IHayateObjectPool<PooledMemoryStream>
     /// <summary>
     /// Builds a pool holding at most <paramref name="maxPoolSize"/> streams.
     /// </summary>
-    /// <param name="maxPoolSize">The maximum number of streams the pool keeps and lends out.</param>
+    /// <param name="maxPoolSize">The maximum number of streams each tier keeps and lends out.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxPoolSize"/> is not greater than
     /// zero.</exception>
     public MemoryStreamPool(int maxPoolSize)
@@ -80,6 +94,7 @@ public sealed class MemoryStreamPool : IHayateObjectPool<PooledMemoryStream>
         }
 
         _policy = new MemoryStreamPoolPolicy(this);
+        _maximumPoolSize = maxPoolSize;
 
         _pool = new HayatePoolBuilder<PooledMemoryStream>()
             .WithPoolName(nameof(PooledMemoryStream))
@@ -105,6 +120,10 @@ public sealed class MemoryStreamPool : IHayateObjectPool<PooledMemoryStream>
             .WithValidateOnReturn(true)
             .WithValidateWhileIdle(false)
             .Build();
+
+        // Items bind their real engine from now on; nothing could have been borrowed before the
+        // constructor returned.
+        _policy.AttachEngine(_pool);
     }
 
     /// <summary>
@@ -112,8 +131,8 @@ public sealed class MemoryStreamPool : IHayateObjectPool<PooledMemoryStream>
     /// may have to be accepted back into the pool. Defaults to <see cref="DefaultMinimumMemoryStreamCapacity"/>.
     /// </summary>
     /// <remarks>
-    /// Raising this value clears the pool: parked streams created under the old minimum cannot pass the
-    /// new one.
+    /// Raising this value clears the pool and retires the existing capacity tiers: parked streams created
+    /// under the old minimum cannot pass the new one, and the tier ladder is anchored at the minimum.
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">The assigned value is not greater than zero.</exception>
     public int MinimumMemoryStreamCapacity
@@ -132,6 +151,12 @@ public sealed class MemoryStreamPool : IHayateObjectPool<PooledMemoryStream>
             if (oldValue < value)
             {
                 _pool.Clear();
+                foreach (var tier in _capacityTiers.Values)
+                {
+                    tier.Clear();
+                }
+
+                _capacityTiers.Clear();
             }
         }
     }
@@ -142,6 +167,9 @@ public sealed class MemoryStreamPool : IHayateObjectPool<PooledMemoryStream>
     /// </summary>
     /// <remarks>
     /// Lowering this value clears the pool: parked streams above the new maximum cannot pass it.
+    /// Streams borrowed through <see cref="GetObject(int)"/> remain covered by their tier's declared
+    /// size, which parks them even above this maximum — declared capacity is what keeps a mixed-size
+    /// workload from churning.
     /// </remarks>
     public int MaximumMemoryStreamCapacity
     {
@@ -152,7 +180,7 @@ public sealed class MemoryStreamPool : IHayateObjectPool<PooledMemoryStream>
             _maximumCapacity = value;
             if (oldValue > value)
             {
-                _pool.Clear();
+                Clear();
             }
         }
     }
@@ -163,6 +191,26 @@ public sealed class MemoryStreamPool : IHayateObjectPool<PooledMemoryStream>
     public PooledMemoryStream GetObject() => Acquire();
 
     /// <summary>
+    /// Acquires a stream able to hold at least <paramref name="minCapacity"/> bytes without growing,
+    /// reserving the buffer up front so the borrow skips the grow ladder entirely.
+    /// </summary>
+    /// <param name="minCapacity">The number of bytes the borrowed stream's buffer must hold without
+    /// growth; must be greater than zero.</param>
+    /// <returns>A pooled stream whose capacity is at least <paramref name="minCapacity"/>.</returns>
+    /// <remarks>
+    /// Requests within <see cref="MinimumMemoryStreamCapacity"/> are served by the base tier exactly
+    /// like <see cref="GetObject()"/>. Anything larger routes to a lazily created capacity tier — the
+    /// smallest bucket of the exponential ladder anchored at the minimum that covers the request — so
+    /// repeated borrows of the same size reuse a parked stream instead of growing one from scratch
+    /// every time, and a tier stream is parked on return even when its capacity exceeds
+    /// <see cref="MaximumMemoryStreamCapacity"/>. Only growth beyond the declared size (and the global
+    /// maximum) destroys a stream, because nothing declared that envelope.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="minCapacity"/> is not greater than
+    /// zero.</exception>
+    public PooledMemoryStream GetObject(int minCapacity) => Acquire(minCapacity);
+
+    /// <summary>
     /// Acquires a stream from the pool, blocking up to the given timeout. Synonym of
     /// <see cref="Acquire(TimeSpan)"/>, named as P89OP names it.
     /// </summary>
@@ -170,6 +218,34 @@ public sealed class MemoryStreamPool : IHayateObjectPool<PooledMemoryStream>
 
     /// <inheritdoc />
     public PooledMemoryStream Acquire() => _pool.Acquire();
+
+    /// <summary>
+    /// Acquires a stream able to hold at least <paramref name="minCapacity"/> bytes without growing,
+    /// routing through <see cref="GetObject(int)"/>'s capacity tiers.
+    /// </summary>
+    /// <param name="minCapacity">The number of bytes the borrowed stream's buffer must hold without
+    /// growth; must be greater than zero.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="minCapacity"/> is not greater than
+    /// zero.</exception>
+    public PooledMemoryStream Acquire(int minCapacity)
+    {
+        if (minCapacity <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minCapacity), minCapacity,
+                "The requested capacity must be greater than zero.");
+        }
+
+        // The base tier covers everything up to the creation capacity — its streams are never created
+        // below the live minimum — so only larger requests need a declared tier.
+        if (minCapacity <= _minimumCapacity)
+        {
+            return _pool.Acquire();
+        }
+
+        var bucket = PoolCapacityTiers.Bucket(_minimumCapacity, minCapacity);
+        var tier = _capacityTiers.GetOrAdd(bucket, static (capacity, self) => self.CreateTierPool(capacity), this);
+        return tier.Acquire();
+    }
 
     /// <inheritdoc />
     public PooledMemoryStream Acquire(TimeSpan timeout) => _pool.Acquire(timeout);
@@ -182,36 +258,151 @@ public sealed class MemoryStreamPool : IHayateObjectPool<PooledMemoryStream>
     public Task<PooledMemoryStream> AcquireAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
         => _pool.AcquireAsync(timeout, cancellationToken);
 
+    /// <summary>
+    /// Returns a stream to the pool it came from. A stream borrowed through a capacity tier returns to
+    /// that tier, so the declared size keeps its streams; standalone or already-destroyed instances
+    /// fall back to the base pool, as before the tiers existed.
+    /// </summary>
     /// <inheritdoc />
-    public void Release(PooledMemoryStream item) => _pool.Release(item);
+    public void Release(PooledMemoryStream item)
+    {
+        var home = item.HomePool;
+        if (home is not null)
+        {
+            home.Release(item);
+            return;
+        }
+
+        _pool.Release(item);
+    }
 
     /// <inheritdoc />
-    public HayatePoolStats GetStats() => _pool.GetStats();
+    public HayatePoolStats GetStats()
+        => SpecializedPoolAggregation.AggregateStats(_pool, TierEngines());
 
     /// <inheritdoc />
-    public HayatePoolSnapshot TakeSnapshot() => _pool.TakeSnapshot();
+    public HayatePoolSnapshot TakeSnapshot()
+        => SpecializedPoolAggregation.AggregateSnapshot(_pool, TierEngines());
 
     /// <inheritdoc />
-    public void ReloadConfig(Action<HayatePoolOptions> configure) => _pool.ReloadConfig(configure);
+    public void ReloadConfig(Action<HayatePoolOptions> configure)
+    {
+        _pool.ReloadConfig(configure);
+        foreach (var tier in _capacityTiers.Values)
+        {
+            tier.ReloadConfig(configure);
+        }
+    }
 
+    /// <summary>
+    /// Destroys every stream currently held by the pool, including the ones parked in its capacity
+    /// tiers. The tier engines stay registered; the next declared borrow recreates streams at the same
+    /// declared sizes.
+    /// </summary>
     /// <inheritdoc />
-    public void Clear() => _pool.Clear();
+    public void Clear()
+    {
+        _pool.Clear();
+        foreach (var tier in _capacityTiers.Values)
+        {
+            tier.Clear();
+        }
+    }
 
     /// <inheritdoc />
     public HayatePoolOptions GetOptions() => _pool.GetOptions();
 
     /// <inheritdoc />
-    public bool CheckAvailable() => _pool.CheckAvailable();
+    public bool CheckAvailable()
+    {
+        if (!_pool.CheckAvailable())
+        {
+            return false;
+        }
+
+        foreach (var tier in _capacityTiers.Values)
+        {
+            if (!tier.CheckAvailable())
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     /// <inheritdoc />
-    public void SetUnavailable(string? reason = null) => _pool.SetUnavailable(reason);
+    public void SetUnavailable(string? reason = null)
+    {
+        _pool.SetUnavailable(reason);
+        foreach (var tier in _capacityTiers.Values)
+        {
+            tier.SetUnavailable(reason);
+        }
+    }
 
     /// <inheritdoc />
-    public void SetAvailable() => _pool.SetAvailable();
+    public void SetAvailable()
+    {
+        _pool.SetAvailable();
+        foreach (var tier in _capacityTiers.Values)
+        {
+            tier.SetAvailable();
+        }
+    }
 
     /// <inheritdoc />
-    public int Evict(HayateEvictReason reason) => _pool.Evict(reason);
+    public int Evict(HayateEvictReason reason)
+    {
+        var evicted = _pool.Evict(reason);
+        foreach (var tier in _capacityTiers.Values)
+        {
+            evicted += tier.Evict(reason);
+        }
+
+        return evicted;
+    }
 
     /// <inheritdoc />
-    public void Dispose() => _pool.Dispose();
+    public void Dispose()
+    {
+        _pool.Dispose();
+        foreach (var tier in _capacityTiers.Values)
+        {
+            tier.Dispose();
+        }
+    }
+
+    private IEnumerable<IHayateObjectPool> TierEngines()
+    {
+        foreach (var tier in _capacityTiers.Values)
+        {
+            yield return tier;
+        }
+    }
+
+    private IHayateObjectPool<PooledMemoryStream> CreateTierPool(int bucket)
+    {
+        var policy = new MemoryStreamPoolPolicy(this, bucket);
+        var pool = new HayatePoolBuilder<PooledMemoryStream>()
+            .WithPoolName($"{nameof(PooledMemoryStream)}#{bucket}")
+            .WithMinSize(0)
+            .WithMaxSize(_maximumPoolSize)
+            .WithPolicy(policy)
+            .WithRejectPolicy(HayatePoolRejectPolicy.CreateOnDemand)
+            .WithEnableSharding(false)
+            .WithEnableAutoScaling(false)
+            .WithEnableEviction(false)
+            .WithEnableGenerationOptimization(false)
+            .WithEnableLeakDetection(false)
+            .WithValidateOnBorrow(true)
+            .WithValidateOnReturn(true)
+            .WithValidateWhileIdle(false)
+            .Build();
+
+        // Attach before the tier becomes reachable: once it is in the dictionary, any thread may borrow
+        // from it, and created streams must bind this engine so returns route home.
+        policy.AttachEngine(pool);
+        return pool;
+    }
 }

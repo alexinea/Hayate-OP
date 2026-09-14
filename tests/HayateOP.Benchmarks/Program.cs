@@ -32,6 +32,10 @@ using Microsoft.Extensions.ObjectPool;
 
 BenchmarkRunner.Run<HayateOpBenchmarks>(args: args);
 
+// Z-C-A specialized-pool allocation benchmarks (tiering benefit + generic Format helpers).
+BenchmarkRunner.Run<SpecializedStringBuilderTierBenchmarks>(args: args);
+BenchmarkRunner.Run<SpecializedStringBuilderFormatBenchmarks>(args: args);
+
 /// <summary>
 /// Head-to-head benchmark matrix for HayateOP.
 /// </summary>

@@ -75,6 +75,42 @@ public sealed class PooledStringBuilder : IDisposable
     public override string ToString() => StringBuilder.ToString();
 
     /// <summary>
+    /// Converts the builder's content to a string and returns the builder to its pool in one call —
+    /// CPL's <c>ToStringReturn</c>: the conversion and the return are one operation, so the borrow ends
+    /// exactly where the text is produced.
+    /// </summary>
+    /// <returns>The builder's current content.</returns>
+    /// <remarks>
+    /// The return is atomic with the conversion: it runs even when the conversion throws, so a failing
+    /// path can never leak the builder out of the pool. Like <see cref="Dispose"/>, the return happens
+    /// exactly once per borrow — a second call on an already-returned builder is a no-op return that
+    /// observes whatever the next borrower may have written, so treat the call as the end of the borrow,
+    /// exactly as the end of a <c>using</c> block.<br />
+    /// On a standalone instance (never handed out by a pool) the conversion runs and the return step
+    /// does nothing.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var sb = StringBuilderPool.Instance.GetObject();
+    /// sb.StringBuilder.Append("order: ").Append(42);
+    /// var text = sb.ToStringReturn();   // builder returned to the pool here
+    /// </code>
+    /// </example>
+    public string ToStringReturn()
+    {
+        try
+        {
+            return StringBuilder.ToString();
+        }
+        finally
+        {
+            // The conversion owns the borrow's outcome: whether it produced the string or threw, the
+            // builder goes back. Dispose is the exactly-once return path, identical to a using block.
+            Dispose();
+        }
+    }
+
+    /// <summary>
     /// Disposing a pooled instance returns it to its pool; disposing a standalone instance does nothing.
     /// Called automatically at the end of a <c>using</c> block.
     /// </summary>
@@ -103,6 +139,13 @@ public sealed class PooledStringBuilder : IDisposable
 
     /// <summary>Registers the owning pool; called by the pool's policy at creation time.</summary>
     internal void BindOwner(IHayateObjectPool<PooledStringBuilder> owner) => _owner = owner;
+
+    /// <summary>
+    /// The pool this instance currently belongs to (its lending engine pool, or the wrapper pool until
+    /// the policy binds the engine); <c>null</c> for standalone or pool-destroyed instances. The pool
+    /// routes a manual <c>Release</c> through it so a borrowed builder returns to the tier it came from.
+    /// </summary>
+    internal IHayateObjectPool<PooledStringBuilder>? HomePool => _owner;
 
     /// <summary>Marks the instance as borrowed so the next dispose performs the return.</summary>
     internal void OnBorrowed() => Interlocked.Exchange(ref _idle, 0);

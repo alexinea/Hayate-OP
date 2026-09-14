@@ -322,6 +322,32 @@ reset (empty stream, cleared builder) before the next borrow. Each pool is an or
 `IHayateObjectPool<T>` underneath, so `AcquireAsync`, `GetStats` and friends work as usual, and each owns
 its own lifetime — construct it, or use the `Instance` singleton and never dispose it.
 
+**Declared-capacity borrows.** `GetObject(minCapacity)` lets the borrower state how much the object must
+hold up front, so the pool reserves that capacity once instead of growing through the ladder on every
+use, and mixed-size workloads stop churning through grow-past-the-maximum-and-destroy: sizes above the
+minimum are served by lazily created internal capacity tiers (an exponential ladder anchored at the
+minimum), a tier parks its builders/streams even above the pool's global maximum — the buffer exists by
+declaration — and only growth beyond the declared envelope destroys an object:
+
+```csharp
+using var sb = StringBuilderPool.Instance.GetObject(200_000);   // capacity ≥ 200K chars, no grow ladder
+```
+
+**Convert and return.** `ToStringReturn()` / `ToByteArrayReturn()` produce the result and end the borrow
+in one exactly-once call — the return runs even when the conversion throws, so nothing leaks:
+
+```csharp
+var sb = StringBuilderPool.Instance.GetObject();
+sb.StringBuilder.Append("order: ").Append(42);
+var text = sb.ToStringReturn();   // builder back in the pool here
+byte[] bytes = stream.ToByteArrayReturn();
+```
+
+**Formatting helpers.** `StringBuilderPool.Format` / `Concat` / `Join` are generic, `params`-free
+alternatives to `string.Format` / `string.Concat` / `string.Join` (ZString-style, up to eight
+arguments): no `object[]`, no boxing of the arguments, one borrow/return cycle, current-culture
+semantics matching `string.Format`.
+
 `SharedStringBuilder` rounds the package out for the opposite use case: one `StringBuilder` shared by
 everyone behind a lock, where the holder's `Dispose` clears it and releases the lock — zero per-use
 allocations, at the price of serialising all users, so hold it briefly:
