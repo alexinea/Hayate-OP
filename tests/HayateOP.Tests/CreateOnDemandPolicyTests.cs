@@ -29,7 +29,8 @@ public class CreateOnDemandPolicyTests
             .WithEnableEviction(false)
             .WithEnableValidation(false)
             .WithRejectPolicy(HayatePoolRejectPolicy.CreateOnDemand)
-            // Deliberately far above any plausible creation cost: waiting this out would fail the check below.
+            // Deliberately far above any plausible creation cost: waiting this out would either throw
+            // TimeoutException or trip the check below.
             .WithAcquireTimeout(TimeSpan.FromSeconds(2))
             // TotalCreated is metrics-gated, so the "created exactly once" assertions need metrics on.
             .WithEnableMetrics(true)
@@ -40,31 +41,17 @@ public class CreateOnDemandPolicyTests
         sw.Stop();
 
         Assert.NotNull(obj);
-        Assert.True(sw.ElapsedMilliseconds < 500,
+        // Bound sits well under the 2s acquire timeout so a wait-out regression still trips it, but with
+        // enough headroom for cold-JIT noise on CI runners (the net48 leg has no ready-to-run images).
+        Assert.True(sw.ElapsedMilliseconds < 1500,
             $"the first borrow of an empty pool must create synchronously, but it took {sw.ElapsedMilliseconds}ms");
         Assert.Equal(1, pool.GetStats().TotalCreated);
     }
 
-    [Fact(Timeout = 30_000)]
-    public void CreateOnDemand_BelowCapacityMisses_ShouldEachCreateWithoutWaiting()
+    private static TestObject[] RunConcurrentBurst(IHayateObjectPool<TestObject> pool, int requests)
     {
-        const int requests = 4;
-
-        using var pool = new HayatePoolBuilder<TestObject>()
-            .WithPoolName("on-demand-concurrent")
-            .WithMinSize(0)
-            .WithMaxSize(8)
-            .WithShardCount(1)
-            .WithEnableAutoScaling(false)
-            .WithEnableEviction(false)
-            .WithEnableValidation(false)
-            .WithRejectPolicy(HayatePoolRejectPolicy.CreateOnDemand)
-            .WithAcquireTimeout(TimeSpan.FromMilliseconds(100))
-            .Build();
-
         var results = new TestObject[requests];
         using var barrier = new Barrier(requests);
-        var sw = Stopwatch.StartNew();
 
         var tasks = Enumerable.Range(0, requests)
             .Select(i => Task.Run(() =>
@@ -75,11 +62,46 @@ public class CreateOnDemandPolicyTests
             .ToArray();
 
         Task.WaitAll(tasks);
+        return results;
+    }
+
+    private static HayatePoolBuilder<TestObject> ConcurrentBurstPoolBuilder(string name) => new HayatePoolBuilder<TestObject>()
+        .WithPoolName(name)
+        .WithMinSize(0)
+        .WithMaxSize(8)
+        .WithShardCount(1)
+        .WithEnableAutoScaling(false)
+        .WithEnableEviction(false)
+        .WithEnableValidation(false)
+        .WithRejectPolicy(HayatePoolRejectPolicy.CreateOnDemand)
+        // Far above any plausible creation cost, so a policy that degraded to waiting out the timeout
+        // before creating shows up as >= 2s and trips the bound below (or throws TimeoutException).
+        .WithAcquireTimeout(TimeSpan.FromSeconds(2));
+
+    [Fact(Timeout = 30_000)]
+    public void CreateOnDemand_BelowCapacityMisses_ShouldEachCreateWithoutWaiting()
+    {
+        const int requests = 4;
+
+        // Warm-up burst on a throwaway pool: primes the JIT of the acquire/create path and the
+        // thread-pool ramp-up. Without it, the measured wall clock on a 4-core CI VM includes cold-start
+        // noise (1.5s observed on the net48 leg), which says nothing about the policy.
+        using (var warmup = ConcurrentBurstPoolBuilder("on-demand-concurrent-warmup").Build())
+        {
+            RunConcurrentBurst(warmup, requests);
+        }
+
+        using var pool = ConcurrentBurstPoolBuilder("on-demand-concurrent").Build();
+
+        var sw = Stopwatch.StartNew();
+        var results = RunConcurrentBurst(pool, requests);
         sw.Stop();
 
         Assert.All(results, Assert.NotNull);
         Assert.Equal(requests, results.Distinct().Count());   // one object per request, nothing lent twice
-        Assert.True(sw.ElapsedMilliseconds < 500,
+        // Correct behavior is milliseconds warm; a wait-then-create degradation pays the full 2s timeout.
+        // The bound sits between the two with CI headroom on both sides.
+        Assert.True(sw.ElapsedMilliseconds < 1500,
             $"{requests} concurrent misses below capacity must each create without waiting, but took {sw.ElapsedMilliseconds}ms");
     }
 
@@ -163,7 +185,9 @@ public class CreateOnDemandPolicyTests
         sw.Stop();
 
         Assert.NotNull(obj);
-        Assert.True(sw.ElapsedMilliseconds < 500,
+        // Same CI-noise headroom as the sync cold test: well under the 2s configured timeout, so a
+        // wait-out regression either throws TimeoutException or trips the bound.
+        Assert.True(sw.ElapsedMilliseconds < 1500,
             $"the async first borrow of an empty pool must create synchronously, but it took {sw.ElapsedMilliseconds}ms");
     }
 }
