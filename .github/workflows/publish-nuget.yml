@@ -2,10 +2,27 @@ name: Publish to NuGet
 
 # Publishes every package under src/ to nuget.org.
 #
-# Trigger : push a tag such as `v2.6.0`, or run manually (workflow_dispatch).
-# Auth    : repository secret NUGET_API_KEY (nuget.org API key).
-#           The nuget.org profile / package owner is `AlexLEWIS`.
-#           The key is stored only in GitHub Secrets and never committed.
+# Trigger : push a tag such as `v2.7`, or run manually (workflow_dispatch).
+#           (GitHub runs the workflow snapshot pinned by the pushed tag, so a
+#           publishing-channel change only takes effect for tags pushed after
+#           the change lands on the default branch.)
+#
+# Auth    : NuGet trusted publishing (OIDC) is the primary channel, following the
+#           dotnetcore/Collections release.yml pattern — the job exchanges a
+#           short-lived GitHub OIDC token (`id-token: write`) for a ~1h temporary
+#           API key via NuGet/login@v1, so no long-lived secret is stored.
+#           Required one-time setup on nuget.org (trusted publishing policy):
+#             Repository owner : alexinea
+#             Repository       : object-pool
+#             Workflow file    : publish-nuget.yml
+#             Package owner    : the AlexLEWIS nuget.org profile
+#           Repository secret NUGET_USERNAME must hold the nuget.org profile
+#           name (not the e-mail) for the OIDC exchange.
+#           Fallback: when the OIDC login does not yield a key (policy not yet
+#           configured, NUGET_USERNAME missing), the push falls back to the
+#           stored NUGET_API_KEY secret; publishing fails only when neither is
+#           available. This keeps the channel alive while trusted publishing is
+#           being rolled out.
 #
 # The local `scripts/Release.bat` is kept as an offline fallback; CI is the
 # primary publishing channel from 2.6 onward.
@@ -20,9 +37,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish (e.g. 2.6). Must match asset/version.props.'
+        description: 'Version to publish (e.g. 2.8). Must match asset/version.props.'
         required: true
         type: string
+
+permissions:
+  contents: read
 
 concurrency:
   group: nuget-publish
@@ -40,8 +60,17 @@ jobs:
   publish:
     name: Pack and push
     runs-on: windows-latest
+    # Job-level permissions replace the workflow-level block, so contents: read
+    # is restated here. id-token: write lets GitHub mint the OIDC token that
+    # NuGet trusted publishing exchanges for a short-lived API key.
+    permissions:
+      contents: read
+      id-token: write
+
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # SourceLink needs full history for the deterministic build
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -72,7 +101,7 @@ jobs:
           echo "requested           = ${requested}"
 
           # Tag convention in this repository is two-part (v2.1, v2.2, ...); accept both
-          # `2.6` and `2.6.0`, and require the patch component to match when supplied.
+          # `2.8` and `2.8.0`, and require the patch component to match when supplied.
           case "${requested}" in
             "${props_full}") ;;
             "${props_short}") ;;
@@ -107,21 +136,43 @@ jobs:
           echo "Produced:"
           ls -1 "${{ env.PACKAGE_OUTPUT }}"
 
+      # Must run right before the push: the temporary key lives for ~1 hour, and each
+      # OIDC token can only be exchanged for a single key. continue-on-error keeps the
+      # stored-key fallback usable while the nuget.org trusted-publishing policy is not
+      # yet in place; a failed exchange simply leaves the output empty.
+      - name: NuGet login (OIDC -> temporary API key)
+        id: nuget_login
+        continue-on-error: true
+        uses: NuGet/login@v1
+        with:
+          # nuget.org profile name, not the e-mail address.
+          user: ${{ secrets.NUGET_USERNAME }}
+
       - name: Push to nuget.org
         shell: bash
         env:
+          OIDC_API_KEY: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "${NUGET_API_KEY:-}" ]; then
-            echo "::error::Secret NUGET_API_KEY is not configured."
+
+          api_key="${OIDC_API_KEY:-}"
+          auth_source="NuGet trusted publishing (OIDC)"
+          if [ -z "${api_key}" ]; then
+            api_key="${NUGET_API_KEY:-}"
+            auth_source="stored NUGET_API_KEY (trusted-publishing fallback)"
+          fi
+          if [ -z "${api_key}" ]; then
+            echo "::error::No publish credential: the OIDC login produced no key (configure the nuget.org trusted-publishing policy + NUGET_USERNAME) and NUGET_API_KEY is not configured."
             exit 1
           fi
+          echo "Auth via ${auth_source}"
+
           find "${{ env.PACKAGE_OUTPUT }}" -name '*.nupkg' -o -name '*.snupkg' | while read -r pkg; do
             echo "::group::push ${pkg}"
             dotnet nuget push "${pkg}" \
               --source "${{ env.NUGET_SOURCE }}" \
-              --api-key "${NUGET_API_KEY}" \
+              --api-key "${api_key}" \
               --skip-duplicate
             echo "::endgroup::"
           done
