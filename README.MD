@@ -50,6 +50,9 @@ documented in [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md).
 > **.NET Framework 4.8 support (added in 2.4)** targets `net48` for classic ASP.NET 4.x / WPF / WinForms
 > hosts that consume the core pool or the `ObjectPool<T>` / DI bridges. Prefer `PackageReference` and add a
 > `bindingRedirect` when the host already loads `Microsoft.Extensions.*` (6.x/8.x/10.x) assemblies.
+> The Specialized package's net48 asset additionally depends on `System.Memory` (4.5.5), which backs the
+> `Span<char>` surface of `HayateValueStringBuilder`; it is that package's only net48-only NuGet
+> dependency and the core library stays free of it (added in the 2.8 window).
 > **.NET Standard 2.0 support (added in 2.5)** ships for the **core package only** (`DotNetCore.HayateOP`),
 > targeting Unity / Xamarin / older .NET hosts that cannot consume `net6.0`+ or `net48` assets. On
 > `netstandard2.0` / `net48`, allocation tracking reports `0` (no `GC.GetAllocatedBytesForCurrentThread`)
@@ -347,6 +350,20 @@ byte[] bytes = stream.ToByteArrayReturn();
 alternatives to `string.Format` / `string.Concat` / `string.Join` (ZString-style, up to eight
 arguments): no `object[]`, no boxing of the arguments, one borrow/return cycle, current-culture
 semantics matching `string.Format`.
+
+**Zero-allocation value builder.** For the transient build-a-line-and-return-it flow,
+`HayateValueStringBuilder` skips `StringBuilder` entirely: a `ref struct` whose buffer is rented from
+`ArrayPool<char>`, with `ToString()` as the build's only allocation (the buffer goes back to the pool
+in the same call — dispose-by-ToString). It has no pool around it, no statistics and no capacity
+ceiling; long-lived builders that need observability or a capacity guard stay on
+`StringBuilderPool`:
+
+```csharp
+using var sb = new HayateValueStringBuilder();   // ref struct — no heap, no async, no lambdas
+sb.Append("order: ");
+sb.Append(id);
+var text = sb.ToString();                        // the one allocation; buffer returned here
+```
 
 `SharedStringBuilder` rounds the package out for the opposite use case: one `StringBuilder` shared by
 everyone behind a lock, where the holder's `Dispose` clears it and releases the lock — zero per-use

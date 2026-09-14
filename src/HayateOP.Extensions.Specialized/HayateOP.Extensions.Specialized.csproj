@@ -24,4 +24,6 @@
 
     <Import Project="references.props" />
 
+    <Import Project="dependency.props" />
+
 </Project>

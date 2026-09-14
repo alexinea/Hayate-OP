@@ -12,6 +12,19 @@ Breaking changes are described in full — with migration guidance — in
 
 ### Added
 
+- **Zero-allocation value builder** (Z1, from the sbpool performance assessment): `HayateValueStringBuilder`
+  is a `ref struct` over a rented `ArrayPool<char>` buffer — doubling growth hands the old buffer
+  straight back, `ToString()` materializes the content and returns the buffer in the same call
+  (dispose-by-ToString, so the build's only allocation is the final string), `Dispose` is idempotent,
+  and `TryCopyTo(Span<char>, out int)` / `AsSpan()` hand out the content without ending the borrow.
+  Appends follow ZString's shape and return `void`: chained calls on a mutable ref struct would run
+  on struct copies and lose their position state. Every member after the builder has ended throws
+  `ObjectDisposedException`, so a use-after-return surfaces cleanly instead of reading a buffer the
+  next renter owns. The type complements `StringBuilderPool` (transient format-and-return flows run
+  here with no heap traffic; long-lived, observable builders stay on the pool) and does not touch the
+  HayateOP engine. Available on every target framework: net6+ natively, net48 through `System.Memory`
+  — the specialized package's first net48-only NuGet dependency (the core library is unaffected);
+  a thread-static fast path stays a future enhancement.
 - **Declared-capacity borrows with tier routing** (Z-C-A, folding the 2.7 C-A convenience batch into
   the specialized pools with ZString semantics): `StringBuilderPool.GetObject(int minCapacity)` /
   `Acquire(int minCapacity)` (and the `MemoryStreamPool` equivalents) let the borrower declare how much

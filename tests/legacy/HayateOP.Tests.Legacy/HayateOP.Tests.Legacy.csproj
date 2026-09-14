@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <Import Project="..\..\..\common.tests.props" />
 
@@ -13,7 +13,16 @@
         <TargetFrameworks>net48;net6.0;net7.0</TargetFrameworks>
         <RootNamespace>DotNetCore.HayateOP.Tests</RootNamespace>
         <IsPackable>false</IsPackable>
+        <!-- Z1: the specialized package's net48 asset carries System.Memory (the Span surface of
+             HayateValueStringBuilder); reference the same version here and generate binding redirects
+             so System.Buffers / System.Memory do not load mixed versions. -->
+        <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+        <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
     </PropertyGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+        <PackageReference Include="System.Memory" Version="4.5.5" />
+    </ItemGroup>
 
     <ItemGroup>
         <PackageReference Include="coverlet.collector" Version="8.0.0">

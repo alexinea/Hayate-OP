@@ -4,6 +4,203 @@
         <name>DotNetCore.HayateOP.Extensions.Specialized</name>
     </assembly>
     <members>
+        <member name="T:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder">
+            <summary>
+            A zero-allocation, stack-only string builder in the ZString / Cosmos <c>ValueStringBuilder</c>
+            shape: a <c>ref struct</c> whose character buffer is rented from <see cref="P:System.Buffers.ArrayPool`1.Shared"/>,
+            doubled when it grows, and handed back the moment <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.ToString"/> materializes the result —
+            the one and only allocation of a build.
+            </summary>
+            <remarks>
+            This type complements <see cref="T:DotNetCore.HayateOP.Specialized.StringBuilderPool"/> rather than replacing it. The transient
+            "build → produce the string" flow (log lines, message formatting) runs here with no heap traffic
+            beyond the final string; long-lived builders that cross methods or need pool observability stay on
+            the pool. The builder never touches the HayateOP engine — <see cref="P:System.Buffers.ArrayPool`1.Shared"/> is its
+            pool — so it has no statistics, no validation and no capacity ceiling, just the raw fast path.<br />
+            Appends follow ZString's shape and return <c>void</c>: the builder is a mutable ref struct, so
+            chained calls like <c>sb.Append(a).Append(b)</c> would run on struct copies and lose their
+            position state — call the methods in sequence instead.<br />
+            <b>Lifecycle.</b> Rent with <c>new</c> (or <c>using var</c>, which disposes at the end of the
+            block), append, and call <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.ToString"/>; the buffer returns to the pool right after the
+            string is materialized, so the borrow ends at the call, exactly like
+            <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.ToStringReturn"/>. <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Dispose"/> is idempotent, and a second
+            <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.ToString"/> on an already-materialized builder throws
+            <see cref="T:System.ObjectDisposedException"/> rather than reading a buffer that now belongs to someone
+            else. Every member other than <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Dispose"/> throws <see cref="T:System.ObjectDisposedException"/>
+            once the builder has ended.<br />
+            <b>Views.</b> <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.AsSpan"/> and <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.TryCopyTo(System.Span{System.Char},System.Int32@)"/> hand out the current content without
+            ending the borrow, but a view is invalidated by anything that moves the buffer (growth, <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Clear"/>
+            is fine, growth is not) and must not outlive the builder — after <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.ToString"/> or
+            <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Dispose"/> the span points into a pool buffer that the next renter owns.<br />
+            This is a <c>ref struct</c>: the compiler keeps it on the stack, so it cannot be boxed, captured by
+            a lambda, or held across an <c>await</c> — the misuse cases are compile-time errors, not runtime
+            hazards. A thread-static fast path (ZString's thread cache, with its no-nesting rule) is a possible
+            future enhancement and deliberately not part of this first version.
+            </remarks>
+            <example>
+            <code>
+            using var sb = new HayateValueStringBuilder();
+            sb.Append("order: ").Append(42);
+            var text = sb.ToString();   // the only allocation; the buffer is back in the pool here
+            </code>
+            </example>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.DefaultInitialCapacity">
+            <summary>
+            The capacity rented for a builder that does not declare one: 256 characters, the
+            Cosmos <c>ValueStringBuilder</c> default.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.#ctor">
+            <summary>
+            Rents a builder from <see cref="P:System.Buffers.ArrayPool`1.Shared"/> with the default initial capacity of
+            <see cref="F:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.DefaultInitialCapacity"/> characters.
+            </summary>
+            <remarks>
+            The parameterless constructor is declared explicitly on purpose: a struct call with no
+            arguments binds to the implicit zero-filling constructor when every declared constructor only
+            has optional parameters, which would hand out an already-ended builder. For the same reason the
+            other constructors take their capacity without a default.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.#ctor(System.Int32)">
+            <summary>
+            Rents a builder from <see cref="P:System.Buffers.ArrayPool`1.Shared"/> with the given initial capacity.
+            </summary>
+            <param name="initialCapacity">The number of characters to reserve up front; the pool may hand
+            back a larger buffer. Must not be negative.</param>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="initialCapacity"/> is
+            negative.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.#ctor(System.Buffers.ArrayPool{System.Char},System.Int32)">
+            <summary>
+            Rents a builder from the given pool with the given initial capacity.
+            </summary>
+            <param name="pool">The pool to rent from and return to; <c>null</c> means
+            <see cref="P:System.Buffers.ArrayPool`1.Shared"/>.</param>
+            <param name="initialCapacity">The number of characters to reserve up front; the pool may hand
+            back a larger buffer. Must not be negative.</param>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="initialCapacity"/> is
+            negative.</exception>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Length">
+            <summary>
+            The number of characters written so far.
+            </summary>
+            <exception cref="T:System.ObjectDisposedException">The builder has ended — the buffer was returned by
+            <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.ToString"/> or <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Dispose"/>.</exception>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Capacity">
+            <summary>
+            The current buffer capacity; the pool may have rented a larger buffer than was asked for.
+            </summary>
+            <exception cref="T:System.ObjectDisposedException">The builder has ended.</exception>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Item(System.Int32)">
+            <summary>
+            The character at <paramref name="index"/>.
+            </summary>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="index"/> is outside
+            <c>[0, Length)</c>.</exception>
+            <exception cref="T:System.ObjectDisposedException">The builder has ended.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.Char)">
+            <summary>
+            Appends a single character.
+            </summary>
+            <param name="value">The character to append.</param>
+            <exception cref="T:System.ObjectDisposedException">The builder has ended.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.String)">
+            <summary>
+            Appends a string; <c>null</c> appends nothing, like <see cref="M:System.Text.StringBuilder.Append(System.String)"/>.
+            </summary>
+            <param name="value">The text to append; may be <c>null</c>.</param>
+            <exception cref="T:System.ObjectDisposedException">The builder has ended.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.ReadOnlySpan{System.Char})">
+            <summary>
+            Appends the given span of characters.
+            </summary>
+            <param name="value">The characters to append.</param>
+            <exception cref="T:System.ObjectDisposedException">The builder has ended.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.AppendLine">
+            <summary>
+            Appends the environment's default line terminator, like <see cref="M:System.Text.StringBuilder.AppendLine"/>.
+            </summary>
+            <exception cref="T:System.ObjectDisposedException">The builder has ended.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.AppendLine(System.String)">
+            <summary>
+            Appends a string followed by the environment's default line terminator; <c>null</c> appends
+            only the terminator, like <see cref="M:System.Text.StringBuilder.AppendLine(System.String)"/>.
+            </summary>    /// <param name="value">The text to append before the terminator; may be <c>null</c>.</param>
+            <exception cref="T:System.ObjectDisposedException">The builder has ended.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Clear">
+            <summary>
+            Resets the builder to empty while keeping the rented buffer, so the next build reuses it.
+            </summary>
+            <exception cref="T:System.ObjectDisposedException">The builder has ended.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.TryCopyTo(System.Span{System.Char},System.Int32@)">
+            <summary>
+            Copies the builder's current content into <paramref name="destination"/> without ending the
+            borrow.
+            </summary>
+            <param name="destination">The span to copy into; large enough or the copy reports failure.</param>
+            <param name="charsWritten">The number of characters copied; <c>0</c> when the copy failed.</param>
+            <returns><c>true</c> when the content fit; <c>false</c> when <paramref name="destination"/> was
+            too small (nothing is written).</returns>
+            <remarks>
+            Unlike <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.ToString"/>, the buffer stays rented — the builder keeps working after the
+            copy. The copy is a single pass over the buffer; no intermediate string is allocated.
+            </remarks>
+            <exception cref="T:System.ObjectDisposedException">The builder has ended.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.AsSpan">
+            <summary>
+            A read-only view of the builder's current content, without copying and without ending the
+            borrow.
+            </summary>
+            <remarks>
+            The view points into the rented buffer: it stays valid only while the builder does not grow or
+            end. Growing (an append that exceeds <see cref="P:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Capacity"/>) moves the content to a new buffer,
+            and <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.ToString"/> / <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Dispose"/> hand the old buffer back to the pool, where
+            the next renter overwrites it — consume the view before either happens.
+            </remarks>
+            <exception cref="T:System.ObjectDisposedException">The builder has ended.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.ToString">
+            <summary>
+            Materializes the content as a new string and ends the builder: the rented buffer returns to its
+            pool immediately after the string is produced, making this the build's one and only allocation.
+            </summary>
+            <returns>The builder's current content.</returns>
+            <remarks>
+            This is dispose-by-ToString, the convention ZString and Cosmos established for this shape: the
+            borrow ends at the call, so <c>return sb.ToString();</c> inside a <c>using</c> block is safe and
+            the trailing <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Dispose"/> is a no-op. Calling <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.ToString"/> (or anything else
+            but <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Dispose"/>) again throws <see cref="T:System.ObjectDisposedException"/> — the buffer now
+            belongs to the pool.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Dispose">
+            <summary>
+            Returns the rented buffer to its pool without producing a string. Called automatically at the
+            end of a <c>using</c> block.
+            </summary>
+            <remarks>
+            Happens exactly once: every later call is a no-op, and so is the dispose after
+            <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.ToString"/> already ended the builder. After the buffer is returned it belongs to the
+            pool — do not read from it again (every accessor throws
+            <see cref="T:System.ObjectDisposedException"/>).
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.EnsureCapacityFor(System.Int32)">
+            <summary>Makes room for <paramref name="count"/> more characters, growing by doubling.</summary>
+        </member>
         <member name="T:DotNetCore.HayateOP.Specialized.MemoryStreamPool">
              <summary>
              A ready-to-use pool of <see cref="T:DotNetCore.HayateOP.Specialized.PooledMemoryStream"/> instances, aligned with P89OP's
