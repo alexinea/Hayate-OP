@@ -74,6 +74,21 @@ Breaking changes are described in full — with migration guidance — in
   default wait-then-timeout policy every borrow past the first would stall until the background scaler
   caught up. Both are overridable through the `configure` callback, and the constructor that takes a
   sub-pool factory changes nothing at all.
+- **Specialized pools extension package** (O-B): `DotNetCore.HayateOP.Extensions.Specialized` ships the
+  ready-to-use `MemoryStream` / `StringBuilder` pools that generic engines leave to you, aligned with
+  P89OP's `CodeProject.ObjectPool.Specialized` — `MemoryStreamPool` / `PooledMemoryStream`,
+  `StringBuilderPool` / `PooledStringBuilder` and `SharedStringBuilder`, with the P89OP default capacity
+  tiers (4KB/512KB bytes for streams, 4096/524288 characters for builders, default pool size 16) and the
+  P89OP `Instance` singletons, `GetObject(string)` prefill, and clear-on-tighten capacity setters.
+  Disposing a borrowed stream or builder returns it through the pool's ordinary return path, so `using`
+  is the whole borrow/return pair and the return cannot be forgotten — including when the body throws.
+  A returned stream stays open for the next borrower (only the pool really closes a buffer, when a
+  returned object fails validation — most commonly one that grew past the maximum capacity); returned
+  objects are reset (empty stream, cleared builder) before the next borrow; and disposal routes exactly
+  one return, so a double dispose never double-parks an object. Each pool is an ordinary
+  `IHayateObjectPool<T>` built on the core engine (create-on-demand, no sharding, no background
+  features), so `AcquireAsync`, `GetStats` and the rest of the surface behave as usual. The package
+  targets .NET Framework 4.8 and .NET 6/7/8/9/10.
 
 ### Changed
 

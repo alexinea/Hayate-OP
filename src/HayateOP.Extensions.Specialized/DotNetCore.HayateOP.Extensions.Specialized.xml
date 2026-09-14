@@ -1,0 +1,554 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>DotNetCore.HayateOP.Extensions.Specialized</name>
+    </assembly>
+    <members>
+        <member name="T:DotNetCore.HayateOP.Specialized.MemoryStreamPool">
+            <summary>
+            A ready-to-use pool of <see cref="T:DotNetCore.HayateOP.Specialized.PooledMemoryStream"/> instances, aligned with P89OP's
+            <c>MemoryStreamPool</c>: borrowing costs one line, and <c>using</c> on the borrowed stream returns it.
+            </summary>
+            <remarks>
+            The pool is built on the ordinary HayateOP engine, configured the way a specialized stream pool
+            wants it: nothing is pre-created, a miss inside the pool size is served by creating a stream on
+            demand, and the two background features a stream pool has no use for (auto-scaling, eviction) are
+            switched off — so an idle pool holds its streams and runs no timers. Validation stays on: it is what
+            enforces the capacity window below, on every return.<br />
+            Streams are created with <see cref="P:DotNetCore.HayateOP.Specialized.MemoryStreamPool.MinimumMemoryStreamCapacity"/> bytes and may grow while borrowed;
+            a stream that comes back with a capacity outside the <see cref="P:DotNetCore.HayateOP.Specialized.MemoryStreamPool.MinimumMemoryStreamCapacity"/> /
+            <see cref="P:DotNetCore.HayateOP.Specialized.MemoryStreamPool.MaximumMemoryStreamCapacity"/> window is destroyed instead of being parked, so buffers
+            never linger larger than the configuration allows. Returned streams are reset to empty (position and
+            length zero) before the next borrow.<br />
+            Tightening the window clears the pool, matching P89OP: raising the minimum or lowering the maximum
+            destroys every parked stream, because none of them can pass the new window. Widening keeps them.
+            </remarks>
+            <example>
+            <code>
+            using var stream = MemoryStreamPool.Instance.GetObject();
+            stream.Write(payload, 0, payload.Length);   // returned to the pool at the end of the block
+            </code>
+            </example>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Specialized.MemoryStreamPool.DefaultPoolMaximumSize">
+            <summary>
+            The default maximum pool size (16), the same value P89OP's <c>ObjectPool.DefaultPoolMaximumSize</c>
+            uses for its specialized pools.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Specialized.MemoryStreamPool.DefaultMinimumMemoryStreamCapacity">
+            <summary>
+            The default minimum memory stream capacity: 4KB, the P89OP default.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Specialized.MemoryStreamPool.DefaultMaximumMemoryStreamCapacity">
+            <summary>
+            The default maximum memory stream capacity: 512KB, the P89OP default.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Specialized.MemoryStreamPool.Instance">
+            <summary>
+            A shared, thread-safe pool instance for callers that do not want to manage a pool's lifetime.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.#ctor">
+            <summary>
+            Builds a pool holding at most <see cref="F:DotNetCore.HayateOP.Specialized.MemoryStreamPool.DefaultPoolMaximumSize"/> streams.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.#ctor(System.Int32)">
+            <summary>
+            Builds a pool holding at most <paramref name="maxPoolSize"/> streams.
+            </summary>
+            <param name="maxPoolSize">The maximum number of streams the pool keeps and lends out.</param>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="maxPoolSize"/> is not greater than
+            zero.</exception>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Specialized.MemoryStreamPool.MinimumMemoryStreamCapacity">
+            <summary>
+            The minimum capacity a stream is created with; it is also the smallest capacity a returned stream
+            may have to be accepted back into the pool. Defaults to <see cref="F:DotNetCore.HayateOP.Specialized.MemoryStreamPool.DefaultMinimumMemoryStreamCapacity"/>.
+            </summary>
+            <remarks>
+            Raising this value clears the pool: parked streams created under the old minimum cannot pass the
+            new one.
+            </remarks>
+            <exception cref="T:System.ArgumentOutOfRangeException">The assigned value is not greater than zero.</exception>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Specialized.MemoryStreamPool.MaximumMemoryStreamCapacity">
+            <summary>
+            The maximum capacity a returned stream may have to be accepted back into the pool; larger streams
+            are destroyed on return. Defaults to <see cref="F:DotNetCore.HayateOP.Specialized.MemoryStreamPool.DefaultMaximumMemoryStreamCapacity"/>.
+            </summary>
+            <remarks>
+            Lowering this value clears the pool: parked streams above the new maximum cannot pass it.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.GetObject">
+            <summary>
+            Acquires a stream from the pool. Synonym of <see cref="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.Acquire"/>, named as P89OP names it.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.GetObject(System.TimeSpan)">
+            <summary>
+            Acquires a stream from the pool, blocking up to the given timeout. Synonym of
+            <see cref="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.Acquire(System.TimeSpan)"/>, named as P89OP names it.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.Acquire">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.Acquire(System.TimeSpan)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.AcquireAsync(System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.AcquireAsync(System.TimeSpan,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.Release(DotNetCore.HayateOP.Specialized.PooledMemoryStream)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.GetStats">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.TakeSnapshot">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.ReloadConfig(System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.Clear">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.GetOptions">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.CheckAvailable">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.SetUnavailable(System.String)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.SetAvailable">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.Evict(DotNetCore.HayateOP.HayateEvictReason)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.Dispose">
+            <inheritdoc />
+        </member>
+        <member name="T:DotNetCore.HayateOP.Specialized.MemoryStreamPoolPolicy">
+            <summary>
+            The policy behind <see cref="T:DotNetCore.HayateOP.Specialized.MemoryStreamPool"/>: creates streams at the configured minimum capacity,
+            guards the capacity window on the way back, and resets returned streams to empty.
+            </summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Specialized.PooledMemoryStream">
+            <summary>
+            A <see cref="T:System.IO.MemoryStream"/> that knows the pool it came from: disposing it returns it to that pool
+            instead of closing it, so a borrow/return pair can be written with <c>using</c> exactly as P89OP's
+            <c>PooledMemoryStream</c> allows.
+            </summary>
+            <remarks>
+            Disposing a stream that sits in a <see cref="T:DotNetCore.HayateOP.Specialized.MemoryStreamPool"/> hands it back through the pool's
+            ordinary return path — validation, the capacity guard and the reset to an empty stream all behave
+            exactly as for a manual <c>Release</c> — and the stream stays open: the buffer is kept alive for the
+            next borrower, which is the whole point of pooling streams. The stream is closed for real only when
+            the pool itself destroys it (a returned stream that failed validation — most commonly one that grew
+            past the pool's maximum capacity — is destroyed, and the pool's destroy path calls the underlying
+            <see cref="M:System.IO.MemoryStream.Dispose(System.Boolean)"/>).<br />
+            Disposal is once-per-borrow: a second <see cref="M:DotNetCore.HayateOP.Specialized.PooledMemoryStream.Dispose(System.Boolean)"/> of the same borrow is a no-op rather
+            than a duplicate return, because returning the same object twice would let two borrowers share it
+            later. After the pool has destroyed a stream, using it throws
+            <see cref="T:System.ObjectDisposedException"/>, like any closed stream.<br />
+            A stream created directly (never handed out by a pool) owns nobody and behaves like an ordinary
+            <see cref="T:System.IO.MemoryStream"/>: disposing it closes it.
+            </remarks>
+            <example>
+            <code>
+            using var stream = MemoryStreamPool.Instance.GetObject();
+            stream.Write(payload, 0, payload.Length);   // returned to the pool at the end of the block
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledMemoryStream.#ctor(System.Int32)">
+            <summary>
+            Creates a standalone stream with the given initial capacity.
+            </summary>
+            <param name="capacity">The initial capacity of the backing buffer.</param>
+            <remarks>
+            A standalone stream is not registered with any pool; disposing it closes the buffer. Only
+            <see cref="T:DotNetCore.HayateOP.Specialized.MemoryStreamPool"/> produces pooled instances.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledMemoryStream.#ctor">
+            <summary>
+            Creates a standalone stream with no reserved capacity; the buffer grows on first write.
+            </summary>
+            <remarks>
+            The parameterless constructor exists so generic pool frameworks that demand a default
+            constructor can handle the type (HayateOP's <see cref="T:DotNetCore.HayateOP.HayatePoolBuilder`1"/> requires one);
+            <see cref="T:DotNetCore.HayateOP.Specialized.MemoryStreamPool"/> uses it and then reserves the configured minimum capacity.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledMemoryStream.Dispose(System.Boolean)">
+            <summary>
+            Disposing a pooled stream returns it to its pool (the stream stays open, ready for the next
+            borrower); disposing a standalone stream closes the buffer. Called automatically at the end of a
+            <c>using</c> block.
+            </summary>
+            <remarks>
+            The return goes through the pool's ordinary return path, so capacity validation and the reset to
+            an empty stream behave exactly as for a manual <c>Release</c> — and a stream that grew past the
+            pool's maximum capacity is destroyed on return instead of being parked with a huge buffer. The
+            return happens exactly once per borrow; every later call is a no-op.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledMemoryStream.ToString">
+            <summary>
+            Returns a string that represents the stream (position and length), as P89OP's wrapper does.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledMemoryStream.BindOwner(DotNetCore.HayateOP.IHayateObjectPool{DotNetCore.HayateOP.Specialized.PooledMemoryStream})">
+            <summary>Registers the owning pool; called by the pool's policy at creation time.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledMemoryStream.OnBorrowed">
+            <summary>Marks the stream as borrowed so the next dispose performs the return.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledMemoryStream.MarkIdle">
+            <summary>
+            Marks the stream as idle; called by the pool's policy on every successful return, including a
+            manual <c>Release</c>, so a dispose after a manual release cannot route a second return.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledMemoryStream.OnDetachedFromPool">
+            <summary>
+            Detaches the pool before the pool destroys the stream, so the disposal that follows is a real
+            buffer disposal instead of another routed return.
+            </summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Specialized.PooledStringBuilder">
+            <summary>
+            A <see cref="P:DotNetCore.HayateOP.Specialized.PooledStringBuilder.StringBuilder"/> holder that knows the pool it came from: disposing it returns it to that
+            pool instead of dropping it, so a borrow/build pair can be written with <c>using</c>.
+            </summary>
+            <remarks>
+            While the instance is registered with a <see cref="T:DotNetCore.HayateOP.Specialized.StringBuilderPool"/>, <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Dispose"/> hands it
+            back through the pool's ordinary return path — validation and the clear behave exactly as for a manual
+            <c>Release</c>. The instance itself is kept alive for the next borrower; only the pool can destroy it,
+            and it does so when the builder grew past the pool's maximum capacity.<br />
+            Disposal is once-per-borrow: a second <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Dispose"/> of the same borrow is a no-op rather than
+            a duplicate return. After disposing, the instance must not be used again — if it was already returned
+            and re-borrowed by someone else, disposing it a second time would be a foreign return.<br />
+            An instance created directly (never handed out by a pool) owns nobody: <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Dispose"/> does
+            nothing and the garbage collector reclaims it.
+            </remarks>
+            <example>
+            <code>
+            using var sb = StringBuilderPool.Instance.GetObject();
+            sb.StringBuilder.Append("hello");
+            var text = sb.ToString();   // returned to the pool at the end of the block
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.#ctor(System.Int32)">
+            <summary>
+            Creates a standalone instance whose builder starts with the given capacity.
+            </summary>
+            <param name="capacity">The initial capacity of the builder.</param>
+            <remarks>
+            A standalone instance is not registered with any pool; disposing it does nothing. Only
+            <see cref="T:DotNetCore.HayateOP.Specialized.StringBuilderPool"/> produces pooled instances.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.#ctor">
+            <summary>
+            Creates a standalone instance whose builder starts with no reserved capacity.
+            </summary>
+            <remarks>
+            The parameterless constructor exists so generic pool frameworks that demand a default
+            constructor can handle the type (HayateOP's <see cref="T:DotNetCore.HayateOP.HayatePoolBuilder`1"/> requires one);
+            <see cref="T:DotNetCore.HayateOP.Specialized.StringBuilderPool"/> uses it and then reserves the configured capacity.
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Specialized.PooledStringBuilder.StringBuilder">
+            <summary>
+            The builder.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.ToString">
+            <summary>
+            Returns the builder's current content, as P89OP's wrapper does.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Dispose">
+            <summary>
+            Disposing a pooled instance returns it to its pool; disposing a standalone instance does nothing.
+            Called automatically at the end of a <c>using</c> block.
+            </summary>
+            <remarks>
+            The return goes through the pool's ordinary return path, so capacity validation and the clear
+            behave exactly as for a manual <c>Release</c> — and a builder that grew past the pool's maximum
+            capacity is destroyed here instead of being parked. The return happens exactly once per borrow;
+            every later call is a no-op.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.BindOwner(DotNetCore.HayateOP.IHayateObjectPool{DotNetCore.HayateOP.Specialized.PooledStringBuilder})">
+            <summary>Registers the owning pool; called by the pool's policy at creation time.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.OnBorrowed">
+            <summary>Marks the instance as borrowed so the next dispose performs the return.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.MarkIdle">
+            <summary>
+            Marks the instance as idle; called by the pool's policy on every successful return, including a
+            manual <c>Release</c>, so a dispose after a manual release cannot route a second return.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.OnDetachedFromPool">
+            <summary>
+            Detaches the pool before the pool destroys the instance, so nothing routes a return for a
+            destroyed instance.
+            </summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Specialized.SharedStringBuilder">
+             <summary>
+             One <see cref="T:System.Text.StringBuilder"/> shared by everyone who wants one, guarded by a single lock — the
+             thread-safe shared builder P89OP used to ship alongside its specialized pools.
+             </summary>
+             <remarks>
+             There is exactly one backing builder: acquiring it blocks every other acquirer until the holder
+             disposes, which is the deliberate trade this type makes. Where a pool hands each borrower its own
+             builder, this type hands every borrower <i>the</i> builder — zero per-use allocation beyond the
+             resulting string, at the price of serialising all users behind one lock.<br />
+             The lock boundary is <b>multi-writer, single-holder</b>: writes from one holder at a time are
+             serialized, and the reader's <see cref="M:DotNetCore.HayateOP.Specialized.SharedStringBuilderScope.ToString"/> snapshot is taken under
+             the same lock, so no writer can interleave in the middle of a snapshot and no reader can observe a
+             half-written buffer. Hold scopes briefly and never across an <c>await</c>; a long-held scope stalls
+             every other user of the shared builder.<br />
+             Disposal clears the builder and releases the lock, exactly once (a second <see cref="M:DotNetCore.HayateOP.Specialized.SharedStringBuilderScope.Dispose"/>
+             is a no-op), so the next acquirer starts from an empty builder.
+             </remarks>
+             <example>
+             <code>
+             var text = SharedStringBuilder.Build(sb => sb.Append("order: ").Append(orderId));
+            
+             using var scope = SharedStringBuilder.Acquire();
+             scope.StringBuilder.Append("hello").Append(' ').Append("world");
+             var greeting = scope.ToString();   // lock released and builder cleared at the end of the block
+             </code>
+             </example>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Specialized.SharedStringBuilder.DefaultCapacity">
+            <summary>
+            The initial capacity of the shared builder: 4096 characters, the same default tier the specialized
+            pools use.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Acquire">
+            <summary>
+            Acquires the shared builder, blocking until the previous holder has released it.
+            </summary>
+            <returns>A scope granting exclusive access to the shared builder; dispose it to clear the builder
+            and release the lock.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Build(System.Action{System.Text.StringBuilder})">
+            <summary>
+            Runs <paramref name="append"/> against the shared builder under the lock and returns the resulting
+            string, clearing the builder before releasing the lock.
+            </summary>
+            <param name="append">The callback that writes into the shared builder.</param>
+            <returns>The builder's content after <paramref name="append"/> ran.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="append"/> is <c>null</c>.</exception>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Specialized.SharedStringBuilderScope">
+            <summary>
+            Exclusive access to the shared builder, taken from <see cref="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Acquire"/>. Holding
+            it blocks every other acquirer; disposing it clears the builder and releases the lock.
+            </summary>
+            <remarks>
+            Disposal is once-only: a second <see cref="M:DotNetCore.HayateOP.Specialized.SharedStringBuilderScope.Dispose"/> is a no-op rather than a second lock release.
+            After disposal, <see cref="P:DotNetCore.HayateOP.Specialized.SharedStringBuilderScope.StringBuilder"/> and <see cref="M:DotNetCore.HayateOP.Specialized.SharedStringBuilderScope.ToString"/> throw
+            <see cref="T:System.ObjectDisposedException"/> — the builder belongs to the next acquirer.
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Specialized.SharedStringBuilderScope.StringBuilder">
+            <summary>
+            The shared builder, exclusively held for the lifetime of this scope.
+            </summary>
+            <exception cref="T:System.ObjectDisposedException">The scope has been disposed — the builder has been
+            cleared and handed to the next acquirer.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.SharedStringBuilderScope.ToString">
+            <summary>
+            Returns a snapshot of the builder's current content. The snapshot is consistent: the scope still
+            holds the lock, so no other writer can interleave.
+            </summary>
+            <exception cref="T:System.ObjectDisposedException">The scope has been disposed.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.SharedStringBuilderScope.Dispose">
+            <summary>
+            Clears the builder and releases the lock. Called automatically at the end of a <c>using</c> block.
+            </summary>
+            <remarks>
+            Happens exactly once; every later call is a no-op. Any exception thrown by the scope's body still
+            passes through the <c>using</c> disposal, so the lock is released on failure paths too.
+            </remarks>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Specialized.StringBuilderPool">
+            <summary>
+            A ready-to-use pool of <see cref="T:DotNetCore.HayateOP.Specialized.PooledStringBuilder"/> instances, aligned with P89OP's
+            <c>StringBuilderPool</c>: borrowing costs one line, <c>using</c> on the borrowed instance returns it,
+            and <see cref="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.GetObject(System.String)"/> starts a builder from an initial string.
+            </summary>
+            <remarks>
+            The pool is built on the ordinary HayateOP engine, configured the way a specialized builder pool
+            wants it: nothing is pre-created, a miss inside the pool size is served by creating a builder on
+            demand, and the background features a builder pool has no use for (auto-scaling, eviction) are
+            switched off. Validation stays on: it is what enforces the maximum capacity below, on every return.<br />
+            Builders are created with <see cref="P:DotNetCore.HayateOP.Specialized.StringBuilderPool.MinimumStringBuilderCapacity"/> characters and may grow while
+            borrowed; a builder that comes back with a capacity above <see cref="P:DotNetCore.HayateOP.Specialized.StringBuilderPool.MaximumStringBuilderCapacity"/>
+            is destroyed instead of being parked, so character buffers never linger larger than the configuration
+            allows. Returned builders are cleared before the next borrow.<br />
+            Lowering the maximum capacity clears the pool, matching P89OP: parked builders above the new maximum
+            cannot pass it. The minimum is the creation capacity only — a builder's capacity never shrinks, so
+            there is no minimum to enforce on the way back.
+            </remarks>
+            <example>
+            <code>
+            using var sb = StringBuilderPool.Instance.GetObject();
+            sb.StringBuilder.Append("hello");
+            var text = sb.ToString();   // returned to the pool at the end of the block
+            </code>
+            </example>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Specialized.StringBuilderPool.DefaultPoolMaximumSize">
+            <summary>
+            The default maximum pool size (16), the same value P89OP's <c>ObjectPool.DefaultPoolMaximumSize</c>
+            uses for its specialized pools.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Specialized.StringBuilderPool.DefaultMinimumStringBuilderCapacity">
+            <summary>
+            The default minimum string builder capacity: 4096 characters, the P89OP default.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Specialized.StringBuilderPool.DefaultMaximumStringBuilderCapacity">
+            <summary>
+            The default maximum string builder capacity: 524288 characters, the P89OP default.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Specialized.StringBuilderPool.Instance">
+            <summary>
+            A shared, thread-safe pool instance for callers that do not want to manage a pool's lifetime.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.#ctor">
+            <summary>
+            Builds a pool holding at most <see cref="F:DotNetCore.HayateOP.Specialized.StringBuilderPool.DefaultPoolMaximumSize"/> builders.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.#ctor(System.Int32)">
+            <summary>
+            Builds a pool holding at most <paramref name="maxPoolSize"/> builders.
+            </summary>
+            <param name="maxPoolSize">The maximum number of builders the pool keeps and lends out.</param>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="maxPoolSize"/> is not greater than
+            zero.</exception>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Specialized.StringBuilderPool.MinimumStringBuilderCapacity">
+            <summary>
+            The capacity a builder is created with. Defaults to <see cref="F:DotNetCore.HayateOP.Specialized.StringBuilderPool.DefaultMinimumStringBuilderCapacity"/>.
+            </summary>
+            <remarks>
+            This is the creation capacity only: a builder's capacity never shrinks, so there is no minimum to
+            enforce on the way back. Raising this value clears the pool to match P89OP's setter behaviour, so
+            the parked builders are recreated at the new size.
+            </remarks>
+            <exception cref="T:System.ArgumentOutOfRangeException">The assigned value is not greater than zero.</exception>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Specialized.StringBuilderPool.MaximumStringBuilderCapacity">
+            <summary>
+            The maximum capacity a returned builder may have to be accepted back into the pool; larger
+            builders are destroyed on return. Defaults to <see cref="F:DotNetCore.HayateOP.Specialized.StringBuilderPool.DefaultMaximumStringBuilderCapacity"/>.
+            </summary>
+            <remarks>
+            Lowering this value clears the pool: parked builders above the new maximum cannot pass it.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.GetObject">
+            <summary>
+            Acquires a builder from the pool. Synonym of <see cref="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.Acquire"/>, named as P89OP names it.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.GetObject(System.TimeSpan)">
+            <summary>
+            Acquires a builder from the pool, blocking up to the given timeout. Synonym of
+            <see cref="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.Acquire(System.TimeSpan)"/>, named as P89OP names it.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.GetObject(System.String)">
+            <summary>
+            Acquires a builder from the pool and appends <paramref name="value"/> to it, as P89OP's
+            <c>GetObject(string)</c> does.
+            </summary>
+            <param name="value">The string appended to the freshly borrowed builder; may be <c>null</c>
+            (appending nothing).</param>
+            <returns>A pooled builder whose content starts with <paramref name="value"/>.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.Acquire">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.Acquire(System.TimeSpan)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.AcquireAsync(System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.AcquireAsync(System.TimeSpan,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.Release(DotNetCore.HayateOP.Specialized.PooledStringBuilder)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.GetStats">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.TakeSnapshot">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.ReloadConfig(System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.Clear">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.GetOptions">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.CheckAvailable">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.SetUnavailable(System.String)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.SetAvailable">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.Evict(DotNetCore.HayateOP.HayateEvictReason)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.Dispose">
+            <inheritdoc />
+        </member>
+        <member name="T:DotNetCore.HayateOP.Specialized.StringBuilderPoolPolicy">
+            <summary>
+            The policy behind <see cref="T:DotNetCore.HayateOP.Specialized.StringBuilderPool"/>: creates builders at the configured capacity, guards
+            the maximum capacity on the way back, and clears returned builders.
+            </summary>
+        </member>
+    </members>
+</doc>

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <Configurations>Debug;Release</Configurations>
+        <Platforms>AnyCPU</Platforms>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <AssemblyName>DotNetCore.HayateOP.Extensions.Specialized</AssemblyName>
+        <PackageId>DotNetCore.HayateOP.Extensions.Specialized</PackageId>
+        <Description>DotNetCore Hayate Object Pool Specialized Pools Extensions</Description>
+    </PropertyGroup>
+
+	<PropertyGroup>
+		<RootNamespace />
+	</PropertyGroup>
+
+    <Import Project="..\..\common.props" />
+
+    <!-- net48 兼容（S2）：仅本库追加，不动 common.props 以免波及测试与全部扩展 -->
+    <PropertyGroup>
+        <TargetFrameworks>net48;$(TargetFrameworks)</TargetFrameworks>
+    </PropertyGroup>
+
+    <Import Project="references.props" />
+
+</Project>

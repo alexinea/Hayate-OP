@@ -18,7 +18,7 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 - **Health Checks**: ASP.NET Core health check integration to monitor pool status in production.
 - **Diagnostics**: `System.Diagnostics` bridge for advanced performance monitoring and telemetry.
 - **Configuration Binding**: Load pool settings from `appsettings.json` (global + per-pool).
-- **Cross-Version Compatibility**: Supports .NET Framework 4.8 (core, ObjectPoolCompat and DependencyInjection packages) and .NET 6/7/8/9/10 (all packages).
+- **Cross-Version Compatibility**: Supports .NET Framework 4.8 (core, ObjectPoolCompat, DependencyInjection and Specialized packages) and .NET 6/7/8/9/10 (all packages).
 
 Release notes live in [`CHANGELOG.md`](CHANGELOG.md); breaking changes and behavioural notes are
 documented in [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md).
@@ -35,6 +35,7 @@ documented in [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md).
 | `DotNetCore.HayateOP.Extensions.HealthCheck`         | ASP.NET Core Health Checks integration to monitor pool status in production.                         |
 | `DotNetCore.HayateOP.Extensions.Endpoints`           | Built-in management endpoints for monitoring and configuration.                                      |
 | `DotNetCore.HayateOP.Extensions.Diagnostics`         | Integration with System.Diagnostics for advanced performance monitoring and telemetry.               |
+| `DotNetCore.HayateOP.Extensions.Specialized`         | Ready-to-use specialized pools for `MemoryStream` and `StringBuilder`, with `using`-based returns.    |
 
 #### Supported Target Frameworks
 
@@ -43,6 +44,7 @@ documented in [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md).
 | `DotNetCore.HayateOP` | .NET Standard 2.0; .NET Framework 4.8; .NET 6/7/8/9/10 |
 | `DotNetCore.HayateOP.Extensions.ObjectPoolCompat` | .NET Framework 4.8; .NET 6/7/8/9/10 |
 | `DotNetCore.HayateOP.Extensions.DependencyInjection` | .NET Framework 4.8; .NET 6/7/8/9/10 |
+| `DotNetCore.HayateOP.Extensions.Specialized` | .NET Framework 4.8; .NET 6/7/8/9/10 |
 | All other `DotNetCore.HayateOP.Extensions.*` packages | .NET 6/7/8/9/10 |
 
 > **.NET Framework 4.8 support (added in 2.4)** targets `net48` for classic ASP.NET 4.x / WPF / WinForms
@@ -67,6 +69,7 @@ dotnet add package DotNetCore.HayateOP.Extensions.Configuration
 dotnet add package DotNetCore.HayateOP.Extensions.HealthCheck
 dotnet add package DotNetCore.HayateOP.Extensions.Endpoints
 dotnet add package DotNetCore.HayateOP.Extensions.Diagnostics
+dotnet add package DotNetCore.HayateOP.Extensions.Specialized
 ```
 
 ## Quick Start
@@ -292,6 +295,40 @@ the same object may exist under two keys, and searching every sub-pool would mak
 than borrowing. `GetPool(key)` hands back the sub-pool itself when you want its statistics, a snapshot or
 its own eviction, and every sub-pool is registered in the pool registry under `Name[key]`, so management
 endpoints and metrics can address a single key.
+
+### Specialized pools
+
+The optional [`DotNetCore.HayateOP.Extensions.Specialized`](https://www.nuget.org/packages/DotNetCore.HayateOP.Extensions.Specialized)
+package ships the ready-to-use `MemoryStream` / `StringBuilder` pools that generic engines leave to you
+(aligned with P89OP's `CodeProject.ObjectPool.Specialized`):
+
+```csharp
+using DotNetCore.HayateOP.Specialized;
+
+// A MemoryStream whose Dispose returns it to the pool — `using` is the whole borrow/return pair.
+using var stream = MemoryStreamPool.Instance.GetObject();
+stream.Write(payload, 0, payload.Length);   // empty and back in the pool after the block
+
+// The same for string building; GetObject(string) starts from an initial value.
+using var sb = StringBuilderPool.Instance.GetObject("order: ");
+sb.StringBuilder.Append(42);
+var text = sb.ToString();
+```
+
+Streams are created with 4KB and builders with 4096 characters; a returned object that grew past the
+pool's maximum capacity (512KB by default, tunable through `MaximumMemoryStreamCapacity` /
+`MaximumStringBuilderCapacity`) is destroyed on return instead of being parked, and returned objects are
+reset (empty stream, cleared builder) before the next borrow. Each pool is an ordinary
+`IHayateObjectPool<T>` underneath, so `AcquireAsync`, `GetStats` and friends work as usual, and each owns
+its own lifetime — construct it, or use the `Instance` singleton and never dispose it.
+
+`SharedStringBuilder` rounds the package out for the opposite use case: one `StringBuilder` shared by
+everyone behind a lock, where the holder's `Dispose` clears it and releases the lock — zero per-use
+allocations, at the price of serialising all users, so hold it briefly:
+
+```csharp
+var message = SharedStringBuilder.Build(b => b.Append("hello, ").Append(name));
+```
 
 ### With Dependency Injection
 
