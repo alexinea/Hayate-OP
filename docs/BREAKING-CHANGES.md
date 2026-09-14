@@ -6,6 +6,16 @@ frequently surprise adopters. For a per-version summary of all changes see
 
 ## 2.7 — Nullable reference type annotations (non-breaking)
 
+2.7's other additions — scoped borrows (`AcquireScoped` / `AcquireScopeAsync`), the
+`HayatePool.Simple` one-call factory, process-shutdown auto-dispose
+(`EnableAutoDisposeWithSystem` / `IHayateShutdownHook`), per-object metadata
+(`GetTimes` / `LastGetThreadId` / `CreateTime`), the native keyed pool
+(`ParameterizedHayatePool<TKey, TValue>`) and the specialized pools package
+(`DotNetCore.HayateOP.Extensions.Specialized`) — are purely additive: new types,
+new members and new packages only, with no change to any existing member's
+signature or behaviour. The only source-visible difference in 2.7 is the
+nullability annotation pass below.
+
 2.7 enables C# nullable reference type (NRT) analysis project-wide for every `src` assembly
 (`<Nullable>enable</Nullable>` in `asset/props/target.feature.props`). This is an additive,
 source-compatible change: every difference is the addition of `?` to a type, a null-forgiving

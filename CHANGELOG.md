@@ -10,7 +10,15 @@ Breaking changes are described in full — with migration guidance — in
 
 ## [Unreleased]
 
-## [2.7.0] - Unreleased
+## [2.7.0] - 2026-09-14
+
+Usability and ecosystem release, no breaking API change. Highlights: nullable
+reference type annotations across every `src` assembly (Q0), scoped borrows with
+a one-call factory (S2), process-shutdown auto-dispose with a pluggable shutdown
+signal (S3), per-object metadata on the wrapper and in snapshots (S4), native
+keyed object pools (`ParameterizedHayatePool<TKey, TValue>`, O-A) and a
+specialized pools extension package for `MemoryStream` / `StringBuilder` /
+shared builders aligned with P89OP (O-B).
 
 ### Added
 
@@ -328,7 +336,9 @@ No breaking change beyond the lease-context rework listed below.
 
 Initial release.
 
-[Unreleased]: https://github.com/alexinea/object-pool/compare/v2.5...HEAD
+[Unreleased]: https://github.com/alexinea/object-pool/compare/v2.7...HEAD
+[2.7.0]: https://github.com/alexinea/object-pool/compare/v2.6...v2.7
+[2.6.0]: https://github.com/alexinea/object-pool/compare/v2.5...v2.6
 [2.5.0]: https://github.com/alexinea/object-pool/compare/v2.4...v2.5
 [2.4.0]: https://github.com/alexinea/object-pool/compare/v2.3...v2.4
 [2.3.0]: https://github.com/alexinea/object-pool/compare/v2.2...v2.3
