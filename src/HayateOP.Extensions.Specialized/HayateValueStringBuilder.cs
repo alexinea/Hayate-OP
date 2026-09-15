@@ -28,9 +28,9 @@ namespace DotNetCore.HayateOP.Specialized;
 /// else. Every member other than <see cref="Dispose"/> throws <see cref="ObjectDisposedException"/>
 /// once the builder has ended.<br />
 /// <b>Views.</b> <see cref="AsSpan"/> and <see cref="TryCopyTo"/> hand out the current content without
-/// ending the borrow, but a view is invalidated by anything that moves the buffer (growth, <see cref="Clear"/>
-/// is fine, growth is not) and must not outlive the builder — after <see cref="ToString"/> or
-/// <see cref="Dispose"/> the span points into a pool buffer that the next renter owns.<br />
+/// ending the borrow, but a view is invalidated by growth (the content moves to a new buffer) and must
+/// not outlive the builder — after <see cref="ToString"/> or <see cref="Dispose"/> the span points
+/// into a pool buffer that the next renter owns.<br />
 /// This is a <c>ref struct</c>: the compiler keeps it on the stack, so it cannot be boxed, captured by
 /// a lambda, or held across an <c>await</c> — the misuse cases are compile-time errors, not runtime
 /// hazards. A thread-static fast path (ZString's thread cache, with its no-nesting rule) is a possible
@@ -39,7 +39,8 @@ namespace DotNetCore.HayateOP.Specialized;
 /// <example>
 /// <code>
 /// using var sb = new HayateValueStringBuilder();
-/// sb.Append("order: ").Append(42);
+/// sb.Append("order: ");
+/// sb.Append(42);
 /// var text = sb.ToString();   // the only allocation; the buffer is back in the pool here
 /// </code>
 /// </example>
@@ -50,6 +51,10 @@ public ref struct HayateValueStringBuilder
     /// Cosmos <c>ValueStringBuilder</c> default.
     /// </summary>
     public const int DefaultInitialCapacity = 256;
+
+    // Bound for the TryFormat grow-and-retry loop: each retry doubles the buffer, so 24 doublings
+    // cover every realistic formatted value many times over before this reports a runaway format.
+    private const int MaxFormatGrowthRetries = 24;
 
     // The rented buffer; null once ToString or Dispose handed it back. Every accessor checks it, so a
     // use-after-return surfaces as an ObjectDisposedException instead of a read into a foreign buffer.
@@ -162,20 +167,19 @@ public ref struct HayateValueStringBuilder
     /// Appends a single character.
     /// </summary>
     /// <param name="value">The character to append.</param>
-        /// <exception cref="ObjectDisposedException">The builder has ended.</exception>
-    public HayateValueStringBuilder Append(char value)
+    /// <exception cref="ObjectDisposedException">The builder has ended.</exception>
+    public void Append(char value)
     {
         ThrowIfEnded();
         EnsureCapacityFor(1);
         _buffer![_pos++] = value;
-        return this;
     }
 
     /// <summary>
     /// Appends a string; <c>null</c> appends nothing, like <see cref="StringBuilder.Append(string)"/>.
     /// </summary>
     /// <param name="value">The text to append; may be <c>null</c>.</param>
-        /// <exception cref="ObjectDisposedException">The builder has ended.</exception>
+    /// <exception cref="ObjectDisposedException">The builder has ended.</exception>
     public void Append(string? value)
     {
         if (value is null)
@@ -190,7 +194,7 @@ public ref struct HayateValueStringBuilder
     /// Appends the given span of characters.
     /// </summary>
     /// <param name="value">The characters to append.</param>
-        /// <exception cref="ObjectDisposedException">The builder has ended.</exception>
+    /// <exception cref="ObjectDisposedException">The builder has ended.</exception>
     public void Append(ReadOnlySpan<char> value)
     {
         ThrowIfEnded();
@@ -205,31 +209,189 @@ public ref struct HayateValueStringBuilder
     }
 
     /// <summary>
+    /// Appends the value through its concrete type (Z4a): strings append directly, values whose type
+    /// implements <c>ISpanFormattable</c> or <c>IFormattable</c> format through it (on net6+ straight
+    /// into the rented buffer, on net48 through an intermediate string — the same cost the builders'
+    /// own primitive appends have there), and everything else falls back to
+    /// <see cref="object.ToString"/>.
+    /// </summary>
+    /// <typeparam name="T">The value's type.</typeparam>
+    /// <param name="value">The value to append; <c>null</c> appends nothing.</param>
+    /// <param name="format">An optional format specifier, passed to the value's formatter.</param>
+    /// <remarks>
+    /// For the built-in primitives prefer the named overloads (<see cref="Append(int, string?)"/> and
+    /// friends): the generic path box-frames its interface check on value types, a 24-byte box per
+    /// call, while the named overloads write through a struct-constrained helper with no boxing at
+    /// all — the same reason ZString and Cosmos ship full sets of named appends.
+    /// </remarks>
+    /// <exception cref="ObjectDisposedException">The builder has ended.</exception>
+    /// <exception cref="FormatException">The formatted value did not fit the buffer after repeated
+    /// growth.</exception>
+    public void Append<T>(T? value, string? format = null)
+    {
+        ThrowIfEnded();
+        if (value is null)
+        {
+            return;
+        }
+
+        if (value is string text)
+        {
+            Append(text);
+            return;
+        }
+
+#if NET6_0_OR_GREATER
+        if (value is ISpanFormattable spanFormattable)
+        {
+            AppendSpanFormattableSlow(spanFormattable, format);
+            return;
+        }
+#endif
+
+        if (value is IFormattable formattable)
+        {
+            Append(formattable.ToString(format, null));
+            return;
+        }
+
+        // The unconstrained receiver makes the compiler treat the ToString result as maybe-null; an
+        // empty append is the no-op a null would have been.
+        Append(value.ToString() ?? string.Empty);
+    }
+
+    /// <summary>Appends an <see cref="int"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public void Append(int value, string? format = null) => AppendSpanFormattable(value, format);
+
+    /// <summary>Appends a <see cref="long"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public void Append(long value, string? format = null) => AppendSpanFormattable(value, format);
+
+    /// <summary>Appends a <see cref="short"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public void Append(short value, string? format = null) => AppendSpanFormattable(value, format);
+
+    /// <summary>Appends a <see cref="byte"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public void Append(byte value, string? format = null) => AppendSpanFormattable(value, format);
+
+    /// <summary>Appends a <see cref="uint"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public void Append(uint value, string? format = null) => AppendSpanFormattable(value, format);
+
+    /// <summary>Appends a <see cref="ulong"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public void Append(ulong value, string? format = null) => AppendSpanFormattable(value, format);
+
+    /// <summary>Appends a <see cref="ushort"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public void Append(ushort value, string? format = null) => AppendSpanFormattable(value, format);
+
+    /// <summary>Appends an <see cref="sbyte"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public void Append(sbyte value, string? format = null) => AppendSpanFormattable(value, format);
+
+    /// <summary>Appends a <see cref="double"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public void Append(double value, string? format = null) => AppendSpanFormattable(value, format);
+
+    /// <summary>Appends a <see cref="float"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public void Append(float value, string? format = null) => AppendSpanFormattable(value, format);
+
+    /// <summary>Appends a <see cref="decimal"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public void Append(decimal value, string? format = null) => AppendSpanFormattable(value, format);
+
+    /// <summary>Appends a <see cref="DateTime"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public void Append(DateTime value, string? format = null) => AppendSpanFormattable(value, format);
+
+    /// <summary>Appends a <see cref="DateTimeOffset"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public void Append(DateTimeOffset value, string? format = null) => AppendSpanFormattable(value, format);
+
+    /// <summary>Appends a <see cref="TimeSpan"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public void Append(TimeSpan value, string? format = null) => AppendSpanFormattable(value, format);
+
+    /// <summary>Appends a <see cref="Guid"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public void Append(Guid value, string? format = null) => AppendSpanFormattable(value, format);
+
+#if NET6_0_OR_GREATER
+    /// <summary>
+    /// Writes a struct-constrained <c>ISpanFormattable</c> value into the rented buffer, doubling on a
+    /// failed fit; the constraint devirtualizes TryFormat per type, so nothing boxes.
+    /// </summary>
+    private void AppendSpanFormattable<T>(T value, string? format)
+        where T : struct, ISpanFormattable
+    {
+        ThrowIfEnded();
+        var attempts = 0;
+        while (true)
+        {
+            if (value.TryFormat(_buffer!.AsSpan(_pos), out var written, format, default))
+            {
+                _pos += written;
+                return;
+            }
+
+            // The remaining space did not fit the formatted value: double the buffer and retry.
+            if (++attempts > MaxFormatGrowthRetries)
+            {
+                throw new FormatException(FormatWriter.FormatTooLongMessage);
+            }
+
+            EnsureCapacityFor(_buffer!.Length - _pos + 1);
+        }
+    }
+
+    /// <summary>The boxed-shape entry the generic path uses for reference-type formatters.</summary>
+    private void AppendSpanFormattableSlow(ISpanFormattable value, string? format)
+    {
+        var attempts = 0;
+        while (true)
+        {
+            if (value.TryFormat(_buffer!.AsSpan(_pos), out var written, format, default))
+            {
+                _pos += written;
+                return;
+            }
+
+            if (++attempts > MaxFormatGrowthRetries)
+            {
+                throw new FormatException(FormatWriter.FormatTooLongMessage);
+            }
+
+            EnsureCapacityFor(_buffer!.Length - _pos + 1);
+        }
+    }
+#else
+    /// <summary>
+    /// net48 has no ISpanFormattable: the named overloads degrade to IFormattable.ToString, the same
+    /// intermediate string the builders' own primitive appends cost there.
+    /// </summary>
+    private void AppendSpanFormattable<T>(T value, string? format)
+        where T : struct, IFormattable
+    {
+        ThrowIfEnded();
+        Append(value.ToString(format, null));
+    }
+#endif
+
+    /// <summary>
     /// Appends the environment's default line terminator, like <see cref="StringBuilder.AppendLine()"/>.
     /// </summary>
-        /// <exception cref="ObjectDisposedException">The builder has ended.</exception>
+    /// <exception cref="ObjectDisposedException">The builder has ended.</exception>
     public void AppendLine() => Append(Environment.NewLine);
 
     /// <summary>
     /// Appends a string followed by the environment's default line terminator; <c>null</c> appends
     /// only the terminator, like <see cref="StringBuilder.AppendLine(string)"/>.
-    /// </summary>    /// <param name="value">The text to append before the terminator; may be <c>null</c>.</param>
-        /// <exception cref="ObjectDisposedException">The builder has ended.</exception>
+    /// </summary>
+    /// <param name="value">The text to append before the terminator; may be <c>null</c>.</param>
+    /// <exception cref="ObjectDisposedException">The builder has ended.</exception>
     public void AppendLine(string? value)
-        {
-            Append(value);
-            Append(Environment.NewLine);
-        }
+    {
+        Append(value);
+        Append(Environment.NewLine);
+    }
 
     /// <summary>
     /// Resets the builder to empty while keeping the rented buffer, so the next build reuses it.
     /// </summary>
-        /// <exception cref="ObjectDisposedException">The builder has ended.</exception>
-    public HayateValueStringBuilder Clear()
+    /// <exception cref="ObjectDisposedException">The builder has ended.</exception>
+    public void Clear()
     {
         ThrowIfEnded();
         _pos = 0;
-        return this;
     }
 
     /// <summary>

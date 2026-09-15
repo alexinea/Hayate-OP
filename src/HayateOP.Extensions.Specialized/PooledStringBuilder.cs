@@ -75,6 +75,132 @@ public sealed class PooledStringBuilder : IDisposable
     public override string ToString() => StringBuilder.ToString();
 
     /// <summary>
+    /// Appends the value through its concrete type (Z4a): on net6+ an
+    /// <c>ISpanFormattable</c> value formats straight into the builder with no
+    /// intermediate string, on net48 the path degrades to <see cref="System.IFormattable"/> — the same
+    /// cost as the builder's own primitive appends there. Strings append directly on every target.
+    /// </summary>
+    /// <typeparam name="T">The value's type.</typeparam>
+    /// <param name="value">The value to append; <c>null</c> appends nothing.</param>
+    /// <param name="format">An optional format specifier, passed to the value's formatter.</param>
+    /// <returns>The same wrapper, for call chaining.</returns>
+    /// <remarks>
+    /// For the built-in primitives prefer the named overloads (<see cref="Append(int, string?)"/> and
+    /// friends): the generic path box-frames its type check on value types under shared-generic
+    /// codegen, while the named overloads write through a struct-constrained helper with no boxing.
+    /// </remarks>
+    public PooledStringBuilder Append<T>(T? value, string? format = null)
+    {
+        FormatWriter.Append(StringBuilder, value, format);
+        return this;
+    }
+
+    /// <summary>Appends an <see cref="int"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public PooledStringBuilder Append(int value, string? format = null)
+    {
+        FormatWriter.Append(StringBuilder, value, format);
+        return this;
+    }
+
+    /// <summary>Appends a <see cref="long"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public PooledStringBuilder Append(long value, string? format = null)
+    {
+        FormatWriter.Append(StringBuilder, value, format);
+        return this;
+    }
+
+    /// <summary>Appends a <see cref="short"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public PooledStringBuilder Append(short value, string? format = null)
+    {
+        FormatWriter.Append(StringBuilder, value, format);
+        return this;
+    }
+
+    /// <summary>Appends a <see cref="byte"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public PooledStringBuilder Append(byte value, string? format = null)
+    {
+        FormatWriter.Append(StringBuilder, value, format);
+        return this;
+    }
+
+    /// <summary>Appends a <see cref="uint"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public PooledStringBuilder Append(uint value, string? format = null)
+    {
+        FormatWriter.Append(StringBuilder, value, format);
+        return this;
+    }
+
+    /// <summary>Appends a <see cref="ulong"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public PooledStringBuilder Append(ulong value, string? format = null)
+    {
+        FormatWriter.Append(StringBuilder, value, format);
+        return this;
+    }
+
+    /// <summary>Appends a <see cref="ushort"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public PooledStringBuilder Append(ushort value, string? format = null)
+    {
+        FormatWriter.Append(StringBuilder, value, format);
+        return this;
+    }
+
+    /// <summary>Appends an <see cref="sbyte"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public PooledStringBuilder Append(sbyte value, string? format = null)
+    {
+        FormatWriter.Append(StringBuilder, value, format);
+        return this;
+    }
+
+    /// <summary>Appends a <see cref="double"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public PooledStringBuilder Append(double value, string? format = null)
+    {
+        FormatWriter.Append(StringBuilder, value, format);
+        return this;
+    }
+
+    /// <summary>Appends a <see cref="float"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public PooledStringBuilder Append(float value, string? format = null)
+    {
+        FormatWriter.Append(StringBuilder, value, format);
+        return this;
+    }
+
+    /// <summary>Appends a <see cref="decimal"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public PooledStringBuilder Append(decimal value, string? format = null)
+    {
+        FormatWriter.Append(StringBuilder, value, format);
+        return this;
+    }
+
+    /// <summary>Appends a <see cref="DateTime"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public PooledStringBuilder Append(DateTime value, string? format = null)
+    {
+        FormatWriter.Append(StringBuilder, value, format);
+        return this;
+    }
+
+    /// <summary>Appends a <see cref="DateTimeOffset"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public PooledStringBuilder Append(DateTimeOffset value, string? format = null)
+    {
+        FormatWriter.Append(StringBuilder, value, format);
+        return this;
+    }
+
+    /// <summary>Appends a <see cref="TimeSpan"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public PooledStringBuilder Append(TimeSpan value, string? format = null)
+    {
+        FormatWriter.Append(StringBuilder, value, format);
+        return this;
+    }
+
+    /// <summary>Appends a <see cref="Guid"/>; see <see cref="Append{T}"/> for the format contract.</summary>
+    public PooledStringBuilder Append(Guid value, string? format = null)
+    {
+        FormatWriter.Append(StringBuilder, value, format);
+        return this;
+    }
+
+    /// <summary>
     /// Converts the builder's content to a string and returns the builder to its pool in one call —
     /// CPL's <c>ToStringReturn</c>: the conversion and the return are one operation, so the borrow ends
     /// exactly where the text is produced.

@@ -4,6 +4,74 @@
         <name>DotNetCore.HayateOP.Extensions.Specialized</name>
     </assembly>
     <members>
+        <member name="T:DotNetCore.HayateOP.Specialized.FormatWriter">
+            <summary>
+            The shared fast-append writer behind the specialized package's generic <c>Append&lt;T&gt;</c>
+            surfaces and format helpers (Z4a). Values travel as their concrete generic type: on net6+ an
+            <c>ISpanFormattable</c> value formats straight into a scratch buffer and lands
+            in the target as a span — no intermediate string, no boxing; on net48 (and for the rare
+            <see cref="T:System.IFormattable"/>-only types everywhere) the path degrades to
+            <see cref="M:System.IFormattable.ToString(System.String,System.IFormatProvider)"/>, the same intermediate string
+            <c>StringBuilder.Append(int)</c> would produce there, so the legacy target is parity by
+            construction. Strings append directly on every target.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.FormatWriter.Append``1(System.Text.StringBuilder,``0,System.String,System.Int32)">
+            <summary>
+            Appends <paramref name="value"/> to <paramref name="target"/> honoring an optional
+            <c>{index,alignment:format}</c>-style request: <paramref name="format"/> passes through to the
+            value's formatter, and a non-zero <paramref name="alignment"/> pads the formatted result
+            (positive right-aligns, negative left-aligns) without ever materializing a padded copy.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.FormatWriter.Append(System.Text.StringBuilder,System.Int32,System.String,System.Int32)">
+            <summary>Appends an <see cref="T:System.Int32"/> honoring an optional format specifier and alignment.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.FormatWriter.Append(System.Text.StringBuilder,System.Int64,System.String,System.Int32)">
+            <summary>Appends a <see cref="T:System.Int64"/> honoring an optional format specifier and alignment.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.FormatWriter.Append(System.Text.StringBuilder,System.Int16,System.String,System.Int32)">
+            <summary>Appends a <see cref="T:System.Int16"/> honoring an optional format specifier and alignment.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.FormatWriter.Append(System.Text.StringBuilder,System.Byte,System.String,System.Int32)">
+            <summary>Appends a <see cref="T:System.Byte"/> honoring an optional format specifier and alignment.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.FormatWriter.Append(System.Text.StringBuilder,System.UInt32,System.String,System.Int32)">
+            <summary>Appends a <see cref="T:System.UInt32"/> honoring an optional format specifier and alignment.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.FormatWriter.Append(System.Text.StringBuilder,System.UInt64,System.String,System.Int32)">
+            <summary>Appends a <see cref="T:System.UInt64"/> honoring an optional format specifier and alignment.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.FormatWriter.Append(System.Text.StringBuilder,System.UInt16,System.String,System.Int32)">
+            <summary>Appends a <see cref="T:System.UInt16"/> honoring an optional format specifier and alignment.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.FormatWriter.Append(System.Text.StringBuilder,System.SByte,System.String,System.Int32)">
+            <summary>Appends an <see cref="T:System.SByte"/> honoring an optional format specifier and alignment.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.FormatWriter.Append(System.Text.StringBuilder,System.Double,System.String,System.Int32)">
+            <summary>Appends a <see cref="T:System.Double"/> honoring an optional format specifier and alignment.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.FormatWriter.Append(System.Text.StringBuilder,System.Single,System.String,System.Int32)">
+            <summary>Appends a <see cref="T:System.Single"/> honoring an optional format specifier and alignment.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.FormatWriter.Append(System.Text.StringBuilder,System.Decimal,System.String,System.Int32)">
+            <summary>Appends a <see cref="T:System.Decimal"/> honoring an optional format specifier and alignment.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.FormatWriter.Append(System.Text.StringBuilder,System.DateTime,System.String,System.Int32)">
+            <summary>Appends a <see cref="T:System.DateTime"/> honoring an optional format specifier and alignment.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.FormatWriter.Append(System.Text.StringBuilder,System.DateTimeOffset,System.String,System.Int32)">
+            <summary>Appends a <see cref="T:System.DateTimeOffset"/> honoring an optional format specifier and alignment.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.FormatWriter.Append(System.Text.StringBuilder,System.TimeSpan,System.String,System.Int32)">
+            <summary>Appends a <see cref="T:System.TimeSpan"/> honoring an optional format specifier and alignment.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.FormatWriter.Append(System.Text.StringBuilder,System.Guid,System.String,System.Int32)">
+            <summary>Appends a <see cref="T:System.Guid"/> honoring an optional format specifier and alignment.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.FormatWriter.AppendPadded(System.Text.StringBuilder,System.ReadOnlySpan{System.Char},System.Int32,System.Int32)">
+            <summary>Pads <paramref name="text"/> with <paramref name="padding"/> spaces around the append.</summary>
+        </member>
         <member name="T:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder">
             <summary>
             A zero-allocation, stack-only string builder in the ZString / Cosmos <c>ValueStringBuilder</c>
@@ -29,9 +97,9 @@
             else. Every member other than <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Dispose"/> throws <see cref="T:System.ObjectDisposedException"/>
             once the builder has ended.<br />
             <b>Views.</b> <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.AsSpan"/> and <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.TryCopyTo(System.Span{System.Char},System.Int32@)"/> hand out the current content without
-            ending the borrow, but a view is invalidated by anything that moves the buffer (growth, <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Clear"/>
-            is fine, growth is not) and must not outlive the builder — after <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.ToString"/> or
-            <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Dispose"/> the span points into a pool buffer that the next renter owns.<br />
+            ending the borrow, but a view is invalidated by growth (the content moves to a new buffer) and must
+            not outlive the builder — after <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.ToString"/> or <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Dispose"/> the span points
+            into a pool buffer that the next renter owns.<br />
             This is a <c>ref struct</c>: the compiler keeps it on the stack, so it cannot be boxed, captured by
             a lambda, or held across an <c>await</c> — the misuse cases are compile-time errors, not runtime
             hazards. A thread-static fast path (ZString's thread cache, with its no-nesting rule) is a possible
@@ -40,7 +108,8 @@
             <example>
             <code>
             using var sb = new HayateValueStringBuilder();
-            sb.Append("order: ").Append(42);
+            sb.Append("order: ");
+            sb.Append(42);
             var text = sb.ToString();   // the only allocation; the buffer is back in the pool here
             </code>
             </example>
@@ -125,6 +194,81 @@
             <param name="value">The characters to append.</param>
             <exception cref="T:System.ObjectDisposedException">The builder has ended.</exception>
         </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append``1(``0,System.String)">
+            <summary>
+            Appends the value through its concrete type (Z4a): strings append directly, values whose type
+            implements <c>ISpanFormattable</c> or <c>IFormattable</c> format through it (on net6+ straight
+            into the rented buffer, on net48 through an intermediate string — the same cost the builders'
+            own primitive appends have there), and everything else falls back to
+            <see cref="M:System.Object.ToString"/>.
+            </summary>
+            <typeparam name="T">The value's type.</typeparam>
+            <param name="value">The value to append; <c>null</c> appends nothing.</param>
+            <param name="format">An optional format specifier, passed to the value's formatter.</param>
+            <remarks>
+            For the built-in primitives prefer the named overloads (<see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.Int32,System.String)"/> and
+            friends): the generic path box-frames its interface check on value types, a 24-byte box per
+            call, while the named overloads write through a struct-constrained helper with no boxing at
+            all — the same reason ZString and Cosmos ship full sets of named appends.
+            </remarks>
+            <exception cref="T:System.ObjectDisposedException">The builder has ended.</exception>
+            <exception cref="T:System.FormatException">The formatted value did not fit the buffer after repeated
+            growth.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.Int32,System.String)">
+            <summary>Appends an <see cref="T:System.Int32"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.Int64,System.String)">
+            <summary>Appends a <see cref="T:System.Int64"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.Int16,System.String)">
+            <summary>Appends a <see cref="T:System.Int16"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.Byte,System.String)">
+            <summary>Appends a <see cref="T:System.Byte"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.UInt32,System.String)">
+            <summary>Appends a <see cref="T:System.UInt32"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.UInt64,System.String)">
+            <summary>Appends a <see cref="T:System.UInt64"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.UInt16,System.String)">
+            <summary>Appends a <see cref="T:System.UInt16"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.SByte,System.String)">
+            <summary>Appends an <see cref="T:System.SByte"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.Double,System.String)">
+            <summary>Appends a <see cref="T:System.Double"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.Single,System.String)">
+            <summary>Appends a <see cref="T:System.Single"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.Decimal,System.String)">
+            <summary>Appends a <see cref="T:System.Decimal"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.DateTime,System.String)">
+            <summary>Appends a <see cref="T:System.DateTime"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.DateTimeOffset,System.String)">
+            <summary>Appends a <see cref="T:System.DateTimeOffset"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.TimeSpan,System.String)">
+            <summary>Appends a <see cref="T:System.TimeSpan"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append(System.Guid,System.String)">
+            <summary>Appends a <see cref="T:System.Guid"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.AppendSpanFormattable``1(``0,System.String)">
+            <summary>
+            Writes a struct-constrained <c>ISpanFormattable</c> value into the rented buffer, doubling on a
+            failed fit; the constraint devirtualizes TryFormat per type, so nothing boxes.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.AppendSpanFormattableSlow(System.ISpanFormattable,System.String)">
+            <summary>The boxed-shape entry the generic path uses for reference-type formatters.</summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.AppendLine">
             <summary>
             Appends the environment's default line terminator, like <see cref="M:System.Text.StringBuilder.AppendLine"/>.
@@ -135,7 +279,8 @@
             <summary>
             Appends a string followed by the environment's default line terminator; <c>null</c> appends
             only the terminator, like <see cref="M:System.Text.StringBuilder.AppendLine(System.String)"/>.
-            </summary>    /// <param name="value">The text to append before the terminator; may be <c>null</c>.</param>
+            </summary>
+            <param name="value">The text to append before the terminator; may be <c>null</c>.</param>
             <exception cref="T:System.ObjectDisposedException">The builder has ended.</exception>
         </member>
         <member name="M:DotNetCore.HayateOP.Specialized.HayateValueStringBuilder.Clear">
@@ -590,6 +735,68 @@
             <summary>
             Returns the builder's current content, as P89OP's wrapper does.
             </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append``1(``0,System.String)">
+            <summary>
+            Appends the value through its concrete type (Z4a): on net6+ an
+            <c>ISpanFormattable</c> value formats straight into the builder with no
+            intermediate string, on net48 the path degrades to <see cref="T:System.IFormattable"/> — the same
+            cost as the builder's own primitive appends there. Strings append directly on every target.
+            </summary>
+            <typeparam name="T">The value's type.</typeparam>
+            <param name="value">The value to append; <c>null</c> appends nothing.</param>
+            <param name="format">An optional format specifier, passed to the value's formatter.</param>
+            <returns>The same wrapper, for call chaining.</returns>
+            <remarks>
+            For the built-in primitives prefer the named overloads (<see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append(System.Int32,System.String)"/> and
+            friends): the generic path box-frames its type check on value types under shared-generic
+            codegen, while the named overloads write through a struct-constrained helper with no boxing.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append(System.Int32,System.String)">
+            <summary>Appends an <see cref="T:System.Int32"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append(System.Int64,System.String)">
+            <summary>Appends a <see cref="T:System.Int64"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append(System.Int16,System.String)">
+            <summary>Appends a <see cref="T:System.Int16"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append(System.Byte,System.String)">
+            <summary>Appends a <see cref="T:System.Byte"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append(System.UInt32,System.String)">
+            <summary>Appends a <see cref="T:System.UInt32"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append(System.UInt64,System.String)">
+            <summary>Appends a <see cref="T:System.UInt64"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append(System.UInt16,System.String)">
+            <summary>Appends a <see cref="T:System.UInt16"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append(System.SByte,System.String)">
+            <summary>Appends an <see cref="T:System.SByte"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append(System.Double,System.String)">
+            <summary>Appends a <see cref="T:System.Double"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append(System.Single,System.String)">
+            <summary>Appends a <see cref="T:System.Single"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append(System.Decimal,System.String)">
+            <summary>Appends a <see cref="T:System.Decimal"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append(System.DateTime,System.String)">
+            <summary>Appends a <see cref="T:System.DateTime"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append(System.DateTimeOffset,System.String)">
+            <summary>Appends a <see cref="T:System.DateTimeOffset"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append(System.TimeSpan,System.String)">
+            <summary>Appends a <see cref="T:System.TimeSpan"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append(System.Guid,System.String)">
+            <summary>Appends a <see cref="T:System.Guid"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
         </member>
         <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.ToStringReturn">
             <summary>
@@ -1237,14 +1444,12 @@
         </member>
         <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.AppendValue``1(System.Text.StringBuilder,``0,System.String,System.Int32)">
             <summary>
-            Renders one argument into a pooled builder: <see cref="T:System.String"/> values append directly, values
-            with a format specifier and <see cref="T:System.IFormattable"/> support format through it, everything
-            else appends through <see cref="M:System.Object.ToString"/>. No <c>object[]</c> is built and no argument
-            is boxed, because the value travels as its concrete type <typeparamref name="T"/>.
+            Renders one argument into a pooled builder through <see cref="T:DotNetCore.HayateOP.Specialized.FormatWriter"/>: strings append
+            directly, net6+ <c>ISpanFormattable</c> values format straight into a scratch buffer
+            (Z4a's direct write), everything else falls back to <see cref="T:System.IFormattable"/> or
+            <see cref="M:System.Object.ToString"/>. No <c>object[]</c> is built and no argument is boxed, because
+            the value travels as its concrete type <typeparamref name="T"/>.
             </summary>
-        </member>
-        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.AppendAligned(System.Text.StringBuilder,System.String,System.Int32)">
-            <summary>Appends <paramref name="text"/> honoring a <c>{index,alignment}</c> pad request.</summary>
         </member>
         <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.FormatInto``1(System.Text.StringBuilder,System.String,``0)">
             <summary>

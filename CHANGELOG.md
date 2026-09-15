@@ -25,6 +25,18 @@ Breaking changes are described in full — with migration guidance — in
   HayateOP engine. Available on every target framework: net6+ natively, net48 through `System.Memory`
   — the specialized package's first net48-only NuGet dependency (the core library is unaffected);
   a thread-static fast path stays a future enhancement.
+- **Fast append surface** (Z4a): `PooledStringBuilder` and `HayateValueStringBuilder` gain generic
+  `Append<T>(value, format)` plus full sets of named primitive overloads (`int`, `long`, `short`,
+  `byte`, `uint`, `ulong`, `ushort`, `sbyte`, `double`, `float`, `decimal`, `DateTime`,
+  `DateTimeOffset`, `TimeSpan`, `Guid`). On net6+ an `ISpanFormattable` value formats straight into
+  the destination — no intermediate string, no boxing — through a struct-constrained helper whose
+  per-type instantiations devirtualize `TryFormat`; the named overloads exist because the generic
+  path box-frames its type check on value types (24 bytes per call), the same reason ZString and
+  Cosmos ship full sets of named appends. On net48 the surface degrades to `IFormattable`, the same
+  intermediate string the builders' own primitive appends cost there. The Z-C-A `Format`/`Concat`/
+  `Join` helpers route through the same writer, so their argument writes gained the direct path too,
+  and a null format now formats through `IFormattable.ToString(null)` (string.Format semantics)
+  instead of dropping custom default formatting.
 - **Declared-capacity borrows with tier routing** (Z-C-A, folding the 2.7 C-A convenience batch into
   the specialized pools with ZString semantics): `StringBuilderPool.GetObject(int minCapacity)` /
   `Acquire(int minCapacity)` (and the `MemoryStreamPool` equivalents) let the borrower declare how much

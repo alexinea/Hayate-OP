@@ -359,64 +359,14 @@ public sealed partial class StringBuilderPool
     }
 
     /// <summary>
-    /// Renders one argument into a pooled builder: <see cref="string"/> values append directly, values
-    /// with a format specifier and <see cref="IFormattable"/> support format through it, everything
-    /// else appends through <see cref="object.ToString"/>. No <c>object[]</c> is built and no argument
-    /// is boxed, because the value travels as its concrete type <typeparamref name="T"/>.
+    /// Renders one argument into a pooled builder through <see cref="FormatWriter"/>: strings append
+    /// directly, net6+ <c>ISpanFormattable</c> values format straight into a scratch buffer
+    /// (Z4a's direct write), everything else falls back to <see cref="IFormattable"/> or
+    /// <see cref="object.ToString"/>. No <c>object[]</c> is built and no argument is boxed, because
+    /// the value travels as its concrete type <typeparamref name="T"/>.
     /// </summary>
     private static void AppendValue<T>(StringBuilder builder, T? value, string? format, int alignment)
-    {
-        if (value is null)
-        {
-            if (alignment != 0)
-            {
-                AppendAligned(builder, string.Empty, alignment);
-            }
-
-            return;
-        }
-
-        if (value is string text)
-        {
-            AppendAligned(builder, text, alignment);
-            return;
-        }
-
-        if (format is not null && value is IFormattable formattable)
-        {
-            AppendAligned(builder, formattable.ToString(format, null), alignment);
-            return;
-        }
-
-        // The unconstrained receiver makes the compiler treat the ToString result as maybe-null; an
-        // empty append is the no-op a null would have been.
-        AppendAligned(builder, value.ToString() ?? string.Empty, alignment);
-    }
-
-    /// <summary>Appends <paramref name="text"/> honoring a <c>{index,alignment}</c> pad request.</summary>
-    private static void AppendAligned(StringBuilder builder, string text, int alignment)
-    {
-        if (alignment == 0)
-        {
-            builder.Append(text);
-            return;
-        }
-
-        // Positive alignment right-aligns (padding goes first), negative left-aligns; spaces are
-        // emitted directly into the builder instead of padded copies of the text.
-        var padding = (alignment > 0 ? alignment : -alignment) - text.Length;
-        if (padding > 0 && alignment > 0)
-        {
-            builder.Append(' ', padding);
-        }
-
-        builder.Append(text);
-
-        if (padding > 0 && alignment < 0)
-        {
-            builder.Append(' ', padding);
-        }
-    }
+        => FormatWriter.Append(builder, value, format, alignment);
 
     private static string FormatCore<TArguments>(TArguments arguments, string format)
         where TArguments : IFormatArguments
