@@ -299,6 +299,34 @@ than borrowing. `GetPool(key)` hands back the sub-pool itself when you want its 
 its own eviction, and every sub-pool is registered in the pool registry under `Name[key]`, so management
 endpoints and metrics can address a single key.
 
+### Unbounded pool (second pool model)
+
+`HayateUnboundedPool<T>` is the ArrayPool-style counterpart to the bounded engine: borrowing never
+blocks, never waits and never rejects — when the idle queue is empty the next borrow creates a new
+object, whatever the momentary demand. The lease is **ownership**: returning is optional, and a
+borrowed object that is never returned is simply collected by the garbage collector, so a forgotten
+return cannot leak or block anyone. The only knob is `maxIdle` — how many objects the pool retains;
+a return that arrives while that many are parked destroys the object instead, so memory does not
+grow with peak demand:
+
+```csharp
+using DotNetCore.HayateOP;
+
+var pool = new HayateUnboundedPool<MessageBuffer>(maxIdle: 64);
+
+// Serves any burst: reuse when idle objects exist, creation when they do not.
+var buffer = pool.Acquire();
+try { /* use the buffer */ }
+finally { pool.Release(buffer); }   // optional — not returning is fine too
+```
+
+It is a full `IHayateObjectPool<T>` (scoped borrows, stats, snapshots and the DI surface work
+unchanged), implements the same reset/validate-on-return hooks as the bounded engine, and reports
+`TotalDestroyed` for the returns that `MaxIdle` rejected. Choose it for transient buffers and
+short-lived large objects under bursty demand; choose the bounded engine when capacity must be
+gated against an external resource. `HayateUnboundedPool<T>` has no `MaxSize`, no timeouts, no
+rejection policies and no background features — there is nothing to wait for and nothing to scale.
+
 ### Specialized pools
 
 The optional [`DotNetCore.HayateOP.Extensions.Specialized`](https://www.nuget.org/packages/DotNetCore.HayateOP.Extensions.Specialized)
