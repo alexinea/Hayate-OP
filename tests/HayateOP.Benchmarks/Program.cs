@@ -36,6 +36,9 @@ BenchmarkRunner.Run<HayateOpBenchmarks>(args: args);
 BenchmarkRunner.Run<SpecializedStringBuilderTierBenchmarks>(args: args);
 BenchmarkRunner.Run<SpecializedStringBuilderFormatBenchmarks>(args: args);
 
+// Z-BDN: five-way line-build comparison incl. Cysharp.ZString and the Z1 value builder.
+BenchmarkRunner.Run<SpecializedStringComparisonBenchmarks>(args: args);
+
 /// <summary>
 /// Head-to-head benchmark matrix for HayateOP.
 /// </summary>
