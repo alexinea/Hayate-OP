@@ -876,6 +876,32 @@ general-purpose engine remains the choice whenever validation, eviction, leak de
 auto-scaling or sharding are required, and its per-operation cost stays above MEOP's because it
 tracks per-object state and a shard index that MEOP does not.
 
+### String building (specialized package)
+
+A dedicated comparison column (`SpecializedStringComparisonBenchmarks` in the benchmarks project,
+net10, one build of `"order: 42 units"` per operation) puts the specialized string surfaces
+head-to-head with `string.Format` and Cysharp.ZString:
+
+| Approach | Mean | Allocated |
+| :--- | ---: | ---: |
+| **HayateValueStringBuilder** (Z1 value builder) | **36.6 ns** | **56 B** |
+| Cysharp.ZString value builder | 36.1 ns | 56 B |
+| ZString.Format | 73.4 ns | 56 B |
+| `string.Format` (BCL baseline) | 89.2 ns | 80 B |
+| StringBuilder direct (fresh per call) | 45.3 ns | 160 B |
+| SharedStringBuilder (lock-guarded) | 51.8 ns | 120 B |
+| StringBuilderPool (borrow + ToStringReturn) | 341.6 ns | 440 B |
+| StringBuilderPool.Format (generic helper) | 383.6 ns | 440 B |
+
+Readings: the Z1 value builder is at parity with ZString — its 56 B is the final string alone, the
+build itself allocates nothing. The pooled rows carry the general engine's fixed 384 B borrow-cycle
+bookkeeping (see the core table above) on top of the final string, so `StringBuilderPool` trades
+allocation for observability and the capacity guard; where that floor matters and the flow is
+transient, prefer `HayateValueStringBuilder`. The declared-capacity tier rows in
+`SpecializedStringBuilderTierBenchmarks` quantify the tiering benefit separately: a 300K-character
+build that the default borrow cannot retain costs 1,229,416 B per operation; the declared borrow
+brings it to 614,864 B (0.500x) and 1,077 µs down to 413 µs.
+
 ## Known limitations
 
 Behavioural notes to be aware of before adopting HayateOP — cold boot on an empty pool, the lazy
