@@ -25,6 +25,13 @@ Breaking changes are described in full — with migration guidance — in
   HayateOP engine. Available on every target framework: net6+ natively, net48 through `System.Memory`
   — the specialized package's first net48-only NuGet dependency (the core library is unaffected);
   a thread-static fast path stays a future enhancement.
+- **Generic direct-write Build overloads** (Z6): `SharedStringBuilder.Build<T1..T8>(format, args)`
+  formats against the shared builder with `string.Format` semantics but no `object[]` and no argument
+  boxing — the values travel as their concrete types through the same direct-write formatting core the
+  pool helpers use. The lock discipline is unchanged: the write and the snapshot happen under the
+  lock, the builder is cleared before the lock is released, and a failing format releases the lock.
+  The parsing core itself moved to a shared internal class, so the pool and shared surfaces parse
+  identical grammar.
 - **Span output surface** (Z5): `PooledStringBuilder.TryCopyTo(Span<char>, out int)` hands the content
   out as chars without materializing a string — on net6+ the copy walks the builder's chunk chain
   straight into the span, on net48 it degrades through one intermediate `ToString`, never worse than

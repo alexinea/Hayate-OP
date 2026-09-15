@@ -940,15 +940,188 @@
             <returns>The builder's content after <paramref name="append"/> ran.</returns>
             <exception cref="T:System.ArgumentNullException"><paramref name="append"/> is <c>null</c>.</exception>
         </member>
-        <member name="T:DotNetCore.HayateOP.Specialized.SharedStringBuilderScope">
+        <member name="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Build``1(System.String,``0)">
             <summary>
-            Exclusive access to the shared builder, taken from <see cref="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Acquire"/>. Holding
-            it blocks every other acquirer; disposing it clears the builder and releases the lock.
+            Formats a composite format string with the given argument against the shared builder (Z6): <c>string.Format</c> semantics without boxing the argument into an <c>object[]</c>: the value is written through its concrete type, with Z4a's direct-write
+            paths for the built-in primitives.
             </summary>
+            <typeparam name="T1">The argument's type.</typeparam>
+            <param name="arg1">The value for hole <c>{0}</c>; <c>null</c> renders as empty.</param>
+            <param name="format">A composite format string (<c>{index}</c>, <c>{index,alignment}</c>,
+            <c>{index,alignment:spec}</c> holes, <c>{{</c>/<c>}}</c> escapes).</param>
+            <returns>The formatted string.</returns>
             <remarks>
-            Disposal is once-only: a second <see cref="M:DotNetCore.HayateOP.Specialized.SharedStringBuilderScope.Dispose"/> is a no-op rather than a second lock release.
-            After disposal, <see cref="P:DotNetCore.HayateOP.Specialized.SharedStringBuilderScope.StringBuilder"/> and <see cref="M:DotNetCore.HayateOP.Specialized.SharedStringBuilderScope.ToString"/> throw
-            <see cref="T:System.ObjectDisposedException"/> — the builder belongs to the next acquirer.
+            The lock discipline is exactly <see cref="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Build(System.Action{System.Text.StringBuilder})"/>'s: the write and the
+            snapshot happen under the lock, and the builder is cleared before the lock is released - on
+            failure paths too. See the one-argument overload for grammar and culture semantics.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Build``2(System.String,``0,``1)">
+            <summary>
+            Formats a composite format string with 2 arguments against the shared builder (Z6), without an <c>object[]</c> or boxing: the value is written through its concrete type, with Z4a's direct-write
+            paths for the built-in primitives.
+            </summary>
+            <typeparam name="T1">The first argument's type.</typeparam>
+            <typeparam name="T2">The second argument's type.</typeparam>
+            <param name="arg1">The value for hole <c>{0}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg2">The value for hole <c>{1}</c>; <c>null</c> renders as empty.</param>
+            <param name="format">A composite format string (<c>{index}</c>, <c>{index,alignment}</c>,
+            <c>{index,alignment:spec}</c> holes, <c>{{</c>/<c>}}</c> escapes).</param>
+            <returns>The formatted string.</returns>
+            <remarks>
+            The lock discipline is exactly <see cref="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Build(System.Action{System.Text.StringBuilder})"/>'s: the write and the
+            snapshot happen under the lock, and the builder is cleared before the lock is released - on
+            failure paths too. See the one-argument overload for grammar and culture semantics.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Build``3(System.String,``0,``1,``2)">
+            <summary>
+            Formats a composite format string with 3 arguments against the shared builder (Z6), without an <c>object[]</c> or boxing: the value is written through its concrete type, with Z4a's direct-write
+            paths for the built-in primitives.
+            </summary>
+            <typeparam name="T1">The first argument's type.</typeparam>
+            <typeparam name="T2">The second argument's type.</typeparam>
+            <typeparam name="T3">The third argument's type.</typeparam>
+            <param name="arg1">The value for hole <c>{0}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg2">The value for hole <c>{1}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg3">The value for hole <c>{2}</c>; <c>null</c> renders as empty.</param>
+            <param name="format">A composite format string (<c>{index}</c>, <c>{index,alignment}</c>,
+            <c>{index,alignment:spec}</c> holes, <c>{{</c>/<c>}}</c> escapes).</param>
+            <returns>The formatted string.</returns>
+            <remarks>
+            The lock discipline is exactly <see cref="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Build(System.Action{System.Text.StringBuilder})"/>'s: the write and the
+            snapshot happen under the lock, and the builder is cleared before the lock is released - on
+            failure paths too. See the one-argument overload for grammar and culture semantics.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Build``4(System.String,``0,``1,``2,``3)">
+            <summary>
+            Formats a composite format string with 4 arguments against the shared builder (Z6), without an <c>object[]</c> or boxing: the value is written through its concrete type, with Z4a's direct-write
+            paths for the built-in primitives.
+            </summary>
+            <typeparam name="T1">The first argument's type.</typeparam>
+            <typeparam name="T2">The second argument's type.</typeparam>
+            <typeparam name="T3">The third argument's type.</typeparam>
+            <typeparam name="T4">The fourth argument's type.</typeparam>
+            <param name="arg1">The value for hole <c>{0}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg2">The value for hole <c>{1}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg3">The value for hole <c>{2}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg4">The value for hole <c>{3}</c>; <c>null</c> renders as empty.</param>
+            <param name="format">A composite format string (<c>{index}</c>, <c>{index,alignment}</c>,
+            <c>{index,alignment:spec}</c> holes, <c>{{</c>/<c>}}</c> escapes).</param>
+            <returns>The formatted string.</returns>
+            <remarks>
+            The lock discipline is exactly <see cref="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Build(System.Action{System.Text.StringBuilder})"/>'s: the write and the
+            snapshot happen under the lock, and the builder is cleared before the lock is released - on
+            failure paths too. See the one-argument overload for grammar and culture semantics.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Build``5(System.String,``0,``1,``2,``3,``4)">
+            <summary>
+            Formats a composite format string with 5 arguments against the shared builder (Z6), without an <c>object[]</c> or boxing: the value is written through its concrete type, with Z4a's direct-write
+            paths for the built-in primitives.
+            </summary>
+            <typeparam name="T1">The first argument's type.</typeparam>
+            <typeparam name="T2">The second argument's type.</typeparam>
+            <typeparam name="T3">The third argument's type.</typeparam>
+            <typeparam name="T4">The fourth argument's type.</typeparam>
+            <typeparam name="T5">The fifth argument's type.</typeparam>
+            <param name="arg1">The value for hole <c>{0}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg2">The value for hole <c>{1}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg3">The value for hole <c>{2}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg4">The value for hole <c>{3}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg5">The value for hole <c>{4}</c>; <c>null</c> renders as empty.</param>
+            <param name="format">A composite format string (<c>{index}</c>, <c>{index,alignment}</c>,
+            <c>{index,alignment:spec}</c> holes, <c>{{</c>/<c>}}</c> escapes).</param>
+            <returns>The formatted string.</returns>
+            <remarks>
+            The lock discipline is exactly <see cref="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Build(System.Action{System.Text.StringBuilder})"/>'s: the write and the
+            snapshot happen under the lock, and the builder is cleared before the lock is released - on
+            failure paths too. See the one-argument overload for grammar and culture semantics.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Build``6(System.String,``0,``1,``2,``3,``4,``5)">
+            <summary>
+            Formats a composite format string with 6 arguments against the shared builder (Z6), without an <c>object[]</c> or boxing: the value is written through its concrete type, with Z4a's direct-write
+            paths for the built-in primitives.
+            </summary>
+            <typeparam name="T1">The first argument's type.</typeparam>
+            <typeparam name="T2">The second argument's type.</typeparam>
+            <typeparam name="T3">The third argument's type.</typeparam>
+            <typeparam name="T4">The fourth argument's type.</typeparam>
+            <typeparam name="T5">The fifth argument's type.</typeparam>
+            <typeparam name="T6">The sixth argument's type.</typeparam>
+            <param name="arg1">The value for hole <c>{0}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg2">The value for hole <c>{1}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg3">The value for hole <c>{2}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg4">The value for hole <c>{3}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg5">The value for hole <c>{4}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg6">The value for hole <c>{5}</c>; <c>null</c> renders as empty.</param>
+            <param name="format">A composite format string (<c>{index}</c>, <c>{index,alignment}</c>,
+            <c>{index,alignment:spec}</c> holes, <c>{{</c>/<c>}}</c> escapes).</param>
+            <returns>The formatted string.</returns>
+            <remarks>
+            The lock discipline is exactly <see cref="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Build(System.Action{System.Text.StringBuilder})"/>'s: the write and the
+            snapshot happen under the lock, and the builder is cleared before the lock is released - on
+            failure paths too. See the one-argument overload for grammar and culture semantics.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Build``7(System.String,``0,``1,``2,``3,``4,``5,``6)">
+            <summary>
+            Formats a composite format string with 7 arguments against the shared builder (Z6), without an <c>object[]</c> or boxing: the value is written through its concrete type, with Z4a's direct-write
+            paths for the built-in primitives.
+            </summary>
+            <typeparam name="T1">The first argument's type.</typeparam>
+            <typeparam name="T2">The second argument's type.</typeparam>
+            <typeparam name="T3">The third argument's type.</typeparam>
+            <typeparam name="T4">The fourth argument's type.</typeparam>
+            <typeparam name="T5">The fifth argument's type.</typeparam>
+            <typeparam name="T6">The sixth argument's type.</typeparam>
+            <typeparam name="T7">The seventh argument's type.</typeparam>
+            <param name="arg1">The value for hole <c>{0}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg2">The value for hole <c>{1}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg3">The value for hole <c>{2}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg4">The value for hole <c>{3}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg5">The value for hole <c>{4}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg6">The value for hole <c>{5}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg7">The value for hole <c>{6}</c>; <c>null</c> renders as empty.</param>
+            <param name="format">A composite format string (<c>{index}</c>, <c>{index,alignment}</c>,
+            <c>{index,alignment:spec}</c> holes, <c>{{</c>/<c>}}</c> escapes).</param>
+            <returns>The formatted string.</returns>
+            <remarks>
+            The lock discipline is exactly <see cref="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Build(System.Action{System.Text.StringBuilder})"/>'s: the write and the
+            snapshot happen under the lock, and the builder is cleared before the lock is released - on
+            failure paths too. See the one-argument overload for grammar and culture semantics.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Build``8(System.String,``0,``1,``2,``3,``4,``5,``6,``7)">
+            <summary>
+            Formats a composite format string with 8 arguments against the shared builder (Z6), without an <c>object[]</c> or boxing: the value is written through its concrete type, with Z4a's direct-write
+            paths for the built-in primitives.
+            </summary>
+            <typeparam name="T1">The first argument's type.</typeparam>
+            <typeparam name="T2">The second argument's type.</typeparam>
+            <typeparam name="T3">The third argument's type.</typeparam>
+            <typeparam name="T4">The fourth argument's type.</typeparam>
+            <typeparam name="T5">The fifth argument's type.</typeparam>
+            <typeparam name="T6">The sixth argument's type.</typeparam>
+            <typeparam name="T7">The seventh argument's type.</typeparam>
+            <typeparam name="T8">The eighth argument's type.</typeparam>
+            <param name="arg1">The value for hole <c>{0}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg2">The value for hole <c>{1}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg3">The value for hole <c>{2}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg4">The value for hole <c>{3}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg5">The value for hole <c>{4}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg6">The value for hole <c>{5}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg7">The value for hole <c>{6}</c>; <c>null</c> renders as empty.</param>
+            <param name="arg8">The value for hole <c>{7}</c>; <c>null</c> renders as empty.</param>
+            <param name="format">A composite format string (<c>{index}</c>, <c>{index,alignment}</c>,
+            <c>{index,alignment:spec}</c> holes, <c>{{</c>/<c>}}</c> escapes).</param>
+            <returns>The formatted string.</returns>
+            <remarks>
+            The lock discipline is exactly <see cref="M:DotNetCore.HayateOP.Specialized.SharedStringBuilder.Build(System.Action{System.Text.StringBuilder})"/>'s: the write and the
+            snapshot happen under the lock, and the builder is cleared before the lock is released - on
+            failure paths too. See the one-argument overload for grammar and culture semantics.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.Specialized.SharedStringBuilderScope.StringBuilder">
@@ -991,6 +1164,47 @@
         </member>
         <member name="M:DotNetCore.HayateOP.Specialized.SpecializedPoolAggregation.AggregateSnapshot(DotNetCore.HayateOP.IHayateObjectPool,System.Collections.Generic.IEnumerable{DotNetCore.HayateOP.IHayateObjectPool})">
             <summary>Combines the base pool's snapshot with every tier's, concatenating the per-object rows.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderFormatCore.AppendValue``1(System.Text.StringBuilder,``0,System.String,System.Int32)">
+            <summary>
+            Renders one argument: strings append directly, net6+ <c>ISpanFormattable</c> values format
+            straight into a scratch buffer (Z4a's direct write), everything else falls back to
+            <see cref="T:System.IFormattable"/> or <see cref="M:System.Object.ToString"/>. No <c>object[]</c> is built and
+            no argument is boxed, because the value travels as its concrete generic type.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderFormatCore.BuildStatic``1(System.Text.StringBuilder,``0,System.String)">
+            <summary>
+            SharedStringBuilder's lock-path formatter (Z6): writes <paramref name="format"/> against the
+            shared builder whose lock the caller holds, and returns the snapshot. The caller owns the lock
+            discipline; this clears, parses, writes and snapshots.
+            </summary>
+            <param name="shared">The shared builder, held under the caller's lock.</param>
+            <param name="arguments">The argument carrier for this arity.</param>
+            <param name="format">A composite format string.</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderFormatCore.FormatInto``1(System.Text.StringBuilder,System.String,``0)">
+            <summary>
+            Writes <paramref name="format"/> into <paramref name="builder"/>, resolving holes against
+            <paramref name="arguments"/>. The grammar is the common <c>string.Format</c> subset:
+            <c>{{</c>/<c>}}</c> escapes, <c>{index}</c>, <c>{index,alignment}</c> and
+            <c>{index,alignment:format}</c>.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderFormatCore.AppendHole``1(System.Text.StringBuilder,System.String,System.Int32,``0)">
+            <summary>
+            Parses one format hole starting at <paramref name="bracePosition"/> (a single <c>{</c>), appends
+            the argument it names, and returns the position just past the hole's closing brace.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderFormatCore.ParsePositiveInt(System.String,System.Int32@)">
+            <summary>Parses a run of decimal digits starting at <paramref name="position"/>, without allocating.</summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Specialized.StringBuilderFormatCore.IFormatArguments">
+            <summary>
+            The per-arity argument carrier the format helpers dispatch through: a struct, so the arguments
+            reach the format core without boxing, and the <c>Append</c> switch runs as a constrained call.
+            </summary>
         </member>
         <member name="T:DotNetCore.HayateOP.Specialized.StringBuilderPool">
              <summary>
@@ -1473,36 +1687,17 @@
             <returns>The joined string, or an empty string when <paramref name="values"/> is empty.</returns>
             <remarks>See the character-separator overload for borrowing semantics.</remarks>
         </member>
-        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.AppendValue``1(System.Text.StringBuilder,``0,System.String,System.Int32)">
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.FormatCore``1(``0,System.String)">
             <summary>
-            Renders one argument into a pooled builder through <see cref="T:DotNetCore.HayateOP.Specialized.FormatWriter"/>: strings append
-            directly, net6+ <c>ISpanFormattable</c> values format straight into a scratch buffer
-            (Z4a's direct write), everything else falls back to <see cref="T:System.IFormattable"/> or
-            <see cref="M:System.Object.ToString"/>. No <c>object[]</c> is built and no argument is boxed, because
-            the value travels as its concrete type <typeparamref name="T"/>.
+            Borrows one builder from the shared instance, writes <paramref name="format"/> into it and
+            returns the string; the return is atomic with the conversion, so a failure cannot leak the
+            builder.
             </summary>
         </member>
-        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.FormatInto``1(System.Text.StringBuilder,System.String,``0)">
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.ConcatCore``1(``0)">
             <summary>
-            Writes <paramref name="format"/> into <paramref name="builder"/>, resolving holes against
-            <paramref name="arguments"/>. The grammar is the common <c>string.Format</c> subset:
-            <c>{{</c>/<c>}}</c> escapes, <c>{index}</c>, <c>{index,alignment}</c> and
-            <c>{index,alignment:format}</c>.
-            </summary>
-        </member>
-        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.AppendHole``1(System.Text.StringBuilder,System.String,System.Int32,``0)">
-            <summary>
-            Parses one format hole starting at <paramref name="bracePosition"/> (a single <c>{</c>), appends
-            the argument it names, and returns the position just past the hole's closing brace.
-            </summary>
-        </member>
-        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.ParsePositiveInt(System.String,System.Int32@)">
-            <summary>Parses a run of decimal digits starting at <paramref name="position"/>, without allocating.</summary>
-        </member>
-        <member name="T:DotNetCore.HayateOP.Specialized.StringBuilderPool.IFormatArguments">
-            <summary>
-            The per-arity argument carrier the format helpers dispatch through: a struct, so the arguments
-            reach the format core without boxing, and the <c>Append</c> switch runs as a constrained call.
+            Borrows one builder from the shared instance, appends every argument in order and returns the
+            string; the return is atomic with the conversion, so a failure cannot leak the builder.
             </summary>
         </member>
         <member name="T:DotNetCore.HayateOP.Specialized.StringBuilderPoolPolicy">

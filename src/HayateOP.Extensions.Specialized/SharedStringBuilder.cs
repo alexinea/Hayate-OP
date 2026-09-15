@@ -84,17 +84,294 @@ public static class SharedStringBuilder
             Monitor.Exit(Gate);
         }
     }
-}
 
-/// <summary>
-/// Exclusive access to the shared builder, taken from <see cref="SharedStringBuilder.Acquire"/>. Holding
-/// it blocks every other acquirer; disposing it clears the builder and releases the lock.
-/// </summary>
-/// <remarks>
-/// Disposal is once-only: a second <see cref="Dispose"/> is a no-op rather than a second lock release.
-/// After disposal, <see cref="StringBuilder"/> and <see cref="ToString"/> throw
-/// <see cref="ObjectDisposedException"/> — the builder belongs to the next acquirer.
-/// </remarks>
+    /// <summary>
+    /// Formats a composite format string with the given argument against the shared builder (Z6): <c>string.Format</c> semantics without boxing the argument into an <c>object[]</c>: the value is written through its concrete type, with Z4a's direct-write
+    /// paths for the built-in primitives.
+    /// </summary>
+    /// <typeparam name="T1">The argument's type.</typeparam>
+    /// <param name="arg1">The value for hole <c>{0}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="format">A composite format string (<c>{index}</c>, <c>{index,alignment}</c>,
+    /// <c>{index,alignment:spec}</c> holes, <c>{{</c>/<c>}}</c> escapes).</param>
+    /// <returns>The formatted string.</returns>
+    /// <remarks>
+    /// The lock discipline is exactly <see cref="Build(Action{StringBuilder})"/>'s: the write and the
+    /// snapshot happen under the lock, and the builder is cleared before the lock is released - on
+    /// failure paths too. See the one-argument overload for grammar and culture semantics.
+    /// </remarks>
+    public static string Build<T1>(string format, T1? arg1)
+    {
+        Monitor.Enter(Gate);
+        try
+        {
+            return StringBuilderFormatCore.BuildStatic(Shared, new StringBuilderFormatCore.FormatArguments1<T1>(arg1), format);
+        }
+        finally
+        {
+            Shared.Clear();
+            Monitor.Exit(Gate);
+        }
+    }
+
+
+    /// <summary>
+    /// Formats a composite format string with 2 arguments against the shared builder (Z6), without an <c>object[]</c> or boxing: the value is written through its concrete type, with Z4a's direct-write
+    /// paths for the built-in primitives.
+    /// </summary>
+    /// <typeparam name="T1">The first argument's type.</typeparam>
+    /// <typeparam name="T2">The second argument's type.</typeparam>
+    /// <param name="arg1">The value for hole <c>{0}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg2">The value for hole <c>{1}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="format">A composite format string (<c>{index}</c>, <c>{index,alignment}</c>,
+    /// <c>{index,alignment:spec}</c> holes, <c>{{</c>/<c>}}</c> escapes).</param>
+    /// <returns>The formatted string.</returns>
+    /// <remarks>
+    /// The lock discipline is exactly <see cref="Build(Action{StringBuilder})"/>'s: the write and the
+    /// snapshot happen under the lock, and the builder is cleared before the lock is released - on
+    /// failure paths too. See the one-argument overload for grammar and culture semantics.
+    /// </remarks>
+    public static string Build<T1, T2>(string format, T1? arg1, T2? arg2)
+    {
+        Monitor.Enter(Gate);
+        try
+        {
+            return StringBuilderFormatCore.BuildStatic(Shared, new StringBuilderFormatCore.FormatArguments2<T1, T2>(arg1, arg2), format);
+        }
+        finally
+        {
+            Shared.Clear();
+            Monitor.Exit(Gate);
+        }
+    }
+
+
+    /// <summary>
+    /// Formats a composite format string with 3 arguments against the shared builder (Z6), without an <c>object[]</c> or boxing: the value is written through its concrete type, with Z4a's direct-write
+    /// paths for the built-in primitives.
+    /// </summary>
+    /// <typeparam name="T1">The first argument's type.</typeparam>
+    /// <typeparam name="T2">The second argument's type.</typeparam>
+    /// <typeparam name="T3">The third argument's type.</typeparam>
+    /// <param name="arg1">The value for hole <c>{0}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg2">The value for hole <c>{1}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg3">The value for hole <c>{2}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="format">A composite format string (<c>{index}</c>, <c>{index,alignment}</c>,
+    /// <c>{index,alignment:spec}</c> holes, <c>{{</c>/<c>}}</c> escapes).</param>
+    /// <returns>The formatted string.</returns>
+    /// <remarks>
+    /// The lock discipline is exactly <see cref="Build(Action{StringBuilder})"/>'s: the write and the
+    /// snapshot happen under the lock, and the builder is cleared before the lock is released - on
+    /// failure paths too. See the one-argument overload for grammar and culture semantics.
+    /// </remarks>
+    public static string Build<T1, T2, T3>(string format, T1? arg1, T2? arg2, T3? arg3)
+    {
+        Monitor.Enter(Gate);
+        try
+        {
+            return StringBuilderFormatCore.BuildStatic(Shared, new StringBuilderFormatCore.FormatArguments3<T1, T2, T3>(arg1, arg2, arg3), format);
+        }
+        finally
+        {
+            Shared.Clear();
+            Monitor.Exit(Gate);
+        }
+    }
+
+
+    /// <summary>
+    /// Formats a composite format string with 4 arguments against the shared builder (Z6), without an <c>object[]</c> or boxing: the value is written through its concrete type, with Z4a's direct-write
+    /// paths for the built-in primitives.
+    /// </summary>
+    /// <typeparam name="T1">The first argument's type.</typeparam>
+    /// <typeparam name="T2">The second argument's type.</typeparam>
+    /// <typeparam name="T3">The third argument's type.</typeparam>
+    /// <typeparam name="T4">The fourth argument's type.</typeparam>
+    /// <param name="arg1">The value for hole <c>{0}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg2">The value for hole <c>{1}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg3">The value for hole <c>{2}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg4">The value for hole <c>{3}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="format">A composite format string (<c>{index}</c>, <c>{index,alignment}</c>,
+    /// <c>{index,alignment:spec}</c> holes, <c>{{</c>/<c>}}</c> escapes).</param>
+    /// <returns>The formatted string.</returns>
+    /// <remarks>
+    /// The lock discipline is exactly <see cref="Build(Action{StringBuilder})"/>'s: the write and the
+    /// snapshot happen under the lock, and the builder is cleared before the lock is released - on
+    /// failure paths too. See the one-argument overload for grammar and culture semantics.
+    /// </remarks>
+    public static string Build<T1, T2, T3, T4>(string format, T1? arg1, T2? arg2, T3? arg3, T4? arg4)
+    {
+        Monitor.Enter(Gate);
+        try
+        {
+            return StringBuilderFormatCore.BuildStatic(Shared, new StringBuilderFormatCore.FormatArguments4<T1, T2, T3, T4>(arg1, arg2, arg3, arg4), format);
+        }
+        finally
+        {
+            Shared.Clear();
+            Monitor.Exit(Gate);
+        }
+    }
+
+
+    /// <summary>
+    /// Formats a composite format string with 5 arguments against the shared builder (Z6), without an <c>object[]</c> or boxing: the value is written through its concrete type, with Z4a's direct-write
+    /// paths for the built-in primitives.
+    /// </summary>
+    /// <typeparam name="T1">The first argument's type.</typeparam>
+    /// <typeparam name="T2">The second argument's type.</typeparam>
+    /// <typeparam name="T3">The third argument's type.</typeparam>
+    /// <typeparam name="T4">The fourth argument's type.</typeparam>
+    /// <typeparam name="T5">The fifth argument's type.</typeparam>
+    /// <param name="arg1">The value for hole <c>{0}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg2">The value for hole <c>{1}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg3">The value for hole <c>{2}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg4">The value for hole <c>{3}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg5">The value for hole <c>{4}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="format">A composite format string (<c>{index}</c>, <c>{index,alignment}</c>,
+    /// <c>{index,alignment:spec}</c> holes, <c>{{</c>/<c>}}</c> escapes).</param>
+    /// <returns>The formatted string.</returns>
+    /// <remarks>
+    /// The lock discipline is exactly <see cref="Build(Action{StringBuilder})"/>'s: the write and the
+    /// snapshot happen under the lock, and the builder is cleared before the lock is released - on
+    /// failure paths too. See the one-argument overload for grammar and culture semantics.
+    /// </remarks>
+    public static string Build<T1, T2, T3, T4, T5>(string format, T1? arg1, T2? arg2, T3? arg3, T4? arg4, T5? arg5)
+    {
+        Monitor.Enter(Gate);
+        try
+        {
+            return StringBuilderFormatCore.BuildStatic(Shared, new StringBuilderFormatCore.FormatArguments5<T1, T2, T3, T4, T5>(arg1, arg2, arg3, arg4, arg5), format);
+        }
+        finally
+        {
+            Shared.Clear();
+            Monitor.Exit(Gate);
+        }
+    }
+
+
+    /// <summary>
+    /// Formats a composite format string with 6 arguments against the shared builder (Z6), without an <c>object[]</c> or boxing: the value is written through its concrete type, with Z4a's direct-write
+    /// paths for the built-in primitives.
+    /// </summary>
+    /// <typeparam name="T1">The first argument's type.</typeparam>
+    /// <typeparam name="T2">The second argument's type.</typeparam>
+    /// <typeparam name="T3">The third argument's type.</typeparam>
+    /// <typeparam name="T4">The fourth argument's type.</typeparam>
+    /// <typeparam name="T5">The fifth argument's type.</typeparam>
+    /// <typeparam name="T6">The sixth argument's type.</typeparam>
+    /// <param name="arg1">The value for hole <c>{0}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg2">The value for hole <c>{1}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg3">The value for hole <c>{2}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg4">The value for hole <c>{3}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg5">The value for hole <c>{4}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg6">The value for hole <c>{5}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="format">A composite format string (<c>{index}</c>, <c>{index,alignment}</c>,
+    /// <c>{index,alignment:spec}</c> holes, <c>{{</c>/<c>}}</c> escapes).</param>
+    /// <returns>The formatted string.</returns>
+    /// <remarks>
+    /// The lock discipline is exactly <see cref="Build(Action{StringBuilder})"/>'s: the write and the
+    /// snapshot happen under the lock, and the builder is cleared before the lock is released - on
+    /// failure paths too. See the one-argument overload for grammar and culture semantics.
+    /// </remarks>
+    public static string Build<T1, T2, T3, T4, T5, T6>(string format, T1? arg1, T2? arg2, T3? arg3, T4? arg4, T5? arg5, T6? arg6)
+    {
+        Monitor.Enter(Gate);
+        try
+        {
+            return StringBuilderFormatCore.BuildStatic(Shared, new StringBuilderFormatCore.FormatArguments6<T1, T2, T3, T4, T5, T6>(arg1, arg2, arg3, arg4, arg5, arg6), format);
+        }
+        finally
+        {
+            Shared.Clear();
+            Monitor.Exit(Gate);
+        }
+    }
+
+
+    /// <summary>
+    /// Formats a composite format string with 7 arguments against the shared builder (Z6), without an <c>object[]</c> or boxing: the value is written through its concrete type, with Z4a's direct-write
+    /// paths for the built-in primitives.
+    /// </summary>
+    /// <typeparam name="T1">The first argument's type.</typeparam>
+    /// <typeparam name="T2">The second argument's type.</typeparam>
+    /// <typeparam name="T3">The third argument's type.</typeparam>
+    /// <typeparam name="T4">The fourth argument's type.</typeparam>
+    /// <typeparam name="T5">The fifth argument's type.</typeparam>
+    /// <typeparam name="T6">The sixth argument's type.</typeparam>
+    /// <typeparam name="T7">The seventh argument's type.</typeparam>
+    /// <param name="arg1">The value for hole <c>{0}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg2">The value for hole <c>{1}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg3">The value for hole <c>{2}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg4">The value for hole <c>{3}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg5">The value for hole <c>{4}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg6">The value for hole <c>{5}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg7">The value for hole <c>{6}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="format">A composite format string (<c>{index}</c>, <c>{index,alignment}</c>,
+    /// <c>{index,alignment:spec}</c> holes, <c>{{</c>/<c>}}</c> escapes).</param>
+    /// <returns>The formatted string.</returns>
+    /// <remarks>
+    /// The lock discipline is exactly <see cref="Build(Action{StringBuilder})"/>'s: the write and the
+    /// snapshot happen under the lock, and the builder is cleared before the lock is released - on
+    /// failure paths too. See the one-argument overload for grammar and culture semantics.
+    /// </remarks>
+    public static string Build<T1, T2, T3, T4, T5, T6, T7>(string format, T1? arg1, T2? arg2, T3? arg3, T4? arg4, T5? arg5, T6? arg6, T7? arg7)
+    {
+        Monitor.Enter(Gate);
+        try
+        {
+            return StringBuilderFormatCore.BuildStatic(Shared, new StringBuilderFormatCore.FormatArguments7<T1, T2, T3, T4, T5, T6, T7>(arg1, arg2, arg3, arg4, arg5, arg6, arg7), format);
+        }
+        finally
+        {
+            Shared.Clear();
+            Monitor.Exit(Gate);
+        }
+    }
+
+
+    /// <summary>
+    /// Formats a composite format string with 8 arguments against the shared builder (Z6), without an <c>object[]</c> or boxing: the value is written through its concrete type, with Z4a's direct-write
+    /// paths for the built-in primitives.
+    /// </summary>
+    /// <typeparam name="T1">The first argument's type.</typeparam>
+    /// <typeparam name="T2">The second argument's type.</typeparam>
+    /// <typeparam name="T3">The third argument's type.</typeparam>
+    /// <typeparam name="T4">The fourth argument's type.</typeparam>
+    /// <typeparam name="T5">The fifth argument's type.</typeparam>
+    /// <typeparam name="T6">The sixth argument's type.</typeparam>
+    /// <typeparam name="T7">The seventh argument's type.</typeparam>
+    /// <typeparam name="T8">The eighth argument's type.</typeparam>
+    /// <param name="arg1">The value for hole <c>{0}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg2">The value for hole <c>{1}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg3">The value for hole <c>{2}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg4">The value for hole <c>{3}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg5">The value for hole <c>{4}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg6">The value for hole <c>{5}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg7">The value for hole <c>{6}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="arg8">The value for hole <c>{7}</c>; <c>null</c> renders as empty.</param>
+    /// <param name="format">A composite format string (<c>{index}</c>, <c>{index,alignment}</c>,
+    /// <c>{index,alignment:spec}</c> holes, <c>{{</c>/<c>}}</c> escapes).</param>
+    /// <returns>The formatted string.</returns>
+    /// <remarks>
+    /// The lock discipline is exactly <see cref="Build(Action{StringBuilder})"/>'s: the write and the
+    /// snapshot happen under the lock, and the builder is cleared before the lock is released - on
+    /// failure paths too. See the one-argument overload for grammar and culture semantics.
+    /// </remarks>
+    public static string Build<T1, T2, T3, T4, T5, T6, T7, T8>(string format, T1? arg1, T2? arg2, T3? arg3, T4? arg4, T5? arg5, T6? arg6, T7? arg7, T8? arg8)
+    {
+        Monitor.Enter(Gate);
+        try
+        {
+            return StringBuilderFormatCore.BuildStatic(Shared, new StringBuilderFormatCore.FormatArguments8<T1, T2, T3, T4, T5, T6, T7, T8>(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8), format);
+        }
+        finally
+        {
+            Shared.Clear();
+            Monitor.Exit(Gate);
+        }
+    }
+}
 public sealed class SharedStringBuilderScope : IDisposable
 {
     private StringBuilder? _builder;
