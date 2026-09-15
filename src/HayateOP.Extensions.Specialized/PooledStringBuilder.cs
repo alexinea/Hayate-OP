@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Buffers;
+using System.IO;
 using System.Text;
 using System.Threading;
 using DotNetCore.HayateOP;
@@ -199,6 +201,95 @@ public sealed class PooledStringBuilder : IDisposable
         FormatWriter.Append(StringBuilder, value, format);
         return this;
     }
+
+    /// <summary>
+    /// Copies the builder's current content into <paramref name="destination"/> without materializing
+    /// a string (Z5): on net6+ the copy walks the builder's chunk chain straight into the span, so a
+    /// consumer that reads text as <see cref="ReadOnlySpan{Char}"/> skips the final string allocation
+    /// entirely; on net48 the builder has no span-aware copy, so the path degrades through one
+    /// intermediate <see cref="ToString"/> — never worse than the string it replaces.
+    /// </summary>
+    /// <param name="destination">The span to copy into.</param>
+    /// <param name="charsWritten">The number of characters copied; <c>0</c> when the copy failed.</param>
+    /// <returns><c>true</c> when the content fit; <c>false</c> when <paramref name="destination"/> was
+    /// too small (nothing is written).</returns>
+    /// <remarks>
+    /// The copy does not end the borrow — the builder keeps working afterwards. It is a snapshot of the
+    /// current content; appends after the copy are not reflected in it.
+    /// </remarks>
+    public bool TryCopyTo(Span<char> destination, out int charsWritten)
+    {
+        var length = StringBuilder.Length;
+        if (destination.Length < length)
+        {
+            charsWritten = 0;
+            return false;
+        }
+
+#if NET6_0_OR_GREATER
+        var written = 0;
+        foreach (var chunk in StringBuilder.GetChunks())
+        {
+            chunk.Span.CopyTo(destination.Slice(written));
+            written += chunk.Length;
+        }
+#else
+        // net48's StringBuilder has no span-aware copy; the intermediate string is the documented
+        // degradation, never worse than ToString-then-consume.
+        StringBuilder.ToString().AsSpan().CopyTo(destination);
+        var written = length;
+#endif
+        charsWritten = written;
+        return true;
+    }
+
+#if NET6_0_OR_GREATER
+    /// <summary>
+    /// Writes the builder's current content to <paramref name="target"/> as UTF-8 bytes (Z5, net6+):
+    /// the chunk chain is encoded chunk by chunk into a rented scratch buffer, so a stream consumer
+    /// skips the final string without a whole-content allocation of its own.
+    /// </summary>
+    /// <param name="target">The stream to write to, positioned wherever the caller wants the content.</param>
+    /// <remarks>
+    /// The write does not end the borrow — the builder keeps working afterwards. The method writes the
+    /// content as it stands when called; appends afterwards are not written.<br />
+    /// The encoder persists across chunks, so a surrogate pair split by a chunk boundary is still
+    /// encoded correctly; the final flush emits whatever the state held back.
+    /// </remarks>
+    public void WriteTo(Stream target)
+    {
+        // 1KB scratch: up to 1024 chars per pass even in the astral-plane worst case; larger chunks
+        // simply loop through the same buffer.
+        var scratch = ArrayPool<byte>.Shared.Rent(1024);
+        try
+        {
+            var encoder = Encoding.UTF8.GetEncoder();
+            foreach (var chunk in StringBuilder.GetChunks())
+            {
+                var span = chunk.Span;
+                while (!span.IsEmpty)
+                {
+                    // Convert (not GetBytes) is the streaming API: it reports how much it consumed on
+                    // both sides, so a chunk larger than the scratch buffer loops through it.
+                    encoder.Convert(span, scratch, flush: false, out var charsUsed, out var bytesUsed, out _);
+                    target.Write(scratch, 0, bytesUsed);
+                    span = span.Slice(charsUsed);
+                }
+            }
+
+            // Emit whatever the encoder held back (a pending surrogate, or nothing in the common case).
+            encoder.Convert(default(ReadOnlySpan<char>), scratch, flush: true, out _, out var tail, out _);
+            if (tail > 0)
+            {
+                target.Write(scratch, 0, tail);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(scratch);
+        }
+    }
+#endif
 
     /// <summary>
     /// Converts the builder's content to a string and returns the builder to its pool in one call —

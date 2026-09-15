@@ -25,6 +25,14 @@ Breaking changes are described in full — with migration guidance — in
   HayateOP engine. Available on every target framework: net6+ natively, net48 through `System.Memory`
   — the specialized package's first net48-only NuGet dependency (the core library is unaffected);
   a thread-static fast path stays a future enhancement.
+- **Span output surface** (Z5): `PooledStringBuilder.TryCopyTo(Span<char>, out int)` hands the content
+  out as chars without materializing a string — on net6+ the copy walks the builder's chunk chain
+  straight into the span, on net48 it degrades through one intermediate `ToString`, never worse than
+  the string it replaces. `WriteTo(Stream)` (net6+) streams the content as UTF-8 through a rented
+  scratch buffer with a persistent encoder, so a stream consumer skips the final string without a
+  whole-content allocation and a surrogate pair split across a chunk boundary stays intact. Neither
+  ends the borrow; both snapshot the content as it stands when called. The Z1 value builder already
+  carried `TryCopyTo` / `AsSpan` from the start.
 - **Fast append surface** (Z4a): `PooledStringBuilder` and `HayateValueStringBuilder` gain generic
   `Append<T>(value, format)` plus full sets of named primitive overloads (`int`, `long`, `short`,
   `byte`, `uint`, `ulong`, `ushort`, `sbyte`, `double`, `float`, `decimal`, `DateTime`,

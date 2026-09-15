@@ -798,6 +798,37 @@
         <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append(System.Guid,System.String)">
             <summary>Appends a <see cref="T:System.Guid"/>; see <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.Append``1(``0,System.String)"/> for the format contract.</summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.TryCopyTo(System.Span{System.Char},System.Int32@)">
+            <summary>
+            Copies the builder's current content into <paramref name="destination"/> without materializing
+            a string (Z5): on net6+ the copy walks the builder's chunk chain straight into the span, so a
+            consumer that reads text as <see cref="T:System.ReadOnlySpan`1"/> skips the final string allocation
+            entirely; on net48 the builder has no span-aware copy, so the path degrades through one
+            intermediate <see cref="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.ToString"/> — never worse than the string it replaces.
+            </summary>
+            <param name="destination">The span to copy into.</param>
+            <param name="charsWritten">The number of characters copied; <c>0</c> when the copy failed.</param>
+            <returns><c>true</c> when the content fit; <c>false</c> when <paramref name="destination"/> was
+            too small (nothing is written).</returns>
+            <remarks>
+            The copy does not end the borrow — the builder keeps working afterwards. It is a snapshot of the
+            current content; appends after the copy are not reflected in it.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.WriteTo(System.IO.Stream)">
+            <summary>
+            Writes the builder's current content to <paramref name="target"/> as UTF-8 bytes (Z5, net6+):
+            the chunk chain is encoded chunk by chunk into a rented scratch buffer, so a stream consumer
+            skips the final string without a whole-content allocation of its own.
+            </summary>
+            <param name="target">The stream to write to, positioned wherever the caller wants the content.</param>
+            <remarks>
+            The write does not end the borrow — the builder keeps working afterwards. The method writes the
+            content as it stands when called; appends afterwards are not written.<br />
+            The encoder persists across chunks, so a surrogate pair split by a chunk boundary is still
+            encoded correctly; the final flush emits whatever the state held back.
+            </remarks>
+        </member>
         <member name="M:DotNetCore.HayateOP.Specialized.PooledStringBuilder.ToStringReturn">
             <summary>
             Converts the builder's content to a string and returns the builder to its pool in one call —
