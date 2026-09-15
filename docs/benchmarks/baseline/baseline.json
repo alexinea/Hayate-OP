@@ -13,8 +13,8 @@
     "Benchmark descriptions were renamed in the same change: the previous `Hayate Lean` row -- the",
     "general-purpose engine with every optional feature off -- is now `Hayate AllOff`, and `Hayate Lean`",
     "now denotes the opt-in wrapper-free fast path (HayatePoolOptions.EnableLean). Anything comparing",
+    "PG4 threshold convergence (2026-09-15): the sub-100 ns lean rows carry widened per-target thresholds (warn 30% / fail 60%) because isolated local reruns measured them across a ~1.9x range (docs/benchmarks/2026-09-10-o1-lean-isolated-repeats.csv); the >=200 ns rows are stable and keep the global 15/30. The overrides are also the guardrails for the first CI-native capture; tighten them once real CI variance is known.",
     "against the 2.5 numbers must read `Hayate AllOff` where it previously read `Hayate Lean`.",
-    "The sub-50 ns rows sit at the resolution limit of this hardware: repeated isolated runs of the two",
     "small benchmarks (docs/benchmarks/2026-09-10-o1-lean-isolated-repeats.csv) measured MEOP between",
     "19.5 and 46.8 ns and the lean path between 30.5 and 59.2 ns, i.e. the lean path tracks MEOP within a",
     "factor of roughly 1.0-1.6. Treat the absolute figures as order-of-magnitude comparisons; the",
@@ -25,7 +25,8 @@
     "comparison. Until a CI-captured baseline is committed (see docs/benchmarks/baseline/README.md), treat results",
     "as advisory (calibration = true) and prefer the ratio-based reference rows over absolute thresholds.",
     "Only entries with gated = true participate in the pass/fail gate; reference rows are reported for context.",
-    "The Concurrent-100 suite is recorded but never gated (observed run-to-run variance is far above the thresholds)."
+    "The Concurrent-100 suite is recorded but never gated (observed run-to-run variance is far above the thresholds).",
+    "Gate policy (Q1, 2026-09-15): this file is the calibration-mode baseline. Committing a CI-native capture (workflow `update_baseline` input -> ci-baseline artifact) replaces this file with calibration = false, which switches the workflow from advisory to enforcing: failMeanPercent and the allocFailBytes gate then block. Until then the workflow stays advisory by design, not by omission."
   ],
   "thresholds": {
     "warnMeanPercent": 15.0,
@@ -54,7 +55,9 @@
       "p90Ns": 31.2,
       "p95Ns": 31.2,
       "p99Ns": 31.2,
-      "allocatedBytes": 0
+      "allocatedBytes": 0,
+      "warnMeanPercentOverride": 30.0,
+      "failMeanPercentOverride": 60.0
     },
     {
       "method": "Acquire+Release | Hayate Sharded4",
@@ -98,7 +101,9 @@
       "p90Ns": 31.4,
       "p95Ns": 31.5,
       "p99Ns": 31.5,
-      "allocatedBytes": 0
+      "allocatedBytes": 0,
+      "warnMeanPercentOverride": 30.0,
+      "failMeanPercentOverride": 60.0
     },
     {
       "method": "AcquireAsync+Release | Hayate AllOff",
@@ -120,7 +125,9 @@
       "p90Ns": 90.1,
       "p95Ns": 90.6,
       "p99Ns": 90.6,
-      "allocatedBytes": 144
+      "allocatedBytes": 144,
+      "warnMeanPercentOverride": 30.0,
+      "failMeanPercentOverride": 60.0
     },
     {
       "method": "AcquireAsync+Release | Hayate Full",

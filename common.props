@@ -10,8 +10,17 @@
         <NoWarn Condition=" '$(Configuration)' == 'Release' ">$(NoWarn);CS1591;NETSDK1138;NU1803</NoWarn>
     </PropertyGroup>
 
+    <!-- 多 TFM XML 根治（Q1）：规范路径的 XML 文档只由最高代际产出；低代际构建的文档落在
+         各自的 obj/$(TargetFramework)/ 下，作为该 TFM 资产随包分发（内容恰好是该代际的准确
+         文档）。任何构建/打包序列结束后，规范 XML 都不再被低代际的最后一次构建覆盖——
+         高代际独有成员（#if 分叉面）的文档不会丢失，此前 2.6/2.7 期间以手工 git restore 规避。 -->
+    <PropertyGroup>
+        <HayateTopTfm>net10.0</HayateTopTfm>
+    </PropertyGroup>
+
     <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
-        <DocumentationFile>$(AssemblyName).xml</DocumentationFile>
+        <DocumentationFile Condition=" '$(TargetFramework)' == '$(HayateTopTfm)' ">$(AssemblyName).xml</DocumentationFile>
+        <DocumentationFile Condition=" '$(TargetFramework)' != '$(HayateTopTfm)' ">$(BaseIntermediateOutputPath)$(TargetFramework)/$(AssemblyName).xml</DocumentationFile>
     </PropertyGroup>
 
     <Import Project="asset/props/target.feature.props"/>

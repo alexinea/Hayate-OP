@@ -10,6 +10,30 @@ Breaking changes are described in full — with migration guidance — in
 
 ## [Unreleased]
 
+### Changed
+
+- **Performance gate promotion machinery** (Q1): `scripts/bench-compare.py` now implements the
+  allocation gate that the threshold table always documented — allocation growth `>= allocFailBytes`
+  fails and `>= allocWarnBytes` warns (previously both keys were parsed but never referenced) — and
+  supports per-target `warnMeanPercentOverride` / `failMeanPercentOverride`. The PG4 convergence
+  outcome applies them to the sub-100 ns lean rows (warn 30 / fail 60), which isolated local reruns
+  measured across a ~1.9× range; the >=200 ns rows keep the global 15/30. `--emit-baseline-file`
+  writes a complete, committable baseline (schema, thresholds, capture metadata, percentiles,
+  `calibration: false`), and the workflow's `update_baseline` input produces it as the `ci-baseline`
+  artifact. `perf-regression.yml` no longer carries a static `continue-on-error`: it reads the
+  baseline's `calibration` flag and routes to a blocking or an advisory compare step accordingly, so
+  committing the CI-native baseline hardens the gate in the same commit — the runbook lives in
+  `docs/benchmarks/baseline/README.md`. Until that capture lands, the committed baseline stays in
+  calibration mode and the gate stays advisory **by design, not by omission**.
+- **Multi-TFM XML documentation fix** (root-cause fix folded into Q1): the canonical
+  `$(AssemblyName).xml` is now produced by the highest target framework only; lower-TFM builds write
+  their documentation into `obj/$(TargetFramework)/`, where it is packed as that TFM's own asset.
+  Every `lib/<tfm>/*.xml` in the package now documents exactly that TFM's API surface (previously
+  every TFM's asset carried whatever TFM built last — a net48 asset could ship documentation for
+  net6+-only members it does not have, and a stray low-TFM build could strip higher-TFM members from
+  the canonical file, which 2.6/2.7 worked around by hand-restoring the XML). The canonical file
+  survives forced single-TFM rebuilds untouched, verified.
+
 ### Added
 
 - **Zero-allocation value builder** (Z1, from the sbpool performance assessment): `HayateValueStringBuilder`

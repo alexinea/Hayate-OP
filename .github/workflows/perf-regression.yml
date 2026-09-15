@@ -5,10 +5,18 @@ name: Performance regression
 # Compares a fresh BenchmarkDotNet run of the `hot` category against the committed
 # baseline in docs/benchmarks/baseline/baseline.json (see that folder's README).
 #
-# Advisory by default: the job does not block regular pull requests
-# (continue-on-error). While the committed baseline is cross-environment
-# ("calibration": true) the results are indicative; once a CI-native baseline is
-# captured the gate can be tightened and promoted to a required check.
+# Enforcement is driven by the baseline itself: while `baseline.json` carries
+# "calibration": true (the seeded local-machine baseline), the job stays advisory
+# (continue-on-error). Once a CI-native baseline is committed — capture it with the
+# `update_baseline` input below, then replace baseline.json with the artifact it
+# produces — the flag disappears and this job blocks pull requests on
+# failMeanPercent / allocFailBytes regressions like any required check.
+#
+# Capture runbook (one-time, maintainer):
+#   1. Actions → Performance regression → Run workflow → update_baseline = true.
+#   2. Download the `ci-baseline` artifact from the finished run.
+#   3. Replace docs/benchmarks/baseline/baseline.json with the artifact's baseline.json
+#      and commit. The next run enforces.
 
 on:
   pull_request:
@@ -23,7 +31,7 @@ on:
   workflow_dispatch:
     inputs:
       update_baseline:
-        description: 'Emit a fresh CI baseline instead of gating'
+        description: 'Emit a fresh CI baseline (artifact) instead of gating'
         type: boolean
         default: false
 
@@ -37,9 +45,17 @@ jobs:
   perf:
     name: Hot-path benchmark gate
     runs-on: windows-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve gate mode from the baseline
+        id: mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          calibration=$(python -c "import json,sys; print('true' if json.load(open('docs/benchmarks/baseline/baseline.json', encoding='utf-8')).get('calibration', False) else 'false')")
+          echo "calibration=${calibration}" >> "$GITHUB_OUTPUT"
+          echo "Baseline calibration mode: ${calibration}"
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -58,15 +74,29 @@ jobs:
           set -euo pipefail
           ./tests/HayateOP.Benchmarks/bin/Release/net10.0/HayateOP.Benchmarks.exe --anyCategories hot
 
-      - name: Compare against baseline
-        if: ${{ github.event.inputs.update_baseline != 'true' }}
+      - name: Compare against baseline (blocking)
+        if: ${{ github.event.inputs.update_baseline != 'true' && steps.mode.outputs.calibration != 'true' }}
         shell: bash
         run: python scripts/bench-compare.py
 
-      - name: Emit fresh baseline (manual only)
+      - name: Compare against baseline (advisory, calibration)
+        if: ${{ github.event.inputs.update_baseline != 'true' && steps.mode.outputs.calibration == 'true' }}
+        shell: bash
+        run: python scripts/bench-compare.py --no-fail
+
+      - name: Emit fresh CI baseline (manual only)
         if: ${{ github.event.inputs.update_baseline == 'true' }}
         shell: bash
-        run: python scripts/bench-compare.py --emit-baseline
+        run: python scripts/bench-compare.py --emit-baseline-file ci-baseline/baseline.json
+
+      - name: Upload CI baseline for committing
+        if: ${{ github.event.inputs.update_baseline == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-baseline
+          path: ci-baseline/baseline.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Upload BenchmarkDotNet artifacts
         if: always()
