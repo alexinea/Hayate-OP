@@ -10,6 +10,24 @@ Breaking changes are described in full — with migration guidance — in
 
 ## [Unreleased]
 
+### Added
+
+- **Unbounded pool model** (N1, the second pool model, aligned with marklauter's `UnboundedPool`):
+  `HayateUnboundedPool<T>` borrows ArrayPool-style — it never blocks, never waits and never rejects;
+  when the idle queue is empty the next borrow creates a new object. The lease is ownership:
+  returning is optional, and a borrowed object that is never returned is left to the garbage
+  collector (the pool keeps no per-object bookkeeping, so a forgotten return cannot leak or block
+  anyone). The only knob is `maxIdle` (default 32): a return that arrives while that many objects
+  are parked destroys the object instead, bounding the resident set by policy rather than demand.
+  The pool is a full `IHayateObjectPool<T>` — scoped borrows, `GetStats`/`TakeSnapshot` and the DI
+  surface work unchanged — implements the same reset/validate-on-return hooks as the bounded engine
+  (a failed validation destroys the object), ignores timeouts on the synchronous overload and
+  completes `AcquireAsync` synchronously, and reports the new `HayatePoolStats.TotalDestroyed`
+  counter for returns rejected past `MaxIdle` and destroy sweeps. There is no `MaxSize`, no
+  rejection policy and no background machinery; `HayatePoolStats.TotalDestroyed` is 0 on the
+  bounded engine. See the "Unbounded pool" section of the README for the model choice between the
+  two.
+
 ### Changed
 
 - **Performance gate promotion machinery** (Q1): `scripts/bench-compare.py` now implements the

@@ -33,6 +33,13 @@ public class HayatePoolStats
     public long TotalAcquired { get; set; }
 
     /// <summary>
+    /// Total number of objects destroyed instead of being parked (returns rejected past
+    /// <c>MaxIdle</c>, failed validation, <c>Clear</c>/<c>Evict</c>/<c>Dispose</c> sweeps);
+    /// reported by the unbounded pool (N1), 0 on the bounded engine.
+    /// </summary>
+    public long TotalDestroyed { get; set; }
+
+    /// <summary>
         /// Number of available slots in the pool
     /// </summary>
     public int AvailableSlots { get; set; }
