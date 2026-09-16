@@ -327,6 +327,33 @@ short-lived large objects under bursty demand; choose the bounded engine when ca
 gated against an external resource. `HayateUnboundedPool<T>` has no `MaxSize`, no timeouts, no
 rejection policies and no background features — there is nothing to wait for and nothing to scale.
 
+### Preparation / reconnect strategy
+
+`IHayatePreparationStrategy<T>` (N3) closes the connection-pool gap: a strategy can check whether a
+borrowed object is actually usable and repair it asynchronously before the caller sees it, which is
+the classic reconnect flow for SMTP, database or broker connections. Install it with
+`WithPreparation` — the returned `HayatePreparationPool<T>` wraps any `IHayateObjectPool<T>`
+(bounded engine, lean, keyed sub-pool, or the unbounded pool):
+
+```csharp
+using DotNetCore.HayateOP;
+
+var pool = new HayatePoolBuilder<SmtpConnection>()
+    .WithMaxPoolSize(10)
+    .Build()
+    .WithPreparation(
+        new SmtpReconnectStrategy(),      // IHayatePreparationStrategy<SmtpConnection>
+        onDiscard: conn => conn.Dispose());
+
+var conn = await pool.AcquireAsync();    // ready or repaired, or the reconnect error throws
+```
+
+Every borrow runs `IsReadyAsync`; a not-ready object goes through `PrepareAsync` (the reconnect).
+A failed prepare hands the object to `onDiscard` and retries with another borrow (budget
+`maxPrepareAttempts`, default 3), then throws `HayatePoolPreparationException` with the last
+failure attached — a caller never receives a silently broken object. The synchronous `Acquire`
+runs the identical chain by blocking; the six policy hooks are unchanged.
+
 ### Specialized pools
 
 The optional [`DotNetCore.HayateOP.Extensions.Specialized`](https://www.nuget.org/packages/DotNetCore.HayateOP.Extensions.Specialized)
