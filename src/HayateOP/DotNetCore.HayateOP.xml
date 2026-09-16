@@ -3452,6 +3452,203 @@
             The number of lease-time records.
             </summary>
         </member>
+        <member name="T:DotNetCore.HayateOP.HayatePreparationPool`1">
+             <summary>
+             Wraps any <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/> with an <see cref="T:DotNetCore.HayateOP.IHayatePreparationStrategy`1"/>
+             (N3): every borrow runs the strategy's ready-check and, when the object is not ready, its
+             asynchronous prepare (reconnect) — so the caller receives a usable object or an exception, never
+             a silently broken one.
+             </summary>
+             <remarks>
+             The wrapper is transparent for everything else: <see cref="M:DotNetCore.HayateOP.HayatePreparationPool`1.Release(`0)"/>, statistics, snapshots and
+             every other member delegate to the inner pool unchanged, and objects that pass the ready-check
+             cost exactly one asynchronous no-op round-trip over a plain borrow.<br />
+             <b>Failure handling.</b> When <see cref="M:DotNetCore.HayateOP.IHayatePreparationStrategy`1.PrepareAsync(`0,System.Threading.CancellationToken)"/> fails
+             (throws), the object is handed to the constructor's <c>onDiscard</c> callback — give it the
+             object's real disposal (a connection's <c>Dispose</c>) so a broken connection does not linger —
+             and the borrow retries with another object. When the retry budget (<c>maxPrepareAttempts</c>,
+             default 3) is exhausted, the last exception propagates to the caller. A retry borrows again from the inner
+             pool, which may create a fresh object; the strategy then sees that object and typically reports
+             it ready or prepares it with the initial handshake.<br />
+             <b>Sync over async.</b> The synchronous <see cref="M:DotNetCore.HayateOP.HayatePreparationPool`1.Acquire"/> runs the same chain by blocking on
+             it (<c>GetAwaiter().GetResult()</c>). That keeps the semantics identical across the sync and
+             async paths (like HikariCP's <c>getConnection</c> testing connections under the hood), but a
+             strategy doing real I/O will block the calling thread, and blocking on tasks under a
+             <see cref="T:System.Threading.SynchronizationContext"/> can deadlock — under such a host, borrow asynchronously.
+             </remarks>
+             <example>
+             <code>
+             var pool = new HayatePoolBuilder&lt;SmtpConnection&gt;()
+                 .WithMaxPoolSize(10)
+                 .Build()
+                 .WithPreparation(
+                     new SmtpReconnectStrategy(),
+                     onDiscard: conn =&gt; conn.Dispose());
+            
+             var conn = await pool.AcquireAsync();   // ready or repaired, or the reconnect error throws
+             </code>
+             </example>
+             <typeparam name="T">The pooled object type.</typeparam>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.#ctor(DotNetCore.HayateOP.IHayateObjectPool{`0},DotNetCore.HayateOP.IHayatePreparationStrategy{`0},System.Action{`0},System.Int32)">
+            <summary>
+            Wraps <paramref name="inner"/> with the given preparation strategy.
+            </summary>
+            <param name="inner">The pool providing the objects.</param>
+            <param name="strategy">The ready-check / prepare strategy run on every borrow.</param>
+            <param name="onDiscard">Invoked with an object whose preparation failed, before the borrow
+            retries; typically the object's real disposal. <c>null</c> leaves the object to the
+            GC.</param>
+            <param name="maxPrepareAttempts">How many objects a single borrow may run through the
+            prepare chain before the last failure propagates; must be greater than zero.</param>
+            <exception cref="T:System.ArgumentNullException"><paramref name="inner"/> or
+            <paramref name="strategy"/> is <c>null</c>.</exception>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="maxPrepareAttempts"/> is not
+            greater than zero.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.Acquire">
+            <summary>
+            Acquires an object from the inner pool and runs the preparation chain (ready-check, then
+            prepare if needed) before delivering it, blocking on the asynchronous chain.
+            </summary>
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.Acquire(System.TimeSpan)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.AcquireAsync(System.Threading.CancellationToken)">
+            <summary>
+            Acquires an object from the inner pool and runs the preparation chain (ready-check, then
+            prepare if needed) before delivering it.
+            </summary>
+            <remarks>
+            Each attempt borrows from the inner pool: a ready object is delivered immediately; a
+            not-ready object goes through <see cref="M:DotNetCore.HayateOP.IHayatePreparationStrategy`1.PrepareAsync(`0,System.Threading.CancellationToken)"/>; a
+            failed prepare discards the object and retries with another borrow. When the attempt budget
+            is exhausted the last prepare failure propagates, so a caller never receives a silently
+            broken object — it either gets a usable one or the reconnect error.
+            </remarks>
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.AcquireAsync(System.TimeSpan,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.Release(`0)">
+            <summary>
+            Returns an object to the inner pool; delegated unchanged.
+            </summary>
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.GetStats">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.TakeSnapshot">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.ReloadConfig(System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <summary>
+            The inner pool is reconfigured; the preparation strategy is unaffected.
+            </summary>
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.Clear">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.GetOptions">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.CheckAvailable">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.SetUnavailable(System.String)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.SetAvailable">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.Evict(DotNetCore.HayateOP.HayateEvictReason)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.Dispose">
+            <summary>
+            Disposes the inner pool. The preparation strategy carries no resources of its own.
+            </summary>
+            <inheritdoc />
+        </member>
+        <member name="T:DotNetCore.HayateOP.HayatePoolPreparationException">
+            <summary>
+            Thrown by <see cref="M:DotNetCore.HayateOP.HayatePreparationPool`1.AcquireAsync(System.Threading.CancellationToken)"/> when the preparation strategy
+            failed for every object the borrow ran through the prepare chain; the last strategy failure is
+            attached as the inner exception.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolPreparationException.#ctor(System.String,System.Exception)">
+            <summary>
+            Builds the exception with the attempt count in the message and the last strategy failure
+            attached.
+            </summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.HayatePreparationPoolExtensions">
+            <summary>
+            Install helpers for <see cref="T:DotNetCore.HayateOP.IHayatePreparationStrategy`1"/> (N3).
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPoolExtensions.WithPreparation``1(DotNetCore.HayateOP.IHayateObjectPool{``0},DotNetCore.HayateOP.IHayatePreparationStrategy{``0},System.Action{``0},System.Int32)">
+            <summary>
+            Wraps this pool with <paramref name="strategy"/>, so every borrow runs the ready-check and,
+            when the object is not ready, the asynchronous prepare (reconnect) before the caller sees
+            it. See <see cref="T:DotNetCore.HayateOP.HayatePreparationPool`1"/> for the failure handling and the sync-over-
+            async caveat of the synchronous borrows.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="pool">The pool providing the objects.</param>
+            <param name="strategy">The ready-check / prepare strategy run on every borrow.</param>
+            <param name="onDiscard">Invoked with an object whose preparation failed; typically the
+            object's real disposal.</param>
+            <param name="maxPrepareAttempts">How many objects a single borrow may run through the
+            prepare chain before the last failure propagates.</param>
+            <returns>A pool whose borrows deliver ready-or-repaired objects.</returns>
+        </member>
+        <member name="T:DotNetCore.HayateOP.IHayatePreparationStrategy`1">
+            <summary>
+            An asynchronous preparation strategy (N3), aligned with marklauter's
+            <c>IPreparationStrategy</c>: every borrow can check whether the object is actually ready to use
+            and — when it is not — repair it asynchronously before the caller sees it, which is the classic
+            reconnect flow of a connection pool (SMTP, database, message broker).
+            </summary>
+            <remarks>
+            Install a strategy with <c>pool.WithPreparation(strategy)</c>
+            (see <see cref="T:DotNetCore.HayateOP.HayatePreparationPoolExtensions"/>); the returned
+            <see cref="T:DotNetCore.HayateOP.HayatePreparationPool`1"/> wraps any <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/> — the bounded
+            engine, the lean fast path, keyed sub-pools, or <see cref="T:DotNetCore.HayateOP.HayateUnboundedPool`1"/> — and runs
+            the check/prepare chain on every borrow. The six synchronous policy hooks are unchanged; this
+            interface exists precisely because "reconnect the connection" cannot be expressed in them.<br />
+            The methods are plain <c>Task</c>-based (not value-task based) so the
+            interface is available on every target framework, including net48 and netstandard2.0.
+            </remarks>
+            <typeparam name="T">The pooled object type.</typeparam>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayatePreparationStrategy`1.IsReadyAsync(`0,System.Threading.CancellationToken)">
+            <summary>
+            Reports whether <paramref name="item"/> is ready to be handed to a borrower right now (for a
+            connection: still connected and responsive).
+            </summary>
+            <param name="item">The object just taken from the pool.</param>
+            <param name="cancellationToken">Propagated from the borrow call.</param>
+            <returns><c>true</c> to deliver the object as-is; <c>false</c> to run
+            <see cref="M:DotNetCore.HayateOP.IHayatePreparationStrategy`1.PrepareAsync(`0,System.Threading.CancellationToken)"/> first.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayatePreparationStrategy`1.PrepareAsync(`0,System.Threading.CancellationToken)">
+            <summary>
+            Prepares <paramref name="item"/> for the borrower — typically the asynchronous reconnect or
+            re-authentication of a dropped connection.
+            </summary>
+            <param name="item">The object that reported not-ready.</param>
+            <param name="cancellationToken">Propagated from the borrow call.</param>
+            <exception cref="T:System.Exception">A failure means the object could not be repaired; the
+            preparation pool destroys it and retries with another (up to the configured attempt
+            limit).</exception>
+        </member>
         <member name="T:DotNetCore.HayateOP.HayateShardAffinityMode">
             <summary>
             The shard-affinity mode for the borrow path (2.5).

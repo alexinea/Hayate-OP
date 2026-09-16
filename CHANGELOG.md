@@ -12,6 +12,20 @@ Breaking changes are described in full — with migration guidance — in
 
 ### Added
 
+- **Asynchronous preparation / reconnect strategy** (N3, closing the marklauter connection-pool
+  gap): `IHayatePreparationStrategy<T>` with `IsReadyAsync` / `PrepareAsync`, installed through
+  `pool.WithPreparation(strategy, onDiscard, maxPrepareAttempts)` which wraps any
+  `IHayateObjectPool<T>` — the bounded engine, the lean fast path, keyed sub-pools, or
+  `HayateUnboundedPool<T>` — in a `HayatePreparationPool<T>`. Every borrow runs the ready-check;
+  a not-ready object goes through the asynchronous prepare (the classic reconnect), so the caller
+  receives a usable object or the reconnect error, never a silently broken one. A failed prepare
+  hands the object to `onDiscard` (give it the object's real disposal) and retries with another
+  borrow; when the budget (default 3) is exhausted the last failure propagates as
+  `HayatePoolPreparationException`, and cancellation propagates with the object discarded. The
+  synchronous `Acquire` runs the identical chain by blocking on it (documented sync-over-async
+  caveat under a `SynchronizationContext`); everything else delegates to the inner pool. The six
+  synchronous policy hooks are unchanged — the interface exists precisely because reconnecting a
+  connection cannot be expressed in them.
 - **Unbounded pool model** (N1, the second pool model, aligned with marklauter's `UnboundedPool`):
   `HayateUnboundedPool<T>` borrows ArrayPool-style — it never blocks, never waits and never rejects;
   when the idle queue is empty the next borrow creates a new object. The lease is ownership:
