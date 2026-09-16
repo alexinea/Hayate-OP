@@ -143,6 +143,23 @@ public class HayatePoolOptions
     /// </example>
     public bool EnableLean { get; set; } = false;
 
+    /// <summary>
+    /// When set together with <see cref="EnableLean"/>, the lean buffer's slot array is rented from
+    /// <c>ArrayPool{T}</c> and grows on demand up to <see cref="MaxPoolSize"/>
+    /// (O-D, the ArrayPool direct-storage backend): the buffer no longer occupies
+    /// <c>MaxPoolSize</c> slots for the pool's whole lifetime, so large pools keep only the array
+    /// the demand actually reached, and the storage returns to the shared pool on
+    /// <c>Dispose</c>. The semantics are otherwise identical to lean mode — same ceiling, same
+    /// wrapper-free borrow/return, same reject policies. Available on net6.0 and above
+    /// (<c>System.Buffers.ArrayPool</c> is a BCL type there); on the older targets the flag is
+    /// ignored and lean mode keeps its fixed buffer.
+    /// </summary>
+    /// <remarks>
+    /// Not part of the feature-profile normalization: like <see cref="EnableLean"/> it is a storage
+    /// shape, not a bookkeeping switch, so <see cref="UseLeanProfile"/> leaves it alone.
+    /// </remarks>
+    public bool EnableArrayPoolStorage { get; set; } = false;
+
     #endregion
 
     #region Sharding strategy

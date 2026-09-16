@@ -1,4 +1,7 @@
 using System.Collections.Concurrent;
+#if NET6_0_OR_GREATER
+using System.Buffers;
+#endif
 using System.Diagnostics;
 using DotNetCore.HayateOP.Common;
 using DotNetCore.HayateOP.Logging;
@@ -258,6 +261,24 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _leanCapacity = _enableLean ? _options.MaxPoolSize : 0;
         _leanRetentionEnabled = _leanCapacity > 0;
         _leanSlots = _leanRetentionEnabled ? new T[_leanCapacity - 1] : Array.Empty<T>();
+
+#if NET6_0_OR_GREATER
+        // O-D: the ArrayPool direct-storage backend. Rented only when opted in; the fixed-buffer
+        // lean path (and every other mode) keeps its exact current allocation shape.
+        _enableArrayPoolStorage = _enableLean && _options.EnableArrayPoolStorage;
+        _apSlotLimit = _enableArrayPoolStorage ? _leanCapacity - 1 : 0;
+        _apSlots = _enableArrayPoolStorage
+            ? (_leanRetentionEnabled
+                ? ArrayPool<T>.Shared.Rent(Math.Min(_leanCapacity - 1, DefaultArrayPoolStorageSlots))
+                : Array.Empty<T>())
+            : Array.Empty<T>();
+#else
+        // System.Buffers.ArrayPool is not a BCL type on netstandard2.0/net48; the flag is ignored
+        // there and lean mode keeps its fixed buffer.
+        _enableArrayPoolStorage = false;
+        _apSlotLimit = 0;
+        _apSlots = Array.Empty<T>();
+#endif
 
         _waitForWarmup = _options.WaitForWarmup;
         _enableAllocationTracking = _options.EnableAllocationTracking;
@@ -2283,6 +2304,16 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         // Release the return-signal gate (same precondition as the timers: no in-flight Acquire waiters at Dispose time)
         _blockGate.Dispose();
+
+#if NET6_0_OR_GREATER
+        // O-D: hand the rented slot array back to the shared pool. Clear() already emptied every
+        // slot, so the array is clean to reuse.
+        if (_enableArrayPoolStorage && _apSlots.Length > 0)
+        {
+            ArrayPool<T>.Shared.Return((T[])(object)_apSlots);
+            _apSlots = Array.Empty<T>();
+        }
+#endif
 
         _logger.LogInformation("Object pool disposed. Type: {Type}", typeof(T).Name);
     }

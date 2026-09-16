@@ -1,4 +1,7 @@
 using System;
+#if NET6_0_OR_GREATER
+using System.Buffers;
+#endif
 using System.Threading;
 using System.Threading.Tasks;
 using DotNetCore.HayateOP.Common;
@@ -44,9 +47,32 @@ public partial class HayatePoolBasic<T>
     // giving the pool a hard ceiling on how many objects it will ever create.
     private long _leanLive;
 
+    // O-D: ArrayPool direct-storage backend. When enabled, _apSlots replaces _leanSlots as the
+    // slot array: it is rented from ArrayPool<T>.Shared (net6+), grows on demand (×2) up to the
+    // MaxPoolSize - 1 slot ceiling, and is returned to the shared pool on Dispose, so a large pool
+    // only holds the array its demand actually reached. The fast lane (_leanFirstItem) is shared
+    // with the fixed-buffer mode. Volatile: borrowers and returners observe the current array
+    // through the volatile read, while a grow replaces the reference with a CAS. On netstandard2.0
+    // / net48 the flag stays false (ArrayPool<T> is not a BCL type there) and lean keeps its
+    // fixed buffer.
+    private readonly bool _enableArrayPoolStorage;
+    private volatile T?[] _apSlots;
+
+    // The logical slot ceiling of the ArrayPool backend: MaxPoolSize - 1 (the fast lane holds one).
+    // The rented array can be physically larger (ArrayPool returns bucket-aligned sizes), so the
+    // capacity decisions must compare against this limit, never against _apSlots.Length.
+    private readonly int _apSlotLimit;
+
     #endregion
 
     #region Lean creation and storage
+
+    // Initial rented array size (slots beyond the fast lane): 31 slots + the fast lane = 32
+    // objects retained without growing, matching the default MEOP start. Grows ×2 on demand.
+    private const int DefaultArrayPoolStorageSlots = 31;
+
+    /// <summary>The slot array the lean buffer currently stores into (fast lane excluded).</summary>
+    private T?[] LeanSlotArray => _enableArrayPoolStorage ? _apSlots : _leanSlots;
 
     /// <summary>
     /// Creates a pooled value without a wrapper and without a registry entry.
@@ -129,8 +155,9 @@ public partial class HayatePoolBasic<T>
             return true;
         }
 
-        var slots = _leanSlots;
-        for (var i = 0; i < slots.Length; i++)
+        var slots = LeanSlotArray;
+        var scanLimit = _enableArrayPoolStorage ? Math.Min(slots.Length, _apSlotLimit) : slots.Length;
+        for (var i = 0; i < scanLimit; i++)
         {
             var slot = slots[i];
             if (slot is not null &&
@@ -165,8 +192,9 @@ public partial class HayatePoolBasic<T>
             return true;
         }
 
-        var slots = _leanSlots;
-        for (var i = 0; i < slots.Length; i++)
+        var slots = LeanSlotArray;
+        var scanLimit = _enableArrayPoolStorage ? Math.Min(slots.Length, _apSlotLimit) : slots.Length;
+        for (var i = 0; i < scanLimit; i++)
         {
             if (slots[i] is null &&
                 Interlocked.CompareExchange(ref slots[i], item, null) is null)
@@ -175,8 +203,62 @@ public partial class HayatePoolBasic<T>
             }
         }
 
+        // Full within the logical limit: in ArrayPool mode a physically smaller array can still be
+        // grown toward the ceiling; otherwise full is final and the caller drops the object.
+#if NET6_0_OR_GREATER
+        if (_enableArrayPoolStorage && slots.Length < _apSlotLimit)
+        {
+            return TryGrowLeanSlotsAndReturn(item);
+        }
+#endif
         return false;
     }
+
+#if NET6_0_OR_GREATER
+    /// <summary>
+    /// Grows the rented slot array (O-D) by doubling up to the <c>MaxPoolSize - 1</c> slot ceiling,
+    /// moves the existing content across, returns the old array to the shared pool, and places
+    /// <paramref name="item"/> into the first fresh slot.
+    /// </summary>
+    /// <returns><c>true</c> when the object was retained in the grown array; <c>false</c> when the
+    /// ceiling is already reached — the caller then drops the object, as in fixed-buffer mode.</returns>
+    /// <remarks>
+    /// The new array is filled before it is published, so a scanner can never observe a null slot
+    /// where this return is about to land; on a lost publish race the item is taken back, the grown
+    /// array is returned, and the loop retries against the current array.
+    /// </remarks>
+    private bool TryGrowLeanSlotsAndReturn(T item)
+    {
+        while (true)
+        {
+            var current = _apSlots;
+            var slotCeiling = _apSlotLimit;
+            if (current.Length >= slotCeiling)
+            {
+                return false;
+            }
+
+            var doubled = current.Length * 2;
+            if (doubled < 0 || doubled < current.Length)
+            {
+                doubled = int.MaxValue - 1;
+            }
+
+            var grown = ArrayPool<T>.Shared.Rent(Math.Min(doubled, slotCeiling));
+            Array.Copy(current, grown, current.Length);
+
+            grown[current.Length] = item;
+            if (Interlocked.CompareExchange(ref _apSlots, grown, current) == current)
+            {
+                ArrayPool<T>.Shared.Return((T[])(object)current);
+                return true;
+            }
+
+            grown[current.Length] = null!;
+            ArrayPool<T>.Shared.Return((T[])(object)grown);
+        }
+    }
+#endif
 
     /// <summary>
     /// Counts the idle objects currently retained in the lean buffer. Diagnostic path only — the
@@ -186,9 +268,10 @@ public partial class HayatePoolBasic<T>
     private int CountLeanIdle()
     {
         var count = _leanFirstItem is null ? 0 : 1;
-        var slots = _leanSlots;
+        var slots = LeanSlotArray;
+        var scanLimit = _enableArrayPoolStorage ? Math.Min(slots.Length, _apSlotLimit) : slots.Length;
 
-        for (var i = 0; i < slots.Length; i++)
+        for (var i = 0; i < scanLimit; i++)
         {
             if (slots[i] is not null) count++;
         }
@@ -276,8 +359,9 @@ public partial class HayatePoolBasic<T>
             destroyed++;
         }
 
-        var slots = _leanSlots;
-        for (var i = 0; i < slots.Length; i++)
+        var slots = LeanSlotArray;
+        var scanLimit = _enableArrayPoolStorage ? Math.Min(slots.Length, _apSlotLimit) : slots.Length;
+        for (var i = 0; i < scanLimit; i++)
         {
             var slot = Interlocked.Exchange(ref slots[i], null);
             if (slot is not null)

@@ -95,6 +95,7 @@ public class HayateOpBenchmarks
     private ObjectPool<PooledObject> _meop = null!;                   // MEOP reference (Baseline)
     private IHayateObjectPool<PooledObject> _allOff = null!;          // general engine, every optional feature off
     private IHayateObjectPool<PooledObject> _lean = null!;            // lean (wrapper-free) fast path: EnableLean
+    private IHayateObjectPool<PooledObject> _ap = null!;              // lean + ArrayPool direct-storage backend (O-D)
     private IHayateObjectPool<PooledObject> _sharded4 = null!;        // 4 shards only
     private IHayateObjectPool<PooledObject> _full = null!;            // all features on
 
@@ -131,6 +132,13 @@ public class HayateOpBenchmarks
             .WithMaxSize(MaxPoolSize)
             .Build();
 
+        _ap = new HayatePoolBuilder<PooledObject>()
+            .WithPoolName("bench-arraypool")
+            .WithArrayPoolStorage()
+            .WithMinSize(MinPoolSize)
+            .WithMaxSize(MaxPoolSize)
+            .Build();
+
         _sharded4 = new HayatePoolBuilder<PooledObject>()
             .WithPoolName("bench-sharded4")
             .WithMinSize(MinPoolSize)
@@ -163,6 +171,7 @@ public class HayateOpBenchmarks
         for (var i = 0; i < MaxPoolSize; i++) _meop.Return(_meop.Get());
         for (var i = 0; i < MaxPoolSize; i++) _allOff.Release(_allOff.Acquire());
         for (var i = 0; i < MaxPoolSize; i++) _lean.Release(_lean.Acquire());
+        for (var i = 0; i < MaxPoolSize; i++) _ap.Release(_ap.Acquire());
         for (var i = 0; i < MaxPoolSize; i++) _sharded4.Release(_sharded4.Acquire());
         for (var i = 0; i < MaxPoolSize; i++) _full.Release(_full.Acquire());
     }
@@ -172,6 +181,7 @@ public class HayateOpBenchmarks
     {
         _allOff.Dispose();
         _lean.Dispose();
+        _ap.Dispose();
         _sharded4.Dispose();
         _full.Dispose();
     }
@@ -212,6 +222,15 @@ public class HayateOpBenchmarks
         var obj = _lean.Acquire();
         obj.Data++;
         _lean.Release(obj);
+    }
+
+    [Benchmark(Description = "Acquire+Release | Hayate ArrayPool (O-D)")]
+    [BenchmarkCategory("hot")]
+    public void Hayate_ArrayPool_AcquireRelease()
+    {
+        var obj = _ap.Acquire();
+        obj.Data++;
+        _ap.Release(obj);
     }
 
     [Benchmark(Description = "Acquire+Release | Hayate Sharded4")]

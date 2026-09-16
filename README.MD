@@ -931,6 +931,14 @@ general-purpose engine remains the choice whenever validation, eviction, leak de
 auto-scaling or sharding are required, and its per-operation cost stays above MEOP's because it
 tracks per-object state and a shard index that MEOP does not.
 
+**ArrayPool direct-storage backend** (O-D): `WithArrayPoolStorage()` keeps every lean property but
+rents the retention array from `ArrayPool<T>.Shared` and grows it on demand (×2) up to `MaxPoolSize`,
+instead of allocating a fixed `MaxPoolSize`-sized array for the pool's whole lifetime — a large pool
+holds only the storage its demand actually reached, and the array returns to the shared pool on
+`Dispose`. Borrow/return cost is unchanged (measured at parity with fixed-buffer lean: 27.8 ns / 0 B
+for `Acquire+Release`, same as MEOP). net6.0+ only; older targets ignore the flag and keep the fixed
+buffer.
+
 ### String building (specialized package)
 
 A dedicated comparison column (`SpecializedStringComparisonBenchmarks` in the benchmarks project,

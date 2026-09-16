@@ -959,6 +959,9 @@
             pool.ReloadConfig(o =&gt; o.MaxPoolSize = 64);
             </code></example>
         </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.LeanSlotArray">
+            <summary>The slot array the lean buffer currently stores into (fast lane excluded).</summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.CreateLeanObject">
             <summary>
             Creates a pooled value without a wrapper and without a registry entry.
@@ -998,6 +1001,20 @@
             <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/> idle objects — the caller then drops it, which
             is the lean analogue of the reference pool's discard-on-full behaviour.
             </returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryGrowLeanSlotsAndReturn(`0)">
+            <summary>
+            Grows the rented slot array (O-D) by doubling up to the <c>MaxPoolSize - 1</c> slot ceiling,
+            moves the existing content across, returns the old array to the shared pool, and places
+            <paramref name="item"/> into the first fresh slot.
+            </summary>
+            <returns><c>true</c> when the object was retained in the grown array; <c>false</c> when the
+            ceiling is already reached — the caller then drops the object, as in fixed-buffer mode.</returns>
+            <remarks>
+            The new array is filled before it is published, so a scanner can never observe a null slot
+            where this return is about to land; on a lost publish race the item is taken back, the grown
+            array is returned, and the loop retries against the current array.
+            </remarks>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.CountLeanIdle">
             <summary>
@@ -1241,6 +1258,19 @@
                 .Build();
             </code>
             </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithArrayPoolStorage(System.Boolean)">
+            <summary>
+            Switches the lean buffer to the ArrayPool direct-storage backend (O-D): the slot array is
+            rented from <c>ArrayPool{T}</c> and grows on demand up to
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/>, instead of occupying <c>MaxPoolSize</c> slots
+            for the pool's whole lifetime. Implies <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLean(System.Boolean)"/>; the borrow/return semantics
+            are identical to lean mode (same ceiling, same wrapper-free fast path). Available on net6.0
+            and above; on older targets the flag is ignored and lean keeps its fixed buffer.
+            </summary>
+            <param name="enable">Whether to use the ArrayPool storage backend; defaults to
+            <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLeanProfile">
             <summary>
@@ -2398,6 +2428,23 @@
             var options = new HayatePoolOptions { EnableLean = true, MinPoolSize = 16, MaxPoolSize = 64 };
             </code>
             </example>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableArrayPoolStorage">
+            <summary>
+            When set together with <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLean"/>, the lean buffer's slot array is rented from
+            <c>ArrayPool{T}</c> and grows on demand up to <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/>
+            (O-D, the ArrayPool direct-storage backend): the buffer no longer occupies
+            <c>MaxPoolSize</c> slots for the pool's whole lifetime, so large pools keep only the array
+            the demand actually reached, and the storage returns to the shared pool on
+            <c>Dispose</c>. The semantics are otherwise identical to lean mode — same ceiling, same
+            wrapper-free borrow/return, same reject policies. Available on net6.0 and above
+            (<c>System.Buffers.ArrayPool</c> is a BCL type there); on the older targets the flag is
+            ignored and lean mode keeps its fixed buffer.
+            </summary>
+            <remarks>
+            Not part of the feature-profile normalization: like <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLean"/> it is a storage
+            shape, not a bookkeeping switch, so <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.UseLeanProfile"/> leaves it alone.
+            </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableSharding">
             <summary>

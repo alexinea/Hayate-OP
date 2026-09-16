@@ -68,6 +68,24 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
+    /// Switches the lean buffer to the ArrayPool direct-storage backend (O-D): the slot array is
+    /// rented from <c>ArrayPool{T}</c> and grows on demand up to
+    /// <see cref="HayatePoolOptions.MaxPoolSize"/>, instead of occupying <c>MaxPoolSize</c> slots
+    /// for the pool's whole lifetime. Implies <see cref="WithLean"/>; the borrow/return semantics
+    /// are identical to lean mode (same ceiling, same wrapper-free fast path). Available on net6.0
+    /// and above; on older targets the flag is ignored and lean keeps its fixed buffer.
+    /// </summary>
+    /// <param name="enable">Whether to use the ArrayPool storage backend; defaults to
+    /// <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    public HayatePoolBuilder<T> WithArrayPoolStorage(bool enable = true)
+    {
+        _options.EnableLean = true;
+        _options.EnableArrayPoolStorage = enable;
+        return this;
+    }
+
+    /// <summary>
     /// Applies the lean profile: the wrapper-free fast path with every bookkeeping feature switched off,
     /// so a pure pooling workload runs at the reference <c>DefaultObjectPool</c> cost.
     /// </summary>

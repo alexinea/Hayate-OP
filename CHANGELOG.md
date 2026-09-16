@@ -12,6 +12,19 @@ Breaking changes are described in full — with migration guidance — in
 
 ### Added
 
+- **ArrayPool direct-storage backend for the lean fast path** (O-D, folding the POP
+  `PooledStack` storage shape into the O1/O2 design line): `WithArrayPoolStorage()` switches the
+  lean buffer's slot array from a fixed `MaxPoolSize`-sized array to one rented from
+  `ArrayPool<T>.Shared` that grows on demand (×2) up to `MaxPoolSize`. A large pool therefore only
+  holds the storage its demand actually reached — the fixed array no longer sits in memory for the
+  pool's whole lifetime — and the rented array returns to the shared pool on `Dispose`. Semantics
+  are identical to fixed-buffer lean (same ceiling, same wrapper-free borrow/return, same reject
+  policies, same stats/snapshot shape); the fast lane is shared. A logical slot limit keeps the
+  retention ceiling exact even though `ArrayPool.Rent` returns bucket-aligned arrays that can be
+  larger than requested. Available on net6.0+ (`ArrayPool<T>` is a BCL type there); on
+  netstandard2.0/net48 the flag is ignored and lean keeps its fixed buffer, preserving the core
+  package's no-dependency policy. The O2 allocation quantification for this backend lands in the
+  benchmarks project (`Acquire+Release | Hayate ArrayPool (O-D)` row).
 - **Asynchronous preparation / reconnect strategy** (N3, closing the marklauter connection-pool
   gap): `IHayatePreparationStrategy<T>` with `IsReadyAsync` / `PrepareAsync`, installed through
   `pool.WithPreparation(strategy, onDiscard, maxPrepareAttempts)` which wraps any
