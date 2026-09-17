@@ -948,8 +948,10 @@ builder.Services.AddOpenTelemetry()
 ## Performance
 
 BenchmarkDotNet compares HayateOP against `Microsoft.Extensions.ObjectPool.DefaultObjectPool<T>`
-(baseline) and plain `new` (no-pool lower bound) across the `Acquire`, `Release` and `AcquireAsync`
-paths, with `[MemoryDiagnoser]` / `[ThreadingDiagnoser]` and P50/P90/P95/P99 latency columns.
+(baseline), plain `new` (no-pool lower bound) and marklauter `MSL.Pool` across the `Acquire`, `Release`
+and `AcquireAsync` paths, with `[MemoryDiagnoser]` / `[ThreadingDiagnoser]` and P50/P90/P95/P99 latency
+columns. `MSL.Pool` exposes an async-only lease API, so it appears in the `Release`, `AcquireAsync` and
+concurrent suites and is N/A in the synchronous one.
 
 ```bash
 dotnet run -c Release --project tests/HayateOP.Benchmarks

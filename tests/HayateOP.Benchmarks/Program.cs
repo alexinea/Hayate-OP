@@ -4,7 +4,9 @@
 //   * implementations under test : HayateOP Lean (wrapper-free fast path) / AllOff (general engine, every
 //                                  optional feature off) / Sharded4 (sharding only) / Full
 //   * reference baselines        : Microsoft.Extensions.ObjectPool (MEOP, Baseline) + plain `new` (no pool, allocation lower bound)
-//   * async dimension            : MEOP and plain `new` expose no async API -> N/A (not present in the matrix)
+//                                  + marklauter MSL.Pool 7.2.1 (the N5 head-to-head line)
+//   * async dimension            : MEOP and plain `new` expose no async API -> N/A (not present in the matrix);
+//                                  MSL.Pool exposes *only* an async API -> N/A in the synchronous suites
 //   * concurrency dimension      : 100-thread Parallel.For borrow/return (throughput + contention)
 //
 // Statistics: built-in BenchmarkDotNet columns (Mean / Median / StdDev / Min / Max) plus custom
@@ -28,7 +30,10 @@ using BenchmarkDotNet.Mathematics;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using DotNetCore.HayateOP;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.ObjectPool;
+using Pool;
+using Pool.Metrics;
 
 BenchmarkRunner.Run<HayateOpBenchmarks>(args: args);
 
@@ -65,6 +70,12 @@ public class HayateOpBenchmarks
     private const int ThreadCount = 100;
     private const int ReleaseSlots = 32;      // borrow slots of the release suite (power of two, branch-free modulo)
 
+    // The asynchronous CancellationToken dimension (N5): MSL.Pool's token-carrying lease overload is
+    // the one measured, so the comparison covers the "async with a CancellationToken" path. The token
+    // is CancellationToken.None, so the token plumbing is exercised without a cancellation ever being
+    // requested and the row stays comparable to the token-less overloads the other rows call.
+    private static readonly CancellationToken LeaseCancellationToken = CancellationToken.None;
+
     private class BenchConfig : ManualConfig
     {
         public BenchConfig()
@@ -93,6 +104,14 @@ public class HayateOpBenchmarks
 
     // ── Pools under test ─────────────────────────────────────
     private ObjectPool<PooledObject> _meop = null!;                   // MEOP reference (Baseline)
+
+    // marklauter MSL.Pool 7.2.1 (N5). The library ships neither a builder nor a synchronous acquire
+    // path: a pool is a `Pool<T>` constructed from an item factory, a logger and an IPoolMetrics sink,
+    // and items are leased exclusively through `LeaseAsync`. It therefore appears in the release,
+    // asynchronous and concurrent suites, and is N/A in the synchronous suites. Capacity basis,
+    // warm-up and payload are identical to every other row so the columns stay comparable.
+    private Pool<PooledObject> _msl = null!;
+
     private IHayateObjectPool<PooledObject> _allOff = null!;          // general engine, every optional feature off
     private IHayateObjectPool<PooledObject> _lean = null!;            // lean (wrapper-free) fast path: EnableLean
     private IHayateObjectPool<PooledObject> _ap = null!;              // lean + ArrayPool direct-storage backend (O-D)
@@ -167,6 +186,26 @@ public class HayateOpBenchmarks
             .WithEnableMetrics(true)
             .Build();
 
+        // marklauter MSL.Pool (N5), built through the public constructor - the library's DI extension
+        // methods add nothing to the measured path. Same capacity basis as every other row
+        // (Min 250 / Max 300), and the defaults are already "no optional feature on": no preparation
+        // strategy is supplied, so the lease route is the plain "take an idle item, or create one
+        // while below MaxSize" path. The two infinite defaults (LeaseTimeout and IdleTimeout are
+        // Timeout.InfiniteTimeSpan out of the box: no lease timeout, no lazy idle eviction) are set
+        // explicitly so a future default change cannot silently alter what this row measures.
+        _msl = new Pool<PooledObject>(
+            PooledObjectFactory.Instance,
+            NullLogger<Pool<PooledObject>>.Instance,
+            NoOpPoolMetrics.Instance,
+            new PoolOptions
+            {
+                MinSize = MinPoolSize,
+                MaxSize = MaxPoolSize,
+                LeaseTimeout = Timeout.InfiniteTimeSpan,
+                IdleTimeout = Timeout.InfiniteTimeSpan,
+            },
+            TimeProvider.System);
+
         // Warm up (borrow fully, then return) so the steady state never hits the create path.
         for (var i = 0; i < MaxPoolSize; i++) _meop.Return(_meop.Get());
         for (var i = 0; i < MaxPoolSize; i++) _allOff.Release(_allOff.Acquire());
@@ -174,6 +213,7 @@ public class HayateOpBenchmarks
         for (var i = 0; i < MaxPoolSize; i++) _ap.Release(_ap.Acquire());
         for (var i = 0; i < MaxPoolSize; i++) _sharded4.Release(_sharded4.Acquire());
         for (var i = 0; i < MaxPoolSize; i++) _full.Release(_full.Acquire());
+        for (var i = 0; i < MaxPoolSize; i++) _msl.Release(_msl.LeaseAsync().GetAwaiter().GetResult());
     }
 
     [GlobalCleanup]
@@ -184,6 +224,7 @@ public class HayateOpBenchmarks
         _ap.Dispose();
         _sharded4.Dispose();
         _full.Dispose();
+        _msl.Dispose();
     }
 
     // ── Suite 1: single-threaded Acquire+Release (all implementations side by side) ──
@@ -277,6 +318,14 @@ public class HayateOpBenchmarks
         _lean.Release(obj);
     }
 
+    [Benchmark(Description = "Release | MSL.Pool")]
+    [BenchmarkCategory("reference")]
+    public async Task Msl_Release()
+    {
+        var obj = await _msl.LeaseAsync();
+        _msl.Release(obj);
+    }
+
     // ── Suite 3: full AcquireAsync path (MEOP / plain new have no async API -> N/A) ──
 
     [Benchmark(Description = "AcquireAsync+Release | Hayate AllOff")]
@@ -304,6 +353,17 @@ public class HayateOpBenchmarks
         var obj = await _full.AcquireAsync();
         obj.Data++;
         _full.Release(obj);
+    }
+
+    // MSL.Pool is async-only; its token-carrying overload is the one measured (see the field comment
+    // on LeaseCancellationToken), which is the marklauter counterpart of the rows above.
+    [Benchmark(Description = "AcquireAsync+Release | MSL.Pool (CT)")]
+    [BenchmarkCategory("reference")]
+    public async Task Msl_AcquireReleaseAsync()
+    {
+        var obj = await _msl.LeaseAsync(LeaseCancellationToken);
+        obj.Data++;
+        _msl.Release(obj);
     }
 
     // ── Suite 4: 100-thread concurrent borrow/return (contention profile) ──
@@ -354,6 +414,92 @@ public class HayateOpBenchmarks
             obj.Data++;
             _sharded4.Release(obj);
         });
+    }
+
+    [Benchmark(Description = "Concurrent-100 | MSL.Pool")]
+    [BenchmarkCategory("concurrent")]
+    public void Msl_Concurrent100()
+    {
+        Parallel.For(0, ThreadCount, _ =>
+        {
+            // MSL.Pool is async-only. On a warm pool the lease completes synchronously, so the wait
+            // bottoms out in the pool's own interlocked fast path rather than in a thread-pool hop.
+            var obj = _msl.LeaseAsync().GetAwaiter().GetResult();
+            obj.Data++;
+            _msl.Release(obj);
+        });
+    }
+
+    // ── MSL.Pool (marklauter) adapters ───────────────────────
+
+    /// <summary>
+    /// Item factory handed to the marklauter pool. It produces the same payload class every other row
+    /// leases, so the pooled-object cost is identical across the columns.
+    /// </summary>
+    private sealed class PooledObjectFactory : IItemFactory<PooledObject>
+    {
+        public static readonly PooledObjectFactory Instance = new();
+
+        private PooledObjectFactory()
+        {
+        }
+
+        public PooledObject CreateItem() => new PooledObject();
+    }
+
+    /// <summary>
+    /// Metrics-disabled <c>IPoolMetrics</c> sink. MSL.Pool records into <c>System.Diagnostics.Metrics</c>
+    /// by default; dropping the recording keeps this row level with the HayateOP configurations that
+    /// run with metrics off (<c>WithEnableMetrics(false)</c>) or on the lean storage, and keeps the
+    /// observable-gauge registrations out of the measured path.
+    /// </summary>
+    private sealed class NoOpPoolMetrics : IPoolMetrics
+    {
+        public static readonly NoOpPoolMetrics Instance = new();
+
+        private NoOpPoolMetrics()
+        {
+        }
+
+        public void RecordLeaseException(Exception ex)
+        {
+        }
+
+        public void RecordPreparationException(Exception ex)
+        {
+        }
+
+        public void RecordLeaseWaitTime(TimeSpan duration)
+        {
+        }
+
+        public void RecordPreparationTime(TimeSpan duration)
+        {
+        }
+
+        public IDisposable RegisterItemsAllocatedObserver(Func<int> observeValue) => NullSubscription.Instance;
+
+        public IDisposable RegisterItemsAvailableObserver(Func<int> observeValue) => NullSubscription.Instance;
+
+        public IDisposable RegisterActiveLeasesObserver(Func<int> observeValue) => NullSubscription.Instance;
+
+        public IDisposable RegisterQueuedLeasesObserver(Func<int> observeValue) => NullSubscription.Instance;
+
+        public IDisposable RegisterUtilizationRateObserver(Func<double> observeValue) => NullSubscription.Instance;
+
+        /// <summary>Shared no-op handle for the observer registrations the metrics sink ignores.</summary>
+        private sealed class NullSubscription : IDisposable
+        {
+            public static readonly NullSubscription Instance = new();
+
+            private NullSubscription()
+            {
+            }
+
+            public void Dispose()
+            {
+            }
+        }
     }
 
     // ── Custom percentile column (BenchmarkDotNet ships no built-in P99 column) ──
