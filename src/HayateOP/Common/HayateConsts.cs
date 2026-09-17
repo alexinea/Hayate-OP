@@ -155,6 +155,24 @@ public static class HayateConstant
 
     #endregion
 
+    #region Abandoned Recovery
+
+    /// <summary>
+    /// Default abandoned-object judgment timeout, in seconds (used by
+    /// <see cref="HayatePoolOptions.RemoveAbandonedTimeout"/>; aligned with CHOPIN's
+    /// <c>AbandonedConfig.RemoveAbandonedTimeout</c> default of 300).
+    /// </summary>
+    public const int DEFAULT_REMOVE_ABANDONED_TIMEOUT_SECONDS = 300;
+
+    /// <summary>
+    /// Default background maintenance cadence for abandoned-object recovery, in milliseconds
+    /// (used by <see cref="HayatePoolOptions.RemoveAbandonedIntervalMs"/> when
+    /// <see cref="HayatePoolOptions.RemoveAbandonedOnMaintenance"/> is on).
+    /// </summary>
+    public const int DEFAULT_REMOVE_ABANDONED_INTERVAL_MILLISECONDS = 30000;
+
+    #endregion
+
     #region Circuit Breaker
 
     /// <summary>

@@ -12,6 +12,19 @@ Breaking changes are described in full — with migration guidance — in
 
 ### Added
 
+- **Abandoned-object recovery** (K2 → M4+, closing the CHOPIN `AbandonedConfig` gap): the M4 leak
+  surface stays forensics-only, and borrowed objects that are never returned past
+  `RemoveAbandonedTimeout` (default 300 s, aligned with CHOPIN) can now be reclaimed through
+  `RemoveAbandonedOnBorrow` (a bounded, oldest-borrow-first scan on every borrow) and/or
+  `RemoveAbandonedOnMaintenance` (the shared background timer at `RemoveAbandonedIntervalMs`,
+  default 30 s). Reclamation is a destructive opt-in — both toggles default to `false`, so the
+  default configuration behaves exactly like M4 (count in `LeakDetectedCount` /
+  `LeakSuspectedCount`, never reclaim). A reclaimed object is destroyed under the shard claim
+  protocol (no double-destroy on races), removed from the registry, counted in the new
+  `HayatePoolStats.AbandonedRemovedCount` / `HayatePoolSnapshot.AbandonedRemovedCount`, and is not
+  also reported as a leak. `LogAbandoned` logs a warning with the captured lease trace on reclaim;
+  releasing an already-reclaimed object follows the pool's existing foreign-return path. Both
+  toggles are forced off in lean mode.
 - **ArrayPool direct-storage backend for the lean fast path** (O-D, folding the POP
   `PooledStack` storage shape into the O1/O2 design line): `WithArrayPoolStorage()` switches the
   lean buffer's slot array from a fixed `MaxPoolSize`-sized array to one rented from

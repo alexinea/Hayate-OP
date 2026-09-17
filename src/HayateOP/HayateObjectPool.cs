@@ -78,9 +78,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private long _evictionPeriodTicks;
     private long _scalingPeriodTicks;
     private long _validationPeriodTicks;
+    private long _abandonedPeriodTicks;
     private long _nextEvictionDue;
     private long _nextScalingDue;
     private long _nextValidationDue;
+    private long _nextAbandonedDue;
     // Re-entrancy guard: a tick that overruns its period must not overlap the next one. The three loops
     // mutate shared shard state (claim + destroy), and the previous one-timer-per-concern layout never
     // ran a single concern concurrently with itself.
@@ -138,6 +140,20 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     // Leak-recheck alert counter (when EnableLeakDetection = false, TakeSnapshot counts suspected leaks —
     // "borrowed beyond the threshold and not returned" — alongside LeakDetectedCount, not replacing it).
     private long _leakSuspectedCount;
+
+    // Abandoned recovery (K2, CHOPIN's RemoveAbandonedOnBorrow/OnMaintenance). Both toggles are
+    // destructive opt-ins captured at construction like every other feature switch; the timeout stays
+    // live on _options so ReloadConfig can tune it.
+    private readonly bool _removeAbandonedOnBorrow;
+    private readonly bool _removeAbandonedOnMaintenance;
+    private readonly bool _logAbandoned;
+    private readonly bool _enableAbandonedRecovery;
+    // Cumulative count of borrowed objects reclaimed as abandoned (the CHOPIN DestroyedByAbandonedCount analog).
+    private long _abandonedRemovedCount;
+    // How many oldest outstanding borrows one borrow-path pass examines (the maintenance pass scans
+    // everything). A small bounded budget keeps the opt-in borrow path's latency predictable while the
+    // FIFO borrowed list guarantees the oldest — hence most likely abandoned — borrows are seen first.
+    private const int BorrowAbandonedScanBudget = 8;
 
     // Shard-affinity mode (constructor-time snapshot). None is the default and has zero overhead (start index is always 0);
     // Thread maps the start shard stably by thread ID; Custom uses the user delegate (falling back to sequential scan on exception/out-of-range/null).
@@ -231,6 +247,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _enableLeakDetection = _options.EnableLeakDetection;
         _enableEviction = _options.EnableEviction;
         _enableMetrics = _options.EnableMetrics;
+
+        // Abandoned recovery (K2) — feature-switch snapshot (lean normalization has already forced both
+        // toggles off in lean mode, so the engine pool is the only host).
+        _removeAbandonedOnBorrow = _options.RemoveAbandonedOnBorrow;
+        _removeAbandonedOnMaintenance = _options.RemoveAbandonedOnMaintenance;
+        _logAbandoned = _options.LogAbandoned;
+        _enableAbandonedRecovery = _removeAbandonedOnBorrow || _removeAbandonedOnMaintenance;
 
         // Capacity alarm is disabled by default (WarnAtRatio = 0 and CriticalAtRatio = 0) —
         // frozen as a read-only flag at construction; when disabled the borrow/return path only adds one predictable branch (JIT-friendly).
@@ -388,18 +411,21 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         var evictionMs = _enableEviction ? Math.Max(1, _options.EvictionIntervalMs) : 0;
         var scalingMs = _enableAutoScaling ? Math.Max(1, _options.ScalingIntervalMs) : 0;
         var validationMs = _enableValidation ? Math.Max(1, _options.ValidateIntervalMs) : 0;
+        var abandonedMs = _removeAbandonedOnMaintenance ? Math.Max(1, _options.RemoveAbandonedIntervalMs) : 0;
 
         var tickMs = 0;
         if (evictionMs > 0) tickMs = evictionMs;
         if (scalingMs > 0 && (tickMs == 0 || scalingMs < tickMs)) tickMs = scalingMs;
         if (validationMs > 0 && (tickMs == 0 || validationMs < tickMs)) tickMs = validationMs;
+        if (abandonedMs > 0 && (tickMs == 0 || abandonedMs < tickMs)) tickMs = abandonedMs;
 
-        // All three disabled: no background work, therefore no timer.
+        // All four disabled: no background work, therefore no timer.
         if (tickMs == 0) return;
 
         _evictionPeriodTicks = MillisecondsToStopwatchTicks(evictionMs);
         _scalingPeriodTicks = MillisecondsToStopwatchTicks(scalingMs);
         _validationPeriodTicks = MillisecondsToStopwatchTicks(validationMs);
+        _abandonedPeriodTicks = MillisecondsToStopwatchTicks(abandonedMs);
 
         // First run of each concern happens one full period after construction, mirroring the original
         // Timer(..., dueTime: interval, period: interval) layout.
@@ -407,6 +433,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         if (_evictionPeriodTicks > 0) _nextEvictionDue = now + _evictionPeriodTicks;
         if (_scalingPeriodTicks > 0) _nextScalingDue = now + _scalingPeriodTicks;
         if (_validationPeriodTicks > 0) _nextValidationDue = now + _validationPeriodTicks;
+        if (_abandonedPeriodTicks > 0) _nextAbandonedDue = now + _abandonedPeriodTicks;
 
         _backgroundTimer = new Timer(BackgroundTick, null, tickMs, tickMs);
     }
@@ -452,6 +479,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             {
                 _nextValidationDue = now + _validationPeriodTicks;
                 ValidateCallback(null);
+            }
+
+            if (_abandonedPeriodTicks > 0 && now >= _nextAbandonedDue)
+            {
+                _nextAbandonedDue = now + _abandonedPeriodTicks;
+                AbandonedCallback(null);
             }
         }
         catch (Exception ex)
@@ -545,6 +578,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         // Wait for pre-warm readiness if not yet done (off by default → constant branch, zero overhead)
         WaitForWarmupIfNeeded();
+
+        // Abandoned recovery on the borrow path (K2, off by default → constant branch, JIT-eliminable).
+        // CHOPIN runs the abandoned scan on every borrow; the FIFO borrowed list plus a bounded budget
+        // keeps it deterministic (the oldest — hence most likely abandoned — borrows are examined first)
+        // and latency-predictable (at most BorrowAbandonedScanBudget claims per borrow).
+        if (_removeAbandonedOnBorrow) ReclaimAbandoned(BorrowAbandonedScanBudget);
 
         var sw = ValueStopwatch.StartNew();
 
@@ -803,6 +842,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         // Wait for pre-warm readiness if not yet done (off by default → constant branch, zero overhead)
         if (_waitForWarmup) await _warmupCompletion.Task.ConfigureAwait(false);
+
+        // Abandoned recovery on the borrow path (K2, off by default → constant branch, JIT-eliminable);
+        // same bounded, oldest-first scan as the synchronous core.
+        if (_removeAbandonedOnBorrow) ReclaimAbandoned(BorrowAbandonedScanBudget);
 
         // The affinity start shard is evaluated only once per AcquireAsync (None is always 0, zero extra overhead).
         var affinityStart = _affinityMode == HayateShardAffinityMode.None ? 0 : SelectStartShardIndex();
@@ -1598,6 +1641,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         var shard = _shards[(int)(Interlocked.Increment(ref _createCursor) - 1) % _shards.Length];
         var w = CreateWrappedObject(shard);   // TryTrack registration is already done internally (includes the _totalCreated counter)
         w.Location = HayateObjectLocation.Borrowed;
+        // A freshly created object handed out already borrowed must join the borrowed list too (K2),
+        // or the abandoned scan would never see create-on-miss / cold-boot borrows.
+        if (_enableAbandonedRecovery) shard.MarkBorrowed(w);
         // The borrow timestamp is recorded unconditionally (same as the Acquire main path, keeping leak recheck usable)
         w.LastBorrowedAt = Stopwatch.GetTimestamp();
         // Cumulative borrow count (a freshly created object is borrowed by definition; the wrapper is exclusively owned by this thread now)
@@ -1640,6 +1686,14 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         // Idempotent protection: eviction, idle validation, and return rejection may concurrently hit the same wrapper,
         // and only the first caller to pass the CAS truly destroys it; the rest return immediately, avoiding a double Dispose.
         if (Interlocked.Exchange(ref w.Destroyed, 1) == 1) return;
+
+        // A destroyed wrapper must never stay linked as borrowed (K2): whatever the destroy reason
+        // (abandoned reclamation, return rejection, validation failure, overflow), a later abandoned
+        // scan must not see it as a live candidate. Runs even on the exception path below.
+        if ((uint)w.ShardIndex < (uint)_shards.Length)
+        {
+            _shards[w.ShardIndex].UnmarkBorrowed(w);
+        }
 
         try
         {
@@ -1935,6 +1989,101 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         }
     }
 
+    /// <summary>
+    /// Reclaims up to <paramref name="maxCandidates"/> borrowed objects whose borrow age exceeds
+    /// <see cref="HayatePoolOptions.RemoveAbandonedTimeout"/> (K2 — CHOPIN's
+    /// <c>RemoveAbandonedOnBorrow/OnMaintenance</c>). Oldest borrows are examined first: each shard's
+    /// borrowed list is FIFO by borrow time, so the scan walks it from the head and stops at the first
+    /// entry not past the timeout — nothing after it can be abandoned either, which makes the bounded
+    /// borrow-path budget (8) exact rather than merely approximate. Claims and destroys happen under the
+    /// shard claim protocol, so a concurrent return or another reclaim pass can never double-destroy.
+    /// </summary>
+    /// <returns>The number of objects reclaimed.</returns>
+    private int ReclaimAbandoned(int maxCandidates)
+    {
+        if (maxCandidates <= 0) return 0;
+
+        var timeoutTicks = (long)(_options.RemoveAbandonedTimeout.TotalSeconds * Stopwatch.Frequency);
+        var now = Stopwatch.GetTimestamp();
+        // Per-call candidate buffer (like the eviction run's sampling buffer): the destroy path calls
+        // user policy code, which could recursively borrow and re-enter this method, so a shared
+        // instance buffer would be clobbered mid-scan.
+        var buffer = new HayateObject<T>[Math.Min(maxCandidates, 64)];
+        var reclaimed = 0;
+
+        foreach (var shard in _shards)
+        {
+            while (reclaimed < maxCandidates)
+            {
+                var n = shard.SnapshotBorrowed(buffer, buffer.Length);
+                if (n == 0) break;
+
+                var found = false;
+                for (var i = 0; i < n; i++)
+                {
+                    var w = buffer[i];
+                    // Returned to the pool between the snapshot and this check (a concurrent Release) —
+                    // skip; the next window re-walks from the new head.
+                    if (!w.IsBorrowed) continue;
+                    // FIFO by borrow time: the first entry not past the timeout means nothing after it
+                    // is abandoned either, so stop scanning this shard.
+                    if (now - w.LastBorrowedAt <= timeoutTicks) break;
+                    // Another reclaim pass (borrow path and maintenance can race) may have claimed it
+                    // first — only the claim winner destroys.
+                    if (!shard.ClaimBorrowed(w)) continue;
+
+                    found = true;
+                    reclaimed++;
+                    Interlocked.Increment(ref _abandonedRemovedCount);
+                    if (_logAbandoned) LogAbandonedObject(w);
+                    Destroy(w);
+                    if (reclaimed >= maxCandidates) break;
+                }
+
+                if (!found) break;
+            }
+        }
+
+        return reclaimed;
+    }
+
+    /// <summary>
+    /// Forensics companion of reclamation (CHOPIN's <c>LogAbandoned</c>): logs a warning for an
+    /// abandoned object with the captured lease trace (when <see cref="HayateLeaseContext"/> holds one —
+    /// stack capture is gated by <see cref="HayatePoolOptions.LeakTraceCaptureMode"/>), so the log states
+    /// the borrow origin of the reclaimed object or explicitly that no stack was captured.
+    /// </summary>
+    private void LogAbandonedObject(HayateObject<T> w)
+    {
+        var trace = w.LeaseContext != null
+            ? FormatLeaseTrace(w.LeaseContext)
+            : "no lease context captured (LeakTraceCaptureMode is Off)";
+        var borrowedMs = (long)((Stopwatch.GetTimestamp() - w.LastBorrowedAt) * 1000.0 / Stopwatch.Frequency);
+        _logger.LogWarning(
+            "[Shard {Index}] Removing abandoned object (borrowed past RemoveAbandonedTimeout). Type: {Type} BorrowedMs: {BorrowedMs} Trace: {Trace}",
+            w.ShardIndex, typeof(T).Name, borrowedMs, trace);
+    }
+
+    /// <summary>
+    /// Background maintenance pass for abandoned recovery (K2). Scans every shard's borrowed list and
+    /// reclaims every object past <see cref="HayatePoolOptions.RemoveAbandonedTimeout"/> — CHOPIN's
+    /// <c>RemoveAbandonedOnMaintenance</c>. Runs on the shared background timer at
+    /// <see cref="HayatePoolOptions.RemoveAbandonedIntervalMs"/>.
+    /// </summary>
+    private void AbandonedCallback(object? state)
+    {
+        //if (!_options.RemoveAbandonedOnMaintenance) return;
+        if (!_removeAbandonedOnMaintenance) return;
+        try
+        {
+            ReclaimAbandoned(int.MaxValue);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Abandoned recovery callback failed");
+        }
+    }
+
     private void ScalingCallback(object? state)
     {
         if (!_enableAutoScaling) return;
@@ -2106,6 +2255,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             CurrentSize = totalObjects,
             LeakDetectedCount = Interlocked.Read(ref _leakDetectedCount),
             LeakSuspectedCount = Interlocked.Read(ref _leakSuspectedCount),
+            AbandonedRemovedCount = Interlocked.Read(ref _abandonedRemovedCount),
             AllocationTrackingEnabled = _enableAllocationTracking,
             AcquireAllocatedBytes = Interlocked.Read(ref _acquireAllocatedBytes),
             ReleaseAllocatedBytes = Interlocked.Read(ref _releaseAllocatedBytes),
@@ -2208,6 +2358,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             TotalAcquired = Interlocked.Read(ref _totalAcquired),
             LeakCount = Interlocked.Read(ref _leakDetectedCount),
             LeakSuspectedCount = Interlocked.Read(ref _leakSuspectedCount),
+            AbandonedRemovedCount = Interlocked.Read(ref _abandonedRemovedCount),
             AllocationTrackingEnabled = _enableAllocationTracking,
             AcquireAllocatedBytes = Interlocked.Read(ref _acquireAllocatedBytes),
             ReleaseAllocatedBytes = Interlocked.Read(ref _releaseAllocatedBytes),

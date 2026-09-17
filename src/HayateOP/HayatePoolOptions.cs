@@ -518,6 +518,94 @@ public class HayatePoolOptions
 
     #endregion
 
+    #region Abandoned recovery
+
+    /// <summary>
+    /// Whether to reclaim abandoned objects on the borrow path.<br />
+    /// Default value: <c>false</c> (forensics-only, identical to the leak-detection surface —
+    /// no automatic reclamation).
+    /// </summary>
+    /// <remarks>
+    /// Purpose: an "abandoned" object is one that was borrowed but not returned within
+    /// <see cref="RemoveAbandonedTimeout"/> — typically a lease the caller lost track of.
+    /// When this is on, every borrow first scans the oldest outstanding borrows (bounded per
+    /// borrow) and reclaims the ones past the timeout, exactly like CHOPIN's
+    /// <c>RemoveAbandonedOnBorrow</c>.<br />
+    /// Risk: reclamation destroys a borrowed object and disposes its value while a caller may
+    /// still hold the reference. That is the opt-in contract — the default keeps the safe
+    /// forensics-only behavior, so long-lived leases are never reclaimed unless the user
+    /// explicitly enables recovery.<br />
+    /// Boundary: only meaningful when <see cref="RemoveAbandonedTimeout"/> is greater than
+    /// <see cref="TimeSpan.Zero"/> (enforced by <see cref="IsValid"/>). Forced off in lean mode.
+    /// </remarks>
+    public bool RemoveAbandonedOnBorrow { get; set; }
+
+    /// <summary>
+    /// Whether to reclaim abandoned objects on the background maintenance pass.<br />
+    /// Default value: <c>false</c> (forensics-only, identical to the leak-detection surface —
+    /// no automatic reclamation).
+    /// </summary>
+    /// <remarks>
+    /// Purpose: when on, the shared background timer runs an abandoned-recovery pass every
+    /// <see cref="RemoveAbandonedIntervalMs"/> milliseconds (the same timer that drives
+    /// eviction / auto-scaling / idle validation), reclaiming every borrowed object past
+    /// <see cref="RemoveAbandonedTimeout"/> — CHOPIN's <c>RemoveAbandonedOnMaintenance</c>.<br />
+    /// Risk: same opt-in contract as <see cref="RemoveAbandonedOnBorrow"/> — reclamation
+    /// disposes a value a caller may still hold, so it is off by default.<br />
+    /// Boundary: only meaningful when <see cref="RemoveAbandonedTimeout"/> is greater than
+    /// <see cref="TimeSpan.Zero"/> (enforced by <see cref="IsValid"/>). Forced off in lean mode.
+    /// </remarks>
+    public bool RemoveAbandonedOnMaintenance { get; set; }
+
+    /// <summary>
+    /// The abandoned-object judgment timeout.<br />
+    /// Default value: <c>TimeSpan.FromSeconds(300)</c> (constructed from
+    /// <see cref="HayateConstant.DEFAULT_REMOVE_ABANDONED_TIMEOUT_SECONDS"/>; 300 s aligns with
+    /// CHOPIN's <c>AbandonedConfig.RemoveAbandonedTimeout</c>).
+    /// </summary>
+    /// <remarks>
+    /// Purpose: how long a borrowed object may stay out before it is treated as abandoned and
+    /// eligible for reclamation (when <see cref="RemoveAbandonedOnBorrow"/> or
+    /// <see cref="RemoveAbandonedOnMaintenance"/> is on).<br />
+    /// Note: this is independent of <see cref="LeakDetectionThreshold"/> — leak detection is a
+    /// forensics counter (default 30 minutes), reclamation is an opt-in destructive action
+    /// (default 5 minutes).<br />
+    /// Boundary: should be greater than <see cref="TimeSpan.Zero"/> (enforced by
+    /// <see cref="IsValid"/> when either reclamation toggle is on).
+    /// </remarks>
+    public TimeSpan RemoveAbandonedTimeout { get; set; } = TimeSpan.FromSeconds(HayateConstant.DEFAULT_REMOVE_ABANDONED_TIMEOUT_SECONDS);
+
+    /// <summary>
+    /// Whether to log a warning (with the captured lease trace, if any) when an abandoned object
+    /// is reclaimed.<br />
+    /// Default value: <c>false</c>.
+    /// </summary>
+    /// <remarks>
+    /// Purpose: the forensics counterpart of reclamation — CHOPIN's <c>LogAbandoned</c>. The
+    /// lease trace is only present when <see cref="LeakTraceCaptureMode"/> captured one; the log
+    /// otherwise states that the object was abandoned without a captured stack.<br />
+    /// Boundary: only meaningful while reclamation (<see cref="RemoveAbandonedOnBorrow"/> or
+    /// <see cref="RemoveAbandonedOnMaintenance"/>) is on; without reclamation nothing is ever
+    /// logged.
+    /// </remarks>
+    public bool LogAbandoned { get; set; }
+
+    /// <summary>
+    /// The background maintenance cadence for abandoned recovery, in milliseconds.<br />
+    /// Default value: <c>30000</c> (constructed from
+    /// <see cref="HayateConstant.DEFAULT_REMOVE_ABANDONED_INTERVAL_MILLISECONDS"/>; the same
+    /// cadence as <see cref="EvictionIntervalMs"/>).
+    /// </summary>
+    /// <remarks>
+    /// Purpose: how often the background pass scans for abandoned objects when
+    /// <see cref="RemoveAbandonedOnMaintenance"/> is on.<br />
+    /// Boundary: values &lt;= 0 are floored to 1 ms by <see cref="ApplyFeatureSwitches"/> so an
+    /// enabled maintenance pass can never spin with a zero period.
+    /// </remarks>
+    public int RemoveAbandonedIntervalMs { get; set; } = HayateConstant.DEFAULT_REMOVE_ABANDONED_INTERVAL_MILLISECONDS;
+
+    #endregion
+
     #region Capacity alarm
 
     /// <summary>
@@ -767,6 +855,11 @@ public class HayatePoolOptions
         EnableGenerationOptimization = false;
         EnableLeakDetection = false;
 
+        // Abandoned recovery is a destructive opt-in: the lean profile (and lean mode itself)
+        // has no wrapper registry for borrowed objects, so both toggles are forced off.
+        RemoveAbandonedOnBorrow = false;
+        RemoveAbandonedOnMaintenance = false;
+
         EnableMetrics = false;
         EnableAllocationTracking = false;
 
@@ -915,6 +1008,13 @@ public class HayatePoolOptions
         options.LeakTraceCaptureMode = this.LeakTraceCaptureMode;
         options.LeakTraceSampleRate = this.LeakTraceSampleRate;
 
+        // Abandoned recovery
+        options.RemoveAbandonedOnBorrow = this.RemoveAbandonedOnBorrow;
+        options.RemoveAbandonedOnMaintenance = this.RemoveAbandonedOnMaintenance;
+        options.RemoveAbandonedTimeout = this.RemoveAbandonedTimeout;
+        options.LogAbandoned = this.LogAbandoned;
+        options.RemoveAbandonedIntervalMs = this.RemoveAbandonedIntervalMs;
+
         // Capacity alarm
         options.WarnAtRatio = this.WarnAtRatio;
         options.CriticalAtRatio = this.CriticalAtRatio;
@@ -993,6 +1093,10 @@ public class HayatePoolOptions
             EnableEviction = false;
             EnableGenerationOptimization = false;
             EnableLeakDetection = false;
+            // Abandoned recovery is a destructive opt-in and the lean fast path stores values
+            // directly (no wrapper registry to scan), so both toggles are forced off in lean mode.
+            RemoveAbandonedOnBorrow = false;
+            RemoveAbandonedOnMaintenance = false;
             EnableMetrics = false;
             EnableAllocationTracking = false;
             EnableCircuitBreaker = false;
@@ -1033,6 +1137,14 @@ public class HayatePoolOptions
         if (LeakTraceSampleRate < 1)
         {
             LeakTraceSampleRate = HayateConstant.DEFAULT_LEAK_TRACE_SAMPLE_RATE;
+        }
+
+        // Abandoned-recovery maintenance cadence guard: an enabled maintenance pass must never spin
+        // with a zero period, so values <= 0 are floored to 1 ms (the same floor as the sibling
+        // eviction / scaling / validation intervals).
+        if (RemoveAbandonedIntervalMs < 1)
+        {
+            RemoveAbandonedIntervalMs = 1;
         }
 
         // Affinity normalization: when Custom mode is selected without a delegate, fall back to None
@@ -1139,6 +1251,13 @@ public class HayatePoolOptions
         if (EnableLeakDetection)
         {
             if (LeakDetectionThreshold <= TimeSpan.Zero) return false;
+        }
+
+        // Abandoned recovery is a destructive opt-in: a zero/negative timeout would reclaim
+        // immediately-borrowed objects, so it is rejected when either toggle is on.
+        if (RemoveAbandonedOnBorrow || RemoveAbandonedOnMaintenance)
+        {
+            if (RemoveAbandonedTimeout <= TimeSpan.Zero) return false;
         }
 
         return true;

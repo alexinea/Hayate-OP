@@ -178,6 +178,14 @@ public class HayateObject<T> where T : class
     internal LinkedListNode<HayateObject<T>>? Node;
 
     /// <summary>
+    /// The node reference of the object within its shard's borrowed-object list (only maintained when
+    /// abandoned recovery is enabled); <c>null</c> means the object is not currently borrowed or the
+    /// feature is off. May only be read/written inside the Shard spin lock; the list drives the
+    /// oldest-borrow-first abandoned scan (K2).
+    /// </summary>
+    internal LinkedListNode<HayateObject<T>>? BorrowedNode;
+
+    /// <summary>
     /// Destruction idempotency flag (0 = not destroyed, 1 = destroyed). Eviction, idle validation, and
     /// return-rejection may concurrently hit the same object, so a CAS guarantees it is destroyed only once.
     /// </summary>
@@ -220,6 +228,7 @@ public class HayateObject<T> where T : class
         LeaseTimeMs = 0;
         ShardIndex = shardIndex;
         Node = null;
+        BorrowedNode = null;
         Location = HayateObjectLocation.None;
         Interlocked.Exchange(ref Destroyed, 0);
         SpareNext = null;

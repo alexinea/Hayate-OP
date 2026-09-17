@@ -111,6 +111,20 @@
             The default leak-trace sampling denominator (used by <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.LeakTraceSampleRate"/>; only effective in Sampled mode).
             </summary>
         </member>
+        <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_REMOVE_ABANDONED_TIMEOUT_SECONDS">
+            <summary>
+            Default abandoned-object judgment timeout, in seconds (used by
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedTimeout"/>; aligned with CHOPIN's
+            <c>AbandonedConfig.RemoveAbandonedTimeout</c> default of 300).
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_REMOVE_ABANDONED_INTERVAL_MILLISECONDS">
+            <summary>
+            Default background maintenance cadence for abandoned-object recovery, in milliseconds
+            (used by <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedIntervalMs"/> when
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedOnMaintenance"/> is on).
+            </summary>
+        </member>
         <member name="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_CIRCUIT_BREAKER_FAILURE_THRESHOLD">
             <summary>
             Default number of consecutive reported failures before the pool-level circuit breaker trips
@@ -625,6 +639,14 @@
             queue rebuild to an O(1) unlink.
             </summary>
         </member>
+        <member name="F:DotNetCore.HayateOP.HayateObject`1.BorrowedNode">
+            <summary>
+            The node reference of the object within its shard's borrowed-object list (only maintained when
+            abandoned recovery is enabled); <c>null</c> means the object is not currently borrowed or the
+            feature is off. May only be read/written inside the Shard spin lock; the list drives the
+            oldest-borrow-first abandoned scan (K2).
+            </summary>
+        </member>
         <member name="F:DotNetCore.HayateOP.HayateObject`1.Destroyed">
             <summary>
             Destruction idempotency flag (0 = not destroyed, 1 = destroyed). Eviction, idle validation, and
@@ -941,6 +963,34 @@
             when disabled (WarnAtRatio = 0 and CriticalAtRatio = 0) the caller's read-only flag short-circuits it at zero cost.
             </summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.ReclaimAbandoned(System.Int32)">
+            <summary>
+            Reclaims up to <paramref name="maxCandidates"/> borrowed objects whose borrow age exceeds
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedTimeout"/> (K2 — CHOPIN's
+            <c>RemoveAbandonedOnBorrow/OnMaintenance</c>). Oldest borrows are examined first: each shard's
+            borrowed list is FIFO by borrow time, so the scan walks it from the head and stops at the first
+            entry not past the timeout — nothing after it can be abandoned either, which makes the bounded
+            borrow-path budget (8) exact rather than merely approximate. Claims and destroys happen under the
+            shard claim protocol, so a concurrent return or another reclaim pass can never double-destroy.
+            </summary>
+            <returns>The number of objects reclaimed.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.LogAbandonedObject(DotNetCore.HayateOP.HayateObject{`0})">
+            <summary>
+            Forensics companion of reclamation (CHOPIN's <c>LogAbandoned</c>): logs a warning for an
+            abandoned object with the captured lease trace (when <see cref="T:DotNetCore.HayateOP.HayateLeaseContext"/> holds one —
+            stack capture is gated by <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.LeakTraceCaptureMode"/>), so the log states
+            the borrow origin of the reclaimed object or explicitly that no stack was captured.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.AbandonedCallback(System.Object)">
+            <summary>
+            Background maintenance pass for abandoned recovery (K2). Scans every shard's borrowed list and
+            reclaims every object past <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedTimeout"/> — CHOPIN's
+            <c>RemoveAbandonedOnMaintenance</c>. Runs on the shared background timer at
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedIntervalMs"/>.
+            </summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.GetStats">
             <example><code>
             var stats = pool.GetStats();
@@ -1128,6 +1178,50 @@
             object was already claimed by eviction / validation / destroy and must not be
             handed out again.
             </returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.MarkBorrowed(DotNetCore.HayateOP.HayateObject{`0})">
+            <summary>
+            Registers a freshly created object that is handed out already borrowed (the create-on-miss /
+            cold-boot path, which does not go through <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TryTake(DotNetCore.HayateOP.HayateObject{`0}@)"/>). Takes the shard lock itself
+            because the wrapper is brand-new and exclusively owned — the lock is uncontended and only
+            protects the borrowed list against concurrent TryTake appends.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.UnmarkBorrowed(DotNetCore.HayateOP.HayateObject{`0})">
+            <summary>
+            Unlinks the object from the borrowed list. Called by the pool's destroy path (K2): a wrapper
+            being destroyed must never stay listed as borrowed, whatever the destroy reason (reclamation,
+            return rejection, validation failure, overflow, Clear). Takes the shard lock itself because
+            the destroy path runs outside it.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.UnlinkBorrowedLocked(DotNetCore.HayateOP.HayateObject{`0})">
+            <summary>
+            Unlinks the borrowed-list node (the caller must hold the shard lock). A node whose list no
+            longer matches is a stale reference from an earlier Clear — the list has been drained and the
+            node dropped, so nothing to remove.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.ClaimBorrowed(DotNetCore.HayateOP.HayateObject{`0})">
+            <summary>
+            Claims a <em>borrowed</em> object for destruction (abandoned recovery, K2 — CHOPIN's
+            <c>RemoveAbandonedOnBorrow/OnMaintenance</c> claim). Only the single caller that wins the
+            <c>Borrowed → Removing</c> transition returns <c>true</c> and owns the destruction; concurrent
+            reclamation and the borrower's own <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.Add(DotNetCore.HayateOP.HayateObject{`0})"/> both lose and must not destroy.
+            </summary>
+            <returns>
+            <c>true</c> for the winning caller only. <c>false</c> means the object was returned to the
+            pool in the meantime, or another thread already claimed it.
+            </returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.SnapshotBorrowed(DotNetCore.HayateOP.HayateObject{`0}[],System.Int32)">
+            <summary>
+            Copies up to <paramref name="max"/> borrowed wrappers from the head of the borrowed list
+            (oldest borrow first) into <paramref name="buffer"/> while holding the shard lock, returning
+            the number copied. The abandoned scan (K2) walks this snapshot from the head and stops at the
+            first entry not past the timeout — because the list is FIFO by borrow time, nothing after it
+            can be abandoned either.
+            </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.Remove(DotNetCore.HayateOP.HayateObject{`0})">
             <summary>
@@ -1977,6 +2071,96 @@
             </code>
             </example>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithRemoveAbandonedOnBorrow(System.Boolean)">
+            <summary>
+            Reclaims abandoned objects on the borrow path: every borrow first examines the oldest
+            outstanding borrows (bounded per borrow) and destroys the ones borrowed past
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedTimeout"/> — CHOPIN's
+            <c>RemoveAbandonedOnBorrow</c>.
+            </summary>
+            <param name="enable">Whether to enable borrow-path reclamation; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <remarks>
+            Reclamation destroys a borrowed object and disposes its value while a caller may still hold the
+            reference, so it is an opt-in (default off): the forensics-only leak surface is the default.
+            Long-lived leases are never reclaimed unless recovery is explicitly enabled.
+            </remarks>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithRemoveAbandonedOnBorrow()
+                .WithRemoveAbandonedTimeout(TimeSpan.FromMinutes(2));
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithRemoveAbandonedOnMaintenance(System.Boolean)">
+            <summary>
+            Reclaims abandoned objects on the background maintenance pass: the shared background timer
+            scans all outstanding borrows every <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedIntervalMs"/>
+            milliseconds and destroys the ones borrowed past
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedTimeout"/> — CHOPIN's
+            <c>RemoveAbandonedOnMaintenance</c>.
+            </summary>
+            <param name="enable">Whether to enable maintenance reclamation; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <remarks>
+            Same opt-in contract as <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithRemoveAbandonedOnBorrow(System.Boolean)"/>: reclamation is destructive
+            and off by default, so a long-lived lease is never reclaimed unless explicitly enabled.
+            </remarks>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithRemoveAbandonedOnMaintenance()
+                .WithRemoveAbandonedInterval(5000);
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithRemoveAbandonedTimeout(System.TimeSpan)">
+            <summary>
+            Sets the abandoned-object judgment timeout.
+            </summary>
+            <param name="timeout">How long a borrowed object may stay out before it is treated as abandoned
+            and eligible for reclamation.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="timeout"/> is not greater than
+            <see cref="F:System.TimeSpan.Zero"/>.</exception>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithRemoveAbandonedTimeout(TimeSpan.FromMinutes(5));
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLogAbandoned(System.Boolean)">
+            <summary>
+            Logs a warning (with the captured lease trace, if any) when an abandoned object is reclaimed —
+            CHOPIN's <c>LogAbandoned</c>.
+            </summary>
+            <param name="enable">Whether to log reclamation warnings; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithRemoveAbandonedOnBorrow()
+                .WithLogAbandoned();
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithRemoveAbandonedInterval(System.Int32)">
+            <summary>
+            Sets the background maintenance cadence for abandoned recovery.
+            </summary>
+            <param name="intervalMs">How often the maintenance pass scans for abandoned objects, in
+            milliseconds; values &lt;= 0 are floored to 1 ms.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithRemoveAbandonedOnMaintenance()
+                .WithRemoveAbandonedInterval(5000);
+            </code>
+            </example>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithRejectPolicy(DotNetCore.HayateOP.HayatePoolRejectPolicy)">
             <summary>
             Sets the reject policy.
@@ -2772,6 +2956,90 @@
             <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/>).
             </remarks>
         </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedOnBorrow">
+            <summary>
+            Whether to reclaim abandoned objects on the borrow path.<br />
+            Default value: <c>false</c> (forensics-only, identical to the leak-detection surface —
+            no automatic reclamation).
+            </summary>
+            <remarks>
+            Purpose: an "abandoned" object is one that was borrowed but not returned within
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedTimeout"/> — typically a lease the caller lost track of.
+            When this is on, every borrow first scans the oldest outstanding borrows (bounded per
+            borrow) and reclaims the ones past the timeout, exactly like CHOPIN's
+            <c>RemoveAbandonedOnBorrow</c>.<br />
+            Risk: reclamation destroys a borrowed object and disposes its value while a caller may
+            still hold the reference. That is the opt-in contract — the default keeps the safe
+            forensics-only behavior, so long-lived leases are never reclaimed unless the user
+            explicitly enables recovery.<br />
+            Boundary: only meaningful when <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedTimeout"/> is greater than
+            <see cref="F:System.TimeSpan.Zero"/> (enforced by <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.IsValid"/>). Forced off in lean mode.
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedOnMaintenance">
+            <summary>
+            Whether to reclaim abandoned objects on the background maintenance pass.<br />
+            Default value: <c>false</c> (forensics-only, identical to the leak-detection surface —
+            no automatic reclamation).
+            </summary>
+            <remarks>
+            Purpose: when on, the shared background timer runs an abandoned-recovery pass every
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedIntervalMs"/> milliseconds (the same timer that drives
+            eviction / auto-scaling / idle validation), reclaiming every borrowed object past
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedTimeout"/> — CHOPIN's <c>RemoveAbandonedOnMaintenance</c>.<br />
+            Risk: same opt-in contract as <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedOnBorrow"/> — reclamation
+            disposes a value a caller may still hold, so it is off by default.<br />
+            Boundary: only meaningful when <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedTimeout"/> is greater than
+            <see cref="F:System.TimeSpan.Zero"/> (enforced by <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.IsValid"/>). Forced off in lean mode.
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedTimeout">
+            <summary>
+            The abandoned-object judgment timeout.<br />
+            Default value: <c>TimeSpan.FromSeconds(300)</c> (constructed from
+            <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_REMOVE_ABANDONED_TIMEOUT_SECONDS"/>; 300 s aligns with
+            CHOPIN's <c>AbandonedConfig.RemoveAbandonedTimeout</c>).
+            </summary>
+            <remarks>
+            Purpose: how long a borrowed object may stay out before it is treated as abandoned and
+            eligible for reclamation (when <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedOnBorrow"/> or
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedOnMaintenance"/> is on).<br />
+            Note: this is independent of <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.LeakDetectionThreshold"/> — leak detection is a
+            forensics counter (default 30 minutes), reclamation is an opt-in destructive action
+            (default 5 minutes).<br />
+            Boundary: should be greater than <see cref="F:System.TimeSpan.Zero"/> (enforced by
+            <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.IsValid"/> when either reclamation toggle is on).
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.LogAbandoned">
+            <summary>
+            Whether to log a warning (with the captured lease trace, if any) when an abandoned object
+            is reclaimed.<br />
+            Default value: <c>false</c>.
+            </summary>
+            <remarks>
+            Purpose: the forensics counterpart of reclamation — CHOPIN's <c>LogAbandoned</c>. The
+            lease trace is only present when <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.LeakTraceCaptureMode"/> captured one; the log
+            otherwise states that the object was abandoned without a captured stack.<br />
+            Boundary: only meaningful while reclamation (<see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedOnBorrow"/> or
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedOnMaintenance"/>) is on; without reclamation nothing is ever
+            logged.
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedIntervalMs">
+            <summary>
+            The background maintenance cadence for abandoned recovery, in milliseconds.<br />
+            Default value: <c>30000</c> (constructed from
+            <see cref="F:DotNetCore.HayateOP.Common.HayateConstant.DEFAULT_REMOVE_ABANDONED_INTERVAL_MILLISECONDS"/>; the same
+            cadence as <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EvictionIntervalMs"/>).
+            </summary>
+            <remarks>
+            Purpose: how often the background pass scans for abandoned objects when
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedOnMaintenance"/> is on.<br />
+            Boundary: values &lt;= 0 are floored to 1 ms by <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/> so an
+            enabled maintenance pass can never spin with a zero period.
+            </remarks>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.WarnAtRatio">
             <summary>
             Capacity warning threshold (utilization, borrowed count / MaxPoolSize).<br />
@@ -3337,6 +3605,12 @@
             The suspected-leak count (a retrospective alert counter used when leak detection is disabled).
             </summary>
         </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.AbandonedRemovedCount">
+            <summary>
+            Cumulative number of borrowed objects reclaimed as abandoned (K2, opt-in recovery only;
+            0 in the default forensics-only configuration).
+            </summary>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.LeakTraces">
             <summary>The captured leak traces (stack frames or placeholders), if leak tracing is enabled.</summary>
         </member>
@@ -3421,6 +3695,15 @@
             <summary>
             When EnableLeakDetection=false, TakeSnapshot counts objects by the same LeakDetectionThreshold
             (borrowed past the threshold without being returned); it only counts, does not capture evidence or reclaim.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.AbandonedRemovedCount">
+            <summary>
+            Cumulative number of borrowed objects reclaimed as abandoned (K2): objects borrowed past
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedTimeout"/> that the opt-in recovery
+            (<see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedOnBorrow"/> /
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedOnMaintenance"/>) destroyed. Always 0 when recovery
+            is off — the default remains forensics-only. The CHOPIN <c>DestroyedByAbandonedCount</c> analog.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.AllocationTrackingEnabled">

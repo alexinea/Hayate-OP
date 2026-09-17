@@ -1,6 +1,6 @@
 ﻿using System;
-using System.Collections.Generic;
-namespace DotNetCore.HayateOP;
+using System.Collections.Generic;
+namespace DotNetCore.HayateOP;
 public class HayatePoolSnapshot
 {
     /// <summary>The UTC timestamp at which this snapshot was taken.</summary>
@@ -16,25 +16,30 @@ public class HayatePoolSnapshot
     /// <summary>The cumulative number of successful acquires.</summary>
     public long TotalAcquired { get; set; }
     /// <summary>The cumulative leak count reported by leak detection.</summary>
-    public long LeakCount { get; set; }
+    public long LeakCount { get; set; }
     /// <summary>
     /// The suspected-leak count (a retrospective alert counter used when leak detection is disabled).
     /// </summary>
-    public long LeakSuspectedCount { get; set; }
+    public long LeakSuspectedCount { get; set; }
+    /// <summary>
+    /// Cumulative number of borrowed objects reclaimed as abandoned (K2, opt-in recovery only;
+    /// 0 in the default forensics-only configuration).
+    /// </summary>
+    public long AbandonedRemovedCount { get; set; }
     /// <summary>The captured leak traces (stack frames or placeholders), if leak tracing is enabled.</summary>
-    public IReadOnlyList<string> LeakTraces { get; set; } = [];
+    public IReadOnlyList<string> LeakTraces { get; set; } = [];
     /// <summary>
     /// Whether allocation tracking is enabled.
     /// </summary>
-    public bool AllocationTrackingEnabled { get; set; }
+    public bool AllocationTrackingEnabled { get; set; }
     /// <summary>
     /// Cumulative bytes allocated on the borrow path (synchronous <c>Acquire</c> only).
     /// </summary>
-    public long AcquireAllocatedBytes { get; set; }
+    public long AcquireAllocatedBytes { get; set; }
     /// <summary>
     /// Cumulative bytes allocated on the return path (synchronous <c>Release</c> only).
     /// </summary>
-    public long ReleaseAllocatedBytes { get; set; }
+    public long ReleaseAllocatedBytes { get; set; }
     /// <summary>
     /// Per-object lifecycle details (covering every live wrapper object: idle plus borrowed).
     /// </summary>

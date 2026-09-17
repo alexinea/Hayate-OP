@@ -94,6 +94,10 @@ public sealed class HayatePrometheusExporter
             "Total number of suspected leaks (leak detection disabled, retro-checked).",
             Map(pools, s => s.LeakSuspectedCount));
 
+        HayatePrometheusSerializer.WriteCounter(sb, $"{ns}_pool_abandoned_removed_total",
+            "Total number of borrowed objects reclaimed as abandoned (opt-in recovery).",
+            Map(pools, s => s.AbandonedRemovedCount));
+
         HayatePrometheusSerializer.WriteGauge(sb, $"{ns}_pool_wait_average_milliseconds",
             "Average borrow wait time in milliseconds.",
             Map(pools, s => s.AverageWaitTimeMs));

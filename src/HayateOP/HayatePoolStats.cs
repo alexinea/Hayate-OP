@@ -60,10 +60,19 @@ public class HayatePoolStats
     public long LeakDetectedCount { get; set; }
 
     /// <summary>
-        /// When EnableLeakDetection=false, TakeSnapshot counts objects by the same LeakDetectionThreshold
+    /// When EnableLeakDetection=false, TakeSnapshot counts objects by the same LeakDetectionThreshold
     /// (borrowed past the threshold without being returned); it only counts, does not capture evidence or reclaim.
     /// </summary>
     public long LeakSuspectedCount { get; set; }
+
+    /// <summary>
+    /// Cumulative number of borrowed objects reclaimed as abandoned (K2): objects borrowed past
+    /// <see cref="HayatePoolOptions.RemoveAbandonedTimeout"/> that the opt-in recovery
+    /// (<see cref="HayatePoolOptions.RemoveAbandonedOnBorrow"/> /
+    /// <see cref="HayatePoolOptions.RemoveAbandonedOnMaintenance"/>) destroyed. Always 0 when recovery
+    /// is off — the default remains forensics-only. The CHOPIN <c>DestroyedByAbandonedCount</c> analog.
+    /// </summary>
+    public long AbandonedRemovedCount { get; set; }
 
     /// <summary>
     /// Whether allocation tracking is enabled.
@@ -166,6 +175,7 @@ public class HayatePoolStats
   TotalMissed: {TotalMissed}
   LeakDetectedCount: {LeakDetectedCount}
   LeakSuspectedCount: {LeakSuspectedCount}
+  AbandonedRemovedCount: {AbandonedRemovedCount}
   AllocationTrackingEnabled: {AllocationTrackingEnabled}
   AverageAcquireAllocatedBytes: {AverageAcquireAllocatedBytes:F1}
   AverageReleaseAllocatedBytes: {AverageReleaseAllocatedBytes:F1}

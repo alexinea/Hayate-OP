@@ -19,6 +19,14 @@ public partial class HayatePoolBasic<T>
         // during the rebuild window concurrent TryTake / Add could lose objects or produce duplicates, so it was replaced entirely with a linked list.
         private readonly LinkedList<HayateObject<T>> _list = new();
 
+        // Borrowed-object linked list (K2, abandoned recovery). Maintained only when abandoned recovery
+        // is enabled (_trackBorrowed): TryTake appends on borrow (FIFO — the head is the oldest borrow),
+        // Add unlinks on return, ClaimBorrowed unlinks on reclamation, and Destroy unlinks via
+        // UnmarkBorrowed on every destroy path. When the feature is off the list stays empty and the
+        // borrow/return hot paths pay a single predicted branch, exactly like the other feature switches.
+        private readonly LinkedList<HayateObject<T>> _borrowed = new();
+        private readonly bool _trackBorrowed;
+
         // Per-shard registry (T -> wrapper object); previously a single pool-wide _objectMap.
         // Borrowed objects live in the pool for a long time, and all shards wrote to the same table, so the bucket array grew with concurrency peaks and never shrank back, leaving the memory peak unconverged.
         // After splitting per shard, registry entries are pinned to the shard where the object was created / destroyed, so capacity aligns with the shard capacity and truly reclaims on destruction.
@@ -134,6 +142,9 @@ public partial class HayatePoolBasic<T>
             Index = index;
             _maxSize = maxSize;
             _logger = logger;
+            // The borrowed list exists only to serve abandoned recovery; with both toggles off the
+            // shard never maintains it (options are normalized by IsValid before the shards are built).
+            _trackBorrowed = options.RemoveAbandonedOnBorrow || options.RemoveAbandonedOnMaintenance;
         }
 
         public void UpdateMaxSize(int newMaxSize)
@@ -190,6 +201,9 @@ public partial class HayatePoolBasic<T>
                 w.Location = HayateObjectLocation.InPool;
                 size++;
                 accepted = true;
+                // The object is no longer borrowed: unlink it from the borrowed list (K2). On the
+                // overflow/reject path it stays linked until the caller's Destroy unmarks it.
+                if (_trackBorrowed) UnlinkBorrowedLocked(w);
             }
             finally
             {
@@ -235,8 +249,132 @@ public partial class HayatePoolBasic<T>
                 // so the eviction thread can never destroy an object already handed to the caller.
                 w.Location = HayateObjectLocation.Borrowed;
 
+                // Appended at the tail, so the borrowed list stays FIFO: the head is always the oldest
+                // borrow — the first candidate the abandoned scan (K2) examines.
+                if (_trackBorrowed) w.BorrowedNode = _borrowed.AddLast(w);
+
                 _logger.LogDebug("[Shard {Index}] Object taken from shard (current size: {Size})", Index, _list.Count);
                 return true;
+            }
+            finally { if (taken) _lock.Exit(); }
+        }
+
+        /// <summary>
+        /// Registers a freshly created object that is handed out already borrowed (the create-on-miss /
+        /// cold-boot path, which does not go through <see cref="TryTake"/>). Takes the shard lock itself
+        /// because the wrapper is brand-new and exclusively owned — the lock is uncontended and only
+        /// protects the borrowed list against concurrent TryTake appends.
+        /// </summary>
+        public void MarkBorrowed(HayateObject<T> w)
+        {
+            if (!_trackBorrowed) return;
+
+            var taken = false;
+            try
+            {
+                _lock.Enter(ref taken);
+                w.BorrowedNode = _borrowed.AddLast(w);
+            }
+            finally { if (taken) _lock.Exit(); }
+        }
+
+        /// <summary>
+        /// Unlinks the object from the borrowed list. Called by the pool's destroy path (K2): a wrapper
+        /// being destroyed must never stay listed as borrowed, whatever the destroy reason (reclamation,
+        /// return rejection, validation failure, overflow, Clear). Takes the shard lock itself because
+        /// the destroy path runs outside it.
+        /// </summary>
+        public void UnmarkBorrowed(HayateObject<T> w)
+        {
+            if (!_trackBorrowed || w is null) return;
+
+            var taken = false;
+            try
+            {
+                _lock.Enter(ref taken);
+                UnlinkBorrowedLocked(w);
+            }
+            finally { if (taken) _lock.Exit(); }
+        }
+
+        /// <summary>
+        /// Unlinks the borrowed-list node (the caller must hold the shard lock). A node whose list no
+        /// longer matches is a stale reference from an earlier Clear — the list has been drained and the
+        /// node dropped, so nothing to remove.
+        /// </summary>
+        private void UnlinkBorrowedLocked(HayateObject<T> w)
+        {
+            var node = w.BorrowedNode;
+            if (node != null && ReferenceEquals(node.List, _borrowed)) _borrowed.Remove(node);
+            w.BorrowedNode = null;
+        }
+
+        /// <summary>
+        /// Claims a <em>borrowed</em> object for destruction (abandoned recovery, K2 — CHOPIN's
+        /// <c>RemoveAbandonedOnBorrow/OnMaintenance</c> claim). Only the single caller that wins the
+        /// <c>Borrowed → Removing</c> transition returns <c>true</c> and owns the destruction; concurrent
+        /// reclamation and the borrower's own <see cref="Add"/> both lose and must not destroy.
+        /// </summary>
+        /// <returns>
+        /// <c>true</c> for the winning caller only. <c>false</c> means the object was returned to the
+        /// pool in the meantime, or another thread already claimed it.
+        /// </returns>
+        public bool ClaimBorrowed(HayateObject<T> w)
+        {
+            if (w == null) return false;
+
+            var claimed = false;
+
+            var taken = false;
+            try
+            {
+                _lock.Enter(ref taken);
+
+                if (w.Location != HayateObjectLocation.Borrowed) return false;
+
+                UnlinkBorrowedLocked(w);
+                w.Location = HayateObjectLocation.Removing;
+                claimed = true;
+            }
+            finally
+            {
+                if (taken) _lock.Exit();
+            }
+
+            if (claimed)
+            {
+                _logger.LogDebug("[Shard {Index}] Borrowed object claimed for abandoned recovery (current borrowed: {Count})", Index, _borrowed.Count);
+            }
+
+            return claimed;
+        }
+
+        /// <summary>
+        /// Copies up to <paramref name="max"/> borrowed wrappers from the head of the borrowed list
+        /// (oldest borrow first) into <paramref name="buffer"/> while holding the shard lock, returning
+        /// the number copied. The abandoned scan (K2) walks this snapshot from the head and stops at the
+        /// first entry not past the timeout — because the list is FIFO by borrow time, nothing after it
+        /// can be abandoned either.
+        /// </summary>
+        public int SnapshotBorrowed(HayateObject<T>[] buffer, int max)
+        {
+            if (buffer is null) throw new ArgumentNullException(nameof(buffer));
+            if (max < 0) throw new ArgumentOutOfRangeException(nameof(max));
+            if (!_trackBorrowed) return 0;
+
+            var taken = false;
+            try
+            {
+                _lock.Enter(ref taken);
+                var limit = Math.Min(max, buffer.Length);
+                var copied = 0;
+                var node = _borrowed.First;
+                while (node != null && copied < limit)
+                {
+                    buffer[copied++] = node.Value;
+                    node = node.Next;
+                }
+                return copied;
             }
             finally { if (taken) _lock.Exit(); }
         }
@@ -341,6 +479,22 @@ public partial class HayatePoolBasic<T>
                     w.Node = null;
                     Interlocked.Exchange(ref w.Destroyed, 1);
                     w.Location = HayateObjectLocation.Destroyed;
+                }
+                // Drain the borrowed list too (K2): the pool clears the registry right after this
+                // call, so a stale borrowed link would let a later abandoned scan claim a wrapper
+                // whose registry entry is already gone. Borrowed values are not disposed here —
+                // consistent with the registry-clear semantics documented at the Clear call site.
+                if (_trackBorrowed)
+                {
+                    var node = _borrowed.First;
+                    while (node != null)
+                    {
+                        var w = node.Value;
+                        var next = node.Next;
+                        _borrowed.Remove(node);
+                        w.BorrowedNode = null;
+                        node = next;
+                    }
                 }
             }
             finally { if (taken) _lock.Exit(); }

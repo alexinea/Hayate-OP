@@ -11,6 +11,7 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 - **Eviction Policy**: Automatically removes expired or idle objects.
 - **Generation Optimization**: Reduces validation frequency for long-lived objects.
 - **Leak Detection**: Tracks and reports potential object leaks; stack-trace capture is opt-in (`Off` / `Sampled` / `EveryAcquire`) since 2.1.
+- **Abandoned Recovery**: Optional reclamation of borrowed objects never returned past `RemoveAbandonedTimeout` (CHOPIN `AbandonedConfig` semantics; destructive, off by default).
 - **Metrics & Monitoring**: Comprehensive statistics and snapshot capabilities.
 - **Multiple Reject Policies**: `Abort`, `Block`, `BlockTimeout`, and `CreateNew`.
 - **Dependency Injection Integration**: Seamless integration with `Microsoft.Extensions.DependencyInjection`.
@@ -650,6 +651,13 @@ var options = new HayatePoolOptions
     LeakTraceCaptureMode = HayateLeakTraceCaptureMode.Off, // Off (default) | Sampled | EveryAcquire
     LeakTraceSampleRate = 1024, // 1/N sampling, Sampled mode only
 
+    // Abandoned recovery (K2; destructive opt-in, both toggles off by default)
+    RemoveAbandonedOnBorrow = false,        // reclaim abandoned objects on the borrow path
+    RemoveAbandonedOnMaintenance = false,   // reclaim abandoned objects on the background maintenance pass
+    RemoveAbandonedTimeout = TimeSpan.FromSeconds(300), // abandoned judgment timeout (aligned with CHOPIN)
+    LogAbandoned = false,                   // log a warning (with the lease trace) when reclaiming
+    RemoveAbandonedIntervalMs = 30000,      // maintenance-pass cadence
+
     // Metrics
     EnableMetrics = false
 };
@@ -678,6 +686,8 @@ The short version of how to trim:
 | `EnableGenerationOptimization` | One extra `Stopwatch.GetTimestamp()` per borrow — the only switch that adds a QPC read to the borrow path |
 | `ValidateOnBorrow` / `ValidateOnReturn` | One `IHayateObjectPolicy.Validate` call per borrow / return; the policy's own work (often a health probe) dominates |
 | `LeakTraceCaptureMode` | The real cost of the leak-detection surface: `EveryAcquire` captures a call stack on every borrow; `Off` (the default) costs two branches |
+| `RemoveAbandonedOnBorrow` | One bounded oldest-borrow scan per borrow when enabled; off by default → constant branch, zero cost |
+| `RemoveAbandonedOnMaintenance` | Background only: drives the shared timer, never touches the borrow or return path |
 | `WarnAtRatio` / `CriticalAtRatio` | The most expensive optional switch: when non-zero it walks every shard, taking one lock per shard, on **every** borrow and return |
 | `EnableMetrics` | A min/max CAS loop, a metrics callback and a debug log per operation — and it is also what keeps `TotalCreated` / `TotalReleased` / `TotalMissed` alive |
 | `EnableAllocationTracking` | Two `GC.GetAllocatedBytesForCurrentThread()` calls per operation; unavailable on `net48` / `netstandard2.0` |
@@ -759,6 +769,43 @@ whether state left on an object is visible elsewhere), or whether one thread is 
 shard. The runtime recycles ids after a thread dies, so treat one as stable only while its
 thread is alive. Objects served by the lean fast path carry no metadata at all — that path
 stores the pooled value directly instead of wrapping it.
+
+### Abandoned object recovery
+
+Leak detection is forensics: it **counts** borrowed objects that stay out past
+`LeakDetectionThreshold`, it never touches them. **Abandoned recovery** (CHOPIN's
+`AbandonedConfig`) goes one step further — it **destroys** borrowed objects that are not returned
+within `RemoveAbandonedTimeout` (default 300 s), reclaiming the capacity they silently hold. An
+object is "abandoned" when a lease was borrowed and never released — typically a caller that lost
+track of it.
+
+Reclamation is **destructive and off by default**, because the pool cannot tell an abandoned
+object from a legitimately long-lived lease: reclaiming destroys the value while a caller may
+still hold the reference. Opt in explicitly when your leases are short and bounded:
+
+```csharp
+var pool = new HayatePoolBuilder<MyResource>()
+    .WithRemoveAbandonedOnBorrow()            // reclaim on the borrow path
+    .WithRemoveAbandonedOnMaintenance()       // and/or on the background maintenance pass
+    .WithRemoveAbandonedTimeout(TimeSpan.FromMinutes(2))
+    .WithLogAbandoned()                       // warn with the captured lease trace on reclaim
+    .Build();
+```
+
+Semantics and costs:
+
+- `RemoveAbandonedOnBorrow` runs a bounded, oldest-borrow-first scan on every borrow (the FIFO
+  borrowed list guarantees the scan stops at the first lease not yet past the timeout, so the
+  bounded budget is exact). `RemoveAbandonedOnMaintenance` drives the shared background timer at
+  `RemoveAbandonedIntervalMs` (default 30 s) and reclaims everything past the timeout.
+- A reclaimed object is destroyed (policy `OnDestroy` + `Dispose`), removed from the registry, and
+  counted in `HayatePoolStats.AbandonedRemovedCount` — it is **not** also reported as a leak, so
+  recovery and the forensics counters never double-flag the same object.
+- Releasing an already-reclaimed object is treated as a foreign return (the pool's existing
+  "object does not belong to this pool" path): it is disposed again and logged, and the pool keeps
+  working. Reclamation is a documented opt-in contract, not a safety net.
+- Both toggles are forced off in lean mode (no wrapper registry) and default to `false`, so the
+  default configuration stays forensics-only — exactly the M4 behavior.
 
 ### Reload configuration at runtime
 

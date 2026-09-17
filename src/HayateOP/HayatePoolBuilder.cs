@@ -1108,6 +1108,122 @@ public class HayatePoolBuilder<T> where T : class, new()
 
     #endregion
 
+    #region Abandoned recovery
+
+    /// <summary>
+    /// Reclaims abandoned objects on the borrow path: every borrow first examines the oldest
+    /// outstanding borrows (bounded per borrow) and destroys the ones borrowed past
+    /// <see cref="HayatePoolOptions.RemoveAbandonedTimeout"/> — CHOPIN's
+    /// <c>RemoveAbandonedOnBorrow</c>.
+    /// </summary>
+    /// <param name="enable">Whether to enable borrow-path reclamation; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <remarks>
+    /// Reclamation destroys a borrowed object and disposes its value while a caller may still hold the
+    /// reference, so it is an opt-in (default off): the forensics-only leak surface is the default.
+    /// Long-lived leases are never reclaimed unless recovery is explicitly enabled.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithRemoveAbandonedOnBorrow()
+    ///     .WithRemoveAbandonedTimeout(TimeSpan.FromMinutes(2));
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithRemoveAbandonedOnBorrow(bool enable = true)
+    {
+        _options.RemoveAbandonedOnBorrow = enable;
+        return this;
+    }
+
+    /// <summary>
+    /// Reclaims abandoned objects on the background maintenance pass: the shared background timer
+    /// scans all outstanding borrows every <see cref="HayatePoolOptions.RemoveAbandonedIntervalMs"/>
+    /// milliseconds and destroys the ones borrowed past
+    /// <see cref="HayatePoolOptions.RemoveAbandonedTimeout"/> — CHOPIN's
+    /// <c>RemoveAbandonedOnMaintenance</c>.
+    /// </summary>
+    /// <param name="enable">Whether to enable maintenance reclamation; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <remarks>
+    /// Same opt-in contract as <see cref="WithRemoveAbandonedOnBorrow"/>: reclamation is destructive
+    /// and off by default, so a long-lived lease is never reclaimed unless explicitly enabled.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithRemoveAbandonedOnMaintenance()
+    ///     .WithRemoveAbandonedInterval(5000);
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithRemoveAbandonedOnMaintenance(bool enable = true)
+    {
+        _options.RemoveAbandonedOnMaintenance = enable;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the abandoned-object judgment timeout.
+    /// </summary>
+    /// <param name="timeout">How long a borrowed object may stay out before it is treated as abandoned
+    /// and eligible for reclamation.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeout"/> is not greater than
+    /// <see cref="TimeSpan.Zero"/>.</exception>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithRemoveAbandonedTimeout(TimeSpan.FromMinutes(5));
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithRemoveAbandonedTimeout(TimeSpan timeout)
+    {
+        if (timeout <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(timeout), "RemoveAbandonedTimeout must be greater than zero");
+        _options.RemoveAbandonedTimeout = timeout;
+        return this;
+    }
+
+    /// <summary>
+    /// Logs a warning (with the captured lease trace, if any) when an abandoned object is reclaimed —
+    /// CHOPIN's <c>LogAbandoned</c>.
+    /// </summary>
+    /// <param name="enable">Whether to log reclamation warnings; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithRemoveAbandonedOnBorrow()
+    ///     .WithLogAbandoned();
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithLogAbandoned(bool enable = true)
+    {
+        _options.LogAbandoned = enable;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the background maintenance cadence for abandoned recovery.
+    /// </summary>
+    /// <param name="intervalMs">How often the maintenance pass scans for abandoned objects, in
+    /// milliseconds; values &lt;= 0 are floored to 1 ms.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithRemoveAbandonedOnMaintenance()
+    ///     .WithRemoveAbandonedInterval(5000);
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithRemoveAbandonedInterval(int intervalMs)
+    {
+        _options.RemoveAbandonedIntervalMs = intervalMs;
+        return this;
+    }
+
+    #endregion
+
     #region Reject policy
 
     /// <summary>
