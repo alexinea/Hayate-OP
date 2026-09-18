@@ -27,6 +27,11 @@
 		     ships a full modern TFM ladder (netstandard2.0 through net9.0), so net10.0 resolves the
 		     net9.0 asset by nearest-TFM selection with no asset-target fallback and no NU1701. -->
 		<PackageReference Include="Hertzole.PowerPools" Version="1.0.0" />
+		<!-- O5->M1+: Chopin.Pooling head-to-head reference column. The package (an Apache Commons
+		     Pool port by labijie.com) ships net452 plus netstandard1.6 assets; net10.0 resolves the
+		     netstandard1.6 asset directly as a compatible modern target, so there is no
+		     asset-target fallback and no NU1701 - hence no NoWarn, unlike the TinyPools reference. -->
+		<PackageReference Include="Chopin.Pooling" Version="1.0.2" />
 	</ItemGroup>
 
 </Project>

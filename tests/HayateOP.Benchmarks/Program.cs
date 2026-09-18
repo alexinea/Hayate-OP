@@ -7,7 +7,9 @@
 //                                  + marklauter MSL.Pool 7.2.1 (the N5 head-to-head line)
 //                                  + RRode TinyPools 1.0.1 (the T8 head-to-head line)
 //                                  + Hertzole PowerPools 1.0.0 (the O8->M1+ head-to-head line)
-//   * async dimension            : MEOP / plain `new` / TinyPools / PowerPools expose no async API -> N/A (not present in the matrix);
+//                                  + Chopin.Pooling 1.0.2 (the O5->M1+ head-to-head line)
+//   * async dimension            : MEOP / plain `new` / TinyPools / PowerPools / Chopin.Pooling expose no async API
+//                                  -> N/A (not present in the matrix);
 //                                  MSL.Pool exposes *only* an async API -> N/A in the synchronous suites
 //   * concurrency dimension      : 100-thread Parallel.For borrow/return (throughput + contention)
 //
@@ -135,6 +137,16 @@ public class HayateOpBenchmarks
     // overridden explicitly below so the capacity basis matches every other row.
     private Hertzole.PowerPools.ObjectPool<PooledObject> _powerPools = null!;
 
+    // Chopin.Pooling 1.0.2 (O5->M1+). A port of the Apache Commons Pool API: a GenericObjectPool<T>
+    // is built from an IPooledObjectFactory<T> plus a GenericObjectPoolConfig, and items move through
+    // a synchronous BorrowObject/ReturnObject pair with no asynchronous API at all. It therefore sits
+    // in the synchronous, release and concurrent suites and is N/A in the asynchronous one, exactly
+    // like MEOP, plain `new`, TinyPools and PowerPools. MinIdle/MaxIdle carry the same 250/300
+    // capacity basis as every other row. The port keeps Commons Pool's object-tracking dictionary,
+    // which is what makes this column worth measuring: ReturnObject allocates a fresh lookup key on
+    // every single return, so the pair is not allocation-free even at steady state.
+    private Chopin.Pooling.Impl.GenericObjectPool<PooledObject> _chopin = null!;
+
     private IHayateObjectPool<PooledObject> _allOff = null!;          // general engine, every optional feature off
     private IHayateObjectPool<PooledObject> _lean = null!;            // lean (wrapper-free) fast path: EnableLean
     private IHayateObjectPool<PooledObject> _ap = null!;              // lean + ArrayPool direct-storage backend (O-D)
@@ -251,6 +263,39 @@ public class HayateOpBenchmarks
             () => new PooledObject(),
             initialCapacity: MaxPoolSize);
 
+        // Chopin.Pooling (O5->M1+), built through the public constructor from an
+        // IPooledObjectFactory<T> plus a GenericObjectPoolConfig. Every option that could add work to
+        // the borrow/return path is pinned to its explicit value instead of being left to the library
+        // default, so a future upstream default change cannot silently alter this row: no validation
+        // on create / borrow / return / idle, and no eviction runs at all
+        // (TimeBetweenEvictionRunsMillis = -1). MinIdle / MaxIdle mirror the MinPoolSize / MaxPoolSize
+        // capacity basis every other row uses. Observed on construction, this implementation does not
+        // pre-fill to MinIdle, so like the rest of the matrix the pool is warmed by the loop below.
+        // MaxWaitMillis = -1 is the library's "wait indefinitely" (BlockWhenExhausted defaults to
+        // true and is pinned here anyway). BorrowStrategy.LIFO plus pool.Lifo = true is the library
+        // default and the counterpart of every other row's "most recently returned item first" fast
+        // path.
+        _chopin = new Chopin.Pooling.Impl.GenericObjectPool<PooledObject>(
+            ChopinPooledObjectFactory.Instance,
+            new Chopin.Pooling.Impl.GenericObjectPoolConfig
+            {
+                MaxTotal = MaxPoolSize,
+                MaxIdle = MaxPoolSize,
+                MinIdle = MinPoolSize,
+                BlockWhenExhausted = true,
+                MaxWaitMillis = -1,
+                TestOnCreate = false,
+                TestOnBorrow = false,
+                TestOnReturn = false,
+                TestWhileIdle = false,
+                TimeBetweenEvictionRunsMillis = -1,
+                NumTestsPerEvictionRun = 3,
+                MinEvictableIdleTimeMillis = 1800000,
+                SoftMinEvictableIdleTimeMillis = -1,
+                BorrowStrategy = Chopin.Pooling.Impl.BorrowStrategy.LIFO,
+            });
+        _chopin.Lifo = true;
+
         // Warm up (borrow fully, then return) so the steady state never hits the create path.
         for (var i = 0; i < MaxPoolSize; i++) _meop.Return(_meop.Get());
         for (var i = 0; i < MaxPoolSize; i++) _allOff.Release(_allOff.Acquire());
@@ -267,6 +312,11 @@ public class HayateOpBenchmarks
         // delta across 1,000,000 borrow/return pairs and a 100-thread burst is 0, verified in
         // docs/benchmarks/2026-09-18-o8-powerpools-line.md.
         for (var i = 0; i < MaxPoolSize; i++) _powerPools.Return(_powerPools.Rent());
+        // Same single-loop idiom again. For Chopin.Pooling the idiom leaves one idle item rather than
+        // MaxPoolSize too (observed: NumIdle = 1, created = 1 after the warm-up), and the steady state
+        // - create path out of the measurement window - is established by BenchmarkDotNet's own warm-up
+        // iterations, verified in docs/benchmarks/2026-09-18-o5-chopin-line.md.
+        for (var i = 0; i < MaxPoolSize; i++) _chopin.ReturnObject(_chopin.BorrowObject());
     }
 
     [GlobalCleanup]
@@ -279,6 +329,9 @@ public class HayateOpBenchmarks
         _full.Dispose();
         _msl.Dispose();
         _powerPools.Dispose();
+        // Chopin.Pooling's GenericObjectPool<T> is not IDisposable either; Close() is its teardown
+        // verb (it clears the idle set and stops the evictor, which this row never starts).
+        _chopin.Close();
         // TinyPools' ObjectPool<T> is not IDisposable: it holds nothing that needs releasing.
     }
 
@@ -324,6 +377,19 @@ public class HayateOpBenchmarks
         var obj = _powerPools.Rent();
         obj.Data++;
         _powerPools.Return(obj);
+    }
+
+    // Chopin.Pooling is the only column that keeps a Commons-Pool-style identity dictionary on the
+    // return path, so it belongs next to the other synchronous reference rows: BorrowObject/ReturnObject
+    // is its direct counterpart of Acquire/Release, and the payload mutation matches every other row so
+    // the pooled-object cost is identical across columns.
+    [Benchmark(Description = "Acquire+Release | Chopin.Pooling")]
+    [BenchmarkCategory("reference")]
+    public void Chopin_AcquireRelease()
+    {
+        var obj = _chopin.BorrowObject();
+        obj.Data++;
+        _chopin.ReturnObject(obj);
     }
 
     [Benchmark(Description = "Acquire+Release | Hayate AllOff")]
@@ -419,6 +485,14 @@ public class HayateOpBenchmarks
     {
         var obj = _powerPools.Rent();
         _powerPools.Return(obj);
+    }
+
+    [Benchmark(Description = "Release | Chopin.Pooling")]
+    [BenchmarkCategory("reference")]
+    public void Chopin_Release()
+    {
+        var obj = _chopin.BorrowObject();
+        _chopin.ReturnObject(obj);
     }
 
     // ── Suite 3: full AcquireAsync path (MEOP / plain new have no async API -> N/A) ──
@@ -549,6 +623,18 @@ public class HayateOpBenchmarks
         });
     }
 
+    [Benchmark(Description = "Concurrent-100 | Chopin.Pooling")]
+    [BenchmarkCategory("concurrent")]
+    public void Chopin_Concurrent100()
+    {
+        Parallel.For(0, ThreadCount, _ =>
+        {
+            var obj = _chopin.BorrowObject();
+            obj.Data++;
+            _chopin.ReturnObject(obj);
+        });
+    }
+
     // ── MSL.Pool (marklauter) adapters ───────────────────────
 
     /// <summary>
@@ -619,6 +705,30 @@ public class HayateOpBenchmarks
             {
             }
         }
+    }
+
+    // ── Chopin.Pooling (labijie) adapters ────────────────────
+
+    /// <summary>
+    /// Object factory handed to the Chopin.Pooling pool. <c>Create()</c> produces the same payload class
+    /// every other row uses, so the pooled-object cost is identical across the columns, and
+    /// <c>Wrap()</c> returns the library's own <c>DefaultPooledObject&lt;T&gt;</c> - the pairing the
+    /// port's base factory documents as the default. The library requires a factory instance, so this
+    /// is the one adapter the Chopin.Pooling column needs; there is no metrics or logging surface to
+    /// neutralize on the borrow/return path.
+    /// </summary>
+    private sealed class ChopinPooledObjectFactory : Chopin.Pooling.BasePooledObjectFactory<PooledObject>
+    {
+        public static readonly ChopinPooledObjectFactory Instance = new();
+
+        private ChopinPooledObjectFactory()
+        {
+        }
+
+        public override PooledObject Create() => new();
+
+        public override Chopin.Pooling.IPooledObject<PooledObject> Wrap(PooledObject obj)
+            => new Chopin.Pooling.Impl.DefaultPooledObject<PooledObject>(obj);
     }
 
     // ── Custom percentile column (BenchmarkDotNet ships no built-in P99 column) ──
