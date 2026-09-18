@@ -8,7 +8,9 @@
 //                                  + RRode TinyPools 1.0.1 (the T8 head-to-head line)
 //                                  + Hertzole PowerPools 1.0.0 (the O8->M1+ head-to-head line)
 //                                  + Chopin.Pooling 1.0.2 (the O5->M1+ head-to-head line)
-//   * async dimension            : MEOP / plain `new` / TinyPools / PowerPools / Chopin.Pooling expose no async API
+//                                  + CnCSharp-Dev PoolingLib 1.0.3 (the C-B head-to-head line)
+//   * async dimension            : MEOP / plain `new` / TinyPools / PowerPools / Chopin.Pooling /
+//                                  PoolingLib expose no async API
 //                                  -> N/A (not present in the matrix);
 //                                  MSL.Pool exposes *only* an async API -> N/A in the synchronous suites
 //   * concurrency dimension      : 100-thread Parallel.For borrow/return (throughput + contention)
@@ -146,6 +148,21 @@ public class HayateOpBenchmarks
     // which is what makes this column worth measuring: ReturnObject allocates a fresh lookup key on
     // every single return, so the pair is not allocation-free even at steady state.
     private Chopin.Pooling.Impl.GenericObjectPool<PooledObject> _chopin = null!;
+
+    // CnCSharp-Dev PoolingLib 1.0.3 (C-B). The leanest library in the matrix: a plain
+    // ConcurrentQueue<T> holding the pooled value directly, with no wrapper node, no per-borrow or
+    // per-return timestamp, no counter, no background timer and no capacity bound whatsoever. It
+    // has a synchronous Get/Return pair and no asynchronous API at all, so it sits in the
+    // synchronous, release and concurrent suites and is N/A in the asynchronous one, exactly like
+    // MEOP, plain `new`, TinyPools, PowerPools and Chopin.Pooling. BasePool<T> is the library's
+    // only plain object-pool type and its constructor is protected, so the sole public entry point
+    // is the static Pool property - one instance per closed generic type (verified: repeated reads
+    // return the same reference). A derived type would add nothing to the measured path, so the
+    // static instance is used directly. The library also exposes an obsolete Release() method
+    // explicitly marked "renamed to Return"; the canonical Return is used instead. Note that
+    // BasePool<T>.Return does not reset the object - only the collection-specialized pools clear
+    // their payload - which is level with every other row, none of which resets either.
+    private PoolingLib.BasePool<PooledObject> _cpl = null!;
 
     private IHayateObjectPool<PooledObject> _allOff = null!;          // general engine, every optional feature off
     private IHayateObjectPool<PooledObject> _lean = null!;            // lean (wrapper-free) fast path: EnableLean
@@ -296,6 +313,14 @@ public class HayateOpBenchmarks
             });
         _chopin.Lifo = true;
 
+        // CnCSharp-Dev PoolingLib (C-B). This library offers no configuration surface at all: no
+        // capacity or maximum-retained bound, no min size, no timeout, no metrics sink, no logger and
+        // no eviction timer - so there is nothing to pin and nothing to switch off, which is itself
+        // part of what this column records. The single capacity-relevant fact is that the return path
+        // is unbounded (every returned object is enqueued and never dropped), i.e. precisely the
+        // unbounded anti-pattern the CPL comparison report told the O-D storage backend to avoid.
+        _cpl = PoolingLib.BasePool<PooledObject>.Pool;
+
         // Warm up (borrow fully, then return) so the steady state never hits the create path.
         for (var i = 0; i < MaxPoolSize; i++) _meop.Return(_meop.Get());
         for (var i = 0; i < MaxPoolSize; i++) _allOff.Release(_allOff.Acquire());
@@ -317,6 +342,11 @@ public class HayateOpBenchmarks
         // - create path out of the measurement window - is established by BenchmarkDotNet's own warm-up
         // iterations, verified in docs/benchmarks/2026-09-18-o5-chopin-line.md.
         for (var i = 0; i < MaxPoolSize; i++) _chopin.ReturnObject(_chopin.BorrowObject());
+        // Same single-loop idiom again. PoolingLib stores whatever it is given and drops nothing, so
+        // the warm-up leaves one idle item rather than MaxPoolSize, and the steady state - create
+        // path out of the measurement window - is established by BenchmarkDotNet's own warm-up
+        // iterations, verified in docs/benchmarks/2026-09-18-cb-poolinglib-line.md.
+        for (var i = 0; i < MaxPoolSize; i++) _cpl.Return(_cpl.Get());
     }
 
     [GlobalCleanup]
@@ -333,6 +363,8 @@ public class HayateOpBenchmarks
         // verb (it clears the idle set and stops the evictor, which this row never starts).
         _chopin.Close();
         // TinyPools' ObjectPool<T> is not IDisposable: it holds nothing that needs releasing.
+        // PoolingLib's BasePool<T> is not IDisposable either and exposes no teardown verb at all: the
+        // static instance simply keeps its idle ConcurrentQueue<T> alive for the life of the process.
     }
 
     // ── Suite 1: single-threaded Acquire+Release (all implementations side by side) ──
@@ -390,6 +422,19 @@ public class HayateOpBenchmarks
         var obj = _chopin.BorrowObject();
         obj.Data++;
         _chopin.ReturnObject(obj);
+    }
+
+    // PoolingLib stores the value directly in a ConcurrentQueue<T> with no wrapper, no timestamp, no
+    // counter and no capacity check, so it belongs next to the other synchronous reference rows:
+    // Get/Return is its direct counterpart of Acquire/Release, and the payload mutation matches every
+    // other row so the pooled-object cost is identical across columns.
+    [Benchmark(Description = "Acquire+Release | PoolingLib")]
+    [BenchmarkCategory("reference")]
+    public void PoolingLib_AcquireRelease()
+    {
+        var obj = _cpl.Get();
+        obj.Data++;
+        _cpl.Return(obj);
     }
 
     [Benchmark(Description = "Acquire+Release | Hayate AllOff")]
@@ -493,6 +538,14 @@ public class HayateOpBenchmarks
     {
         var obj = _chopin.BorrowObject();
         _chopin.ReturnObject(obj);
+    }
+
+    [Benchmark(Description = "Release | PoolingLib")]
+    [BenchmarkCategory("reference")]
+    public void PoolingLib_Release()
+    {
+        var obj = _cpl.Get();
+        _cpl.Return(obj);
     }
 
     // ── Suite 3: full AcquireAsync path (MEOP / plain new have no async API -> N/A) ──
@@ -632,6 +685,21 @@ public class HayateOpBenchmarks
             var obj = _chopin.BorrowObject();
             obj.Data++;
             _chopin.ReturnObject(obj);
+        });
+    }
+
+    // PoolingLib's single ConcurrentQueue<T> is the one unbounded, unsynchronized-by-caller store in
+    // the matrix, so the concurrent row is what exposes whether its lock-free queue absorbs 100-thread
+    // contention better or worse than the matrix's sharded and plain-locked rows.
+    [Benchmark(Description = "Concurrent-100 | PoolingLib")]
+    [BenchmarkCategory("concurrent")]
+    public void PoolingLib_Concurrent100()
+    {
+        Parallel.For(0, ThreadCount, _ =>
+        {
+            var obj = _cpl.Get();
+            obj.Data++;
+            _cpl.Return(obj);
         });
     }
 

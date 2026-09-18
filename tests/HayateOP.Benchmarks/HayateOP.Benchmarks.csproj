@@ -32,6 +32,11 @@
 		     netstandard1.6 asset directly as a compatible modern target, so there is no
 		     asset-target fallback and no NU1701 - hence no NoWarn, unlike the TinyPools reference. -->
 		<PackageReference Include="Chopin.Pooling" Version="1.0.2" />
+		<!-- C-B: CnCSharp-Dev PoolingLib head-to-head reference column. The package ships a single
+		     netstandard2.0 asset and no dependencies; net10.0 selects it directly as a compatible
+		     modern target, so there is no asset-target fallback and no NU1701 - hence no NoWarn,
+		     unlike the TinyPools reference. Verified in obj/project.assets.json after restore. -->
+		<PackageReference Include="PoolingLib" Version="1.0.3" />
 	</ItemGroup>
 
 </Project>
