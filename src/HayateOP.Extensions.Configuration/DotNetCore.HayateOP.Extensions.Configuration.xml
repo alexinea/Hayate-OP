@@ -22,5 +22,40 @@
             </code>
             </example>
         </member>
+        <member name="M:Microsoft.Extensions.DependencyInjection.ConfigurationExtensions.RegisterNamedHayatePool``1(DotNetCore.HayateOP.IHayateServiceCollection,Microsoft.Extensions.Configuration.IConfiguration,System.String,System.String)">
+            <summary>
+            Registers a <b>named</b> pool of type <typeparamref name="T"/> driven by configuration: the
+            configuration-driven counterpart of <c>AddNamedPool&lt;T&gt;(name)</c>.
+            </summary>
+            <param name="services">The Hayate service collection.</param>
+            <param name="configuration">The configuration root used to read pool options.</param>
+            <param name="name">The logical pool name; also the name of the per-pool configuration section
+            (<c>{configSectionPath}:Pools:{name}</c>).</param>
+            <param name="configSectionPath">Configuration section path; defaults to "HayatePool".</param>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <exception cref="T:System.InvalidOperationException">Thrown when the merged pool configuration is invalid.</exception>
+            <remarks>
+            The pool is registered under the canonical name <c>{typeof(T).Name}:{name}</c> and resolved
+            through <see cref="T:DotNetCore.HayateOP.IHayateNamedPoolAccessor"/>, so a configuration-driven named pool coexists
+            with the unnamed pool of the same type and with any other name — exactly as a pool declared
+            with <c>AddNamedPool</c> does. Section merging and hot reload behave as they do for
+            <see cref="M:Microsoft.Extensions.DependencyInjection.ConfigurationExtensions.RegisterHayatePool``1(DotNetCore.HayateOP.IHayateServiceCollection,Microsoft.Extensions.Configuration.IConfiguration,System.String,System.String)"/>:
+            the global section is applied first and only the keys present in the pool's own section
+            override it.
+            </remarks>
+            <example>
+            <code>
+            // appsettings.json:  "HayatePool": { "Pools": { "replica": { "MaxPoolSize": 16 } } }
+            services.RegisterNamedHayatePool&lt;MyConnection&gt;(configuration, "replica");
+            </code>
+            </example>
+        </member>
+        <member name="M:Microsoft.Extensions.DependencyInjection.ConfigurationExtensions.BuildConfiguredPool``1(System.IServiceProvider,System.String,Microsoft.Extensions.Configuration.IConfiguration,System.Boolean)">
+            <summary>
+            Builds the pool for <paramref name="poolName"/> by merging the global configuration with the
+            pool's own section, subscribes it to configuration hot reload, and — for named pools —
+            registers it into the pool registry.
+            </summary>
+        </member>
     </members>
 </doc>

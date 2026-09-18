@@ -62,76 +62,142 @@ public static class ConfigurationExtensions
 
         // Register the pool instance.
         services.Services.AddSingleton<IHayateObjectPool<T>>(sp =>
-        {
-            // Resolve dependencies.
-            var optionsMonitor = sp.GetRequiredService<IOptionsMonitor<HayatePoolOptions>>();
-            var policy = sp.GetRequiredService<IHayateObjectPolicy<T>>();
-            var scalingStrategy = sp.GetRequiredService<IHayateScalingStrategy>();
-            var metrics = sp.GetRequiredService<IHayateMetrics>();
-            var loggerFactory = sp.GetService<ILoggerFactory>();
-            var logger = new HayateMicrosoftLoggerAdapter<T>(loggerFactory?.CreateLogger<T>());
-
-            // Merge the global and pool-specific configuration.
-            var mergedOptions = MergeOptions(optionsMonitor.CurrentValue, poolConfigSection);
-            if (!mergedOptions.IsValid())
-            {
-                throw new InvalidOperationException($"HayatePool [{poolName}] configuration is invalid");
-            }
-
-            // Build the pool.
-            // Only attach the DI-registered custom metrics when the metrics master switch is enabled;
-            // otherwise keep the v2.1 semantics (the custom instance has no effect) to avoid Build()
-            // fast-failing and wrongly affecting Configuration users.
-            var builder = new HayatePoolBuilder<T>()
-                .WithPoolName(poolName)
-                .WithPolicy(policy)
-                .WithScalingStrategy(scalingStrategy)
-                .WithLogger(logger);
-
-            if (mergedOptions.EnableMetrics)
-            {
-                builder.WithMetrics(metrics);
-            }
-
-            var pool = builder
-                .Configure(opt => mergedOptions.CopyTo(opt))
-                .Build();
-
-            // Subscribe to configuration change tokens to hot-reload the pool configuration.
-            var changeToken = optionsMonitor.OnChange((newOptions, changedPoolName) =>
-            {
-
-                if (changedPoolName != poolName && changedPoolName != Options.Options.DefaultName) return;
-
-                try
-                {
-                    // Merge the latest configuration.
-                    var latestOptions = MergeOptions(optionsMonitor.CurrentValue, poolConfigSection);
-                    if (!latestOptions.IsValid())
-                    {
-                        logger?.LogWarning("HayatePool [{PoolName}] hot-reload configuration is invalid; ignored", poolName);
-                        return;
-                    }
-
-                    // Sync the update to the pool.
-                    pool.ReloadConfig(opt => latestOptions.CopyTo(opt));
-
-                    logger?.LogInformation("HayatePool [{PoolName}] configuration hot-reloaded successfully", poolName);
-                }
-                catch (Exception ex)
-                {
-                    logger?.LogError(ex, "HayatePool [{PoolName}] configuration hot-reload failed", poolName);
-                }
-            });
-
-            // Cache the change token so it can be unbound when the pool is disposed.
-            _changeTokenCache.TryAdd(poolName, changeToken!);
-
-            return pool;
-        });
-
+            BuildConfiguredPool<T>(sp, poolName, poolConfigSection, registerInRegistry: false));
 
         return services;
+    }
+
+    /// <summary>
+    /// Registers a <b>named</b> pool of type <typeparamref name="T"/> driven by configuration: the
+    /// configuration-driven counterpart of <c>AddNamedPool&lt;T&gt;(name)</c>.
+    /// </summary>
+    /// <param name="services">The Hayate service collection.</param>
+    /// <param name="configuration">The configuration root used to read pool options.</param>
+    /// <param name="name">The logical pool name; also the name of the per-pool configuration section
+    /// (<c>{configSectionPath}:Pools:{name}</c>).</param>
+    /// <param name="configSectionPath">Configuration section path; defaults to "HayatePool".</param>
+    /// <typeparam name="T">The pooled object type.</typeparam>
+    /// <exception cref="InvalidOperationException">Thrown when the merged pool configuration is invalid.</exception>
+    /// <remarks>
+    /// The pool is registered under the canonical name <c>{typeof(T).Name}:{name}</c> and resolved
+    /// through <see cref="IHayateNamedPoolAccessor"/>, so a configuration-driven named pool coexists
+    /// with the unnamed pool of the same type and with any other name — exactly as a pool declared
+    /// with <c>AddNamedPool</c> does. Section merging and hot reload behave as they do for
+    /// <see cref="RegisterHayatePool{T}(IHayateServiceCollection, IConfiguration, string?, string)"/>:
+    /// the global section is applied first and only the keys present in the pool's own section
+    /// override it.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// // appsettings.json:  "HayatePool": { "Pools": { "replica": { "MaxPoolSize": 16 } } }
+    /// services.RegisterNamedHayatePool&lt;MyConnection&gt;(configuration, "replica");
+    /// </code>
+    /// </example>
+    public static IHayateServiceCollection RegisterNamedHayatePool<T>(this IHayateServiceCollection services,
+        IConfiguration configuration,
+        string name,
+        string configSectionPath = "HayatePool")
+        where T : class, new()
+    {
+        var key = HayateServiceKey.Create<T>(name);
+        var poolConfigSection = configuration.GetSection($"{configSectionPath}:Pools:{name}");
+
+        // Options are keyed by the canonical registry name so two pools of the same type never share
+        // an options entry; the configuration section keeps the plain logical name, which is what a
+        // user writes in appsettings.
+        services.Services.Configure<HayatePoolOptions>(key.RegistryName, poolConfigSection);
+        services.Services.TryAddSingleton<IHayateObjectPoolRegistry, HayateObjectPoolRegistry>();
+        services.Services.TryAddSingleton<IHayateObjectPolicy<T>, DefaultHayateObjectPolicy<T>>();
+        services.Services.AddSingleton<HayatePoolConfigurationCleanup>();
+
+        services.Services.TryAddSingleton<HayateNamedPoolCollection<T>>();
+        services.Services.AddSingleton(new HayateNamedPoolRegistration<T>(key,
+            sp => BuildConfiguredPool<T>(sp, key.RegistryName, poolConfigSection, registerInRegistry: true)));
+        services.Services.TryAddSingleton<IHayateNamedPoolAccessor>(sp =>
+            new HayateNamedPoolAccessor(sp, sp.GetService<IHayateObjectPoolRegistry>()));
+
+        return services;
+    }
+
+    /// <summary>
+    /// Builds the pool for <paramref name="poolName"/> by merging the global configuration with the
+    /// pool's own section, subscribes it to configuration hot reload, and — for named pools —
+    /// registers it into the pool registry.
+    /// </summary>
+    private static IHayateObjectPool<T> BuildConfiguredPool<T>(IServiceProvider sp, string poolName,
+        IConfiguration poolConfigSection, bool registerInRegistry)
+        where T : class, new()
+    {
+        // Resolve dependencies.
+        var optionsMonitor = sp.GetRequiredService<IOptionsMonitor<HayatePoolOptions>>();
+        var policy = sp.GetRequiredService<IHayateObjectPolicy<T>>();
+        var scalingStrategy = sp.GetRequiredService<IHayateScalingStrategy>();
+        var metrics = sp.GetRequiredService<IHayateMetrics>();
+        var loggerFactory = sp.GetService<ILoggerFactory>();
+        var logger = new HayateMicrosoftLoggerAdapter<T>(loggerFactory?.CreateLogger<T>());
+
+        // Merge the global and pool-specific configuration.
+        var mergedOptions = MergeOptions(optionsMonitor.CurrentValue, poolConfigSection);
+        if (!mergedOptions.IsValid())
+        {
+            throw new InvalidOperationException($"HayatePool [{poolName}] configuration is invalid");
+        }
+
+        // Build the pool.
+        // Only attach the DI-registered custom metrics when the metrics master switch is enabled;
+        // otherwise keep the v2.1 semantics (the custom instance has no effect) to avoid Build()
+        // fast-failing and wrongly affecting Configuration users.
+        var builder = new HayatePoolBuilder<T>()
+            .WithPoolName(poolName)
+            .WithPolicy(policy)
+            .WithScalingStrategy(scalingStrategy)
+            .WithLogger(logger);
+
+        if (mergedOptions.EnableMetrics)
+        {
+            builder.WithMetrics(metrics);
+        }
+
+        var pool = builder
+            .Configure(opt => mergedOptions.CopyTo(opt))
+            .Build();
+
+        if (registerInRegistry)
+        {
+            var registry = sp.GetService<IHayateObjectPoolRegistry>();
+            registry?.Register(poolName, pool);
+        }
+
+        // Subscribe to configuration change tokens to hot-reload the pool configuration.
+        var changeToken = optionsMonitor.OnChange((newOptions, changedPoolName) =>
+        {
+            if (changedPoolName != poolName && changedPoolName != Options.Options.DefaultName) return;
+
+            try
+            {
+                // Merge the latest configuration.
+                var latestOptions = MergeOptions(optionsMonitor.CurrentValue, poolConfigSection);
+                if (!latestOptions.IsValid())
+                {
+                    logger?.LogWarning("HayatePool [{PoolName}] hot-reload configuration is invalid; ignored", poolName);
+                    return;
+                }
+
+                // Sync the update to the pool.
+                pool.ReloadConfig(opt => latestOptions.CopyTo(opt));
+
+                logger?.LogInformation("HayatePool [{PoolName}] configuration hot-reloaded successfully", poolName);
+            }
+            catch (Exception ex)
+            {
+                logger?.LogError(ex, "HayatePool [{PoolName}] configuration hot-reload failed", poolName);
+            }
+        });
+
+        // Cache the change token so it can be unbound when the pool is disposed.
+        _changeTokenCache.TryAdd(poolName, changeToken!);
+
+        return pool;
     }
 
     private static HayatePoolOptions MergeOptions(HayatePoolOptions globalOptions, IConfiguration poolSection)

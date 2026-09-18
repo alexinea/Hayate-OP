@@ -2446,6 +2446,88 @@
             </summary>
             <returns>A formatted alarm string.</returns>
         </member>
+        <member name="T:DotNetCore.HayateOP.HayatePoolFactory">
+            <summary>
+            Default <see cref="T:DotNetCore.HayateOP.IHayatePoolFactory"/>: builds pools with <see cref="T:DotNetCore.HayateOP.HayatePoolBuilder`1"/>
+            and, when a registry is supplied, registers each built pool under the key's canonical name.
+            </summary>
+            <remarks>
+            Pool creation is a cold path — it happens when a tenant, a plugin or a subsystem first asks for a
+            pool, not per borrow — so the generic dispatch for the non-generic <see cref="M:DotNetCore.HayateOP.HayatePoolFactory.Create(DotNetCore.HayateOP.HayateServiceKey,System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/> /
+            <see cref="M:DotNetCore.HayateOP.HayatePoolFactory.GetOrCreate(DotNetCore.HayateOP.HayateServiceKey,System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/> overloads is done through a cached generic-method handle rather than
+            duplicated per type. Nothing the factory does is on the borrow or return path.
+            </remarks>
+            <example>
+            <code>
+            var factory = new HayatePoolFactory();
+            var pool = factory.CreatePool&lt;MyConnection&gt;("primary", o =&gt; o.MaxPoolSize = 64);
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolFactory.#ctor">
+            <summary>
+            Creates a factory that does not register the pools it builds.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolFactory.#ctor(DotNetCore.HayateOP.IHayateObjectPoolRegistry)">
+            <summary>
+            Creates a factory that registers every pool it builds into <paramref name="registry"/>.
+            </summary>
+            <param name="registry">The registry to register built pools into; <c>null</c> disables
+            registration (and makes <see cref="M:DotNetCore.HayateOP.HayatePoolFactory.GetOrCreate(DotNetCore.HayateOP.HayateServiceKey,System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/> equivalent to <see cref="M:DotNetCore.HayateOP.HayatePoolFactory.Create(DotNetCore.HayateOP.HayateServiceKey,System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/>).</param>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolFactory.Registry">
+            <summary>The registry built pools are registered into; <c>null</c> when registration is off.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolFactory.Create(DotNetCore.HayateOP.HayateServiceKey,System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolFactory.GetOrCreate(DotNetCore.HayateOP.HayateServiceKey,System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <inheritdoc />
+        </member>
+        <member name="T:DotNetCore.HayateOP.HayatePoolFactoryExtensions">
+            <summary>
+            Strongly typed helpers over <see cref="T:DotNetCore.HayateOP.IHayatePoolFactory"/>, so a caller that knows the element
+            type at compile time never has to cast the non-generic result back.
+            </summary>
+            <remarks>
+            These are thin adapters: the pool is still built (and registered) by the factory's non-generic
+            method, so <see cref="M:DotNetCore.HayateOP.HayatePoolFactoryExtensions.GetOrCreatePool``1(DotNetCore.HayateOP.IHayatePoolFactory,System.String,System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/> deduplicates exactly like
+            <see cref="M:DotNetCore.HayateOP.IHayatePoolFactory.GetOrCreate(DotNetCore.HayateOP.HayateServiceKey,System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/> does. The cast is safe by construction — a factory
+            builds <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/> for the key's element type.
+            </remarks>
+            <example>
+            <code>
+            var pool = factory.GetOrCreatePool&lt;MyConnection&gt;("primary", o =&gt; o.MaxPoolSize = 64);
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolFactoryExtensions.CreatePool``1(DotNetCore.HayateOP.IHayatePoolFactory,System.String,System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <summary>Builds a new pool of <typeparamref name="T"/> under the given logical name.</summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="factory">The factory to build with.</param>
+            <param name="name">The logical pool name.</param>
+            <param name="configure">An optional callback applied to the options before the pool is built.</param>
+            <returns>The freshly built pool.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="factory"/> is <c>null</c>.</exception>
+            <exception cref="T:System.InvalidCastException">The factory returned a pool whose element type is not
+            <typeparamref name="T"/>.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolFactoryExtensions.GetOrCreatePool``1(DotNetCore.HayateOP.IHayatePoolFactory,System.String,System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <summary>
+            Returns the pool of <typeparamref name="T"/> already registered under the given logical name,
+            or builds and registers a new one.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="factory">The factory to build with.</param>
+            <param name="name">The logical pool name.</param>
+            <param name="configure">An optional callback applied to the options before the pool is built;
+            ignored when a pool is already registered under the name.</param>
+            <returns>The existing or newly built pool.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="factory"/> is <c>null</c>.</exception>
+            <exception cref="T:System.InvalidCastException">The registered or built pool's element type is not
+            <typeparamref name="T"/>.</exception>
+        </member>
         <member name="T:DotNetCore.HayateOP.HayatePoolMetadata">
             <summary>
             A metadata entry for a single pool in the registry (2.5).
@@ -3399,6 +3481,74 @@
             </code>
             </example>
         </member>
+        <member name="T:DotNetCore.HayateOP.HayatePoolRegistryExtensions">
+            <summary>
+            Typed lookups over <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/>, kept as extension methods so the
+            interface itself stays at its original size and existing implementations keep compiling.
+            </summary>
+            <remarks>
+            The registry stores the non-generic <see cref="T:DotNetCore.HayateOP.IHayateObjectPool"/> face, which is what the
+            management endpoints and diagnostics need; a caller that knows the element type would otherwise
+            have to cast and null-check by hand, and a cast that silently succeeds for the wrong element type
+            is worse than one that fails loudly. Every lookup here therefore verifies the element type and
+            reports <c>false</c> / throws when it does not match, instead of handing back an unusable pool.<br />
+            The string overloads take the <b>logical</b> name — the same name passed to
+            <see cref="M:DotNetCore.HayateOP.HayateServiceKey.Create``1(System.String)"/> when the pool was registered — and derive the canonical
+            registry key from it; <see cref="M:DotNetCore.HayateOP.IHayateObjectPoolRegistry.TryGet(System.String,DotNetCore.HayateOP.IHayateObjectPool@)"/> keeps taking the canonical
+            key, so the two are never confused.
+            </remarks>
+            <example>
+            <code>
+            if (registry.TryGetPool&lt;MyConnection&gt;("primary", out var pool))
+                using (var lease = pool.Acquire()) { /* ... */ }
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolRegistryExtensions.TryGetPool``1(DotNetCore.HayateOP.IHayateObjectPoolRegistry,System.String,DotNetCore.HayateOP.IHayateObjectPool{``0}@)">
+            <summary>Resolves a registered pool by logical name and element type.</summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="registry">The registry to query.</param>
+            <param name="name">The logical pool name.</param>
+            <param name="pool">When this method returns <c>true</c>, the resolved pool; otherwise
+            <c>null</c>.</param>
+            <returns><c>true</c> when a pool of <typeparamref name="T"/> is registered under
+            <paramref name="name"/>.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="registry"/> is <c>null</c>.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolRegistryExtensions.TryGetPool``1(DotNetCore.HayateOP.IHayateObjectPoolRegistry,DotNetCore.HayateOP.HayateServiceKey,DotNetCore.HayateOP.IHayateObjectPool{``0}@)">
+            <summary>Resolves a registered pool by service key and element type.</summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="registry">The registry to query.</param>
+            <param name="key">The service key identifying the pool.</param>
+            <param name="pool">When this method returns <c>true</c>, the resolved pool; otherwise
+            <c>null</c>.</param>
+            <returns><c>true</c> when a pool of <typeparamref name="T"/> is registered under the
+            key.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="registry"/> or <paramref name="key"/>
+            is <c>null</c>.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolRegistryExtensions.GetPool``1(DotNetCore.HayateOP.IHayateObjectPoolRegistry,System.String)">
+            <summary>Resolves a registered pool by canonical registry name and element type.</summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="registry">The registry to query.</param>
+            <param name="name">The logical pool name.</param>
+            <returns>The resolved pool, or <c>null</c> when no pool of <typeparamref name="T"/> is
+            registered under that name.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="registry"/> is <c>null</c>.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolRegistryExtensions.GetRequiredPool``1(DotNetCore.HayateOP.IHayateObjectPoolRegistry,System.String)">
+            <summary>
+            Resolves a registered pool by logical name and element type, throwing when it is absent or of
+            another element type.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="registry">The registry to query.</param>
+            <param name="name">The logical pool name.</param>
+            <returns>The resolved pool.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="registry"/> is <c>null</c>.</exception>
+            <exception cref="T:System.InvalidOperationException">No pool of <typeparamref name="T"/> is registered
+            under <paramref name="name"/>.</exception>
+        </member>
         <member name="T:DotNetCore.HayateOP.HayatePoolRejectPolicy">
             <summary>
             Rejection-policy enum defining how a request is handled when it is rejected.
@@ -4041,6 +4191,87 @@
             preparation pool destroys it and retries with another (up to the configured attempt
             limit).</exception>
         </member>
+        <member name="T:DotNetCore.HayateOP.HayateServiceKey">
+            <summary>
+            Identifies a pool by the pooled element type together with a logical name, so that several
+            independently configured pools of the same element type can coexist and be addressed by name.
+            </summary>
+            <remarks>
+            A key is an identity, not a configuration: it says <i>which</i> pool is meant, never how it is
+            built. The canonical <see cref="P:DotNetCore.HayateOP.HayateServiceKey.RegistryName"/> is what the
+            <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/> and the named DI registrations store the pool under —
+            the element type name and the logical name joined by <see cref="F:DotNetCore.HayateOP.HayateServiceKey.NameSeparator"/> — so a named
+            pool never collides with the unnamed pool of the same type (which the registry keeps under the
+            bare type name).<br />
+            The registry name is a registry / options key, not a configuration path: it contains
+            <see cref="F:DotNetCore.HayateOP.HayateServiceKey.NameSeparator"/>, which configuration providers treat as a section separator, so it
+            must not be used to build an <c>IConfiguration</c> section path.
+            </remarks>
+            <example>
+            <code>
+            var primary = HayateServiceKey.Create&lt;MyConnection&gt;("primary");
+            var replica = HayateServiceKey.Create&lt;MyConnection&gt;("replica");
+            </code>
+            </example>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateServiceKey.NameSeparator">
+            <summary>The separator placed between the element type name and the logical pool name.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateServiceKey.#ctor(System.Type,System.String)">
+            <summary>
+            Creates a key for the given element type and logical name.
+            </summary>
+            <param name="elementType">The pooled element type (the <c>T</c> of <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/>).</param>
+            <param name="name">The logical pool name; cannot be empty and cannot contain <see cref="F:DotNetCore.HayateOP.HayateServiceKey.NameSeparator"/>.</param>
+            <exception cref="T:System.ArgumentNullException"><paramref name="elementType"/> or <paramref name="name"/> is <c>null</c>.</exception>
+            <exception cref="T:System.ArgumentException"><paramref name="name"/> is empty or whitespace, contains
+            <see cref="F:DotNetCore.HayateOP.HayateServiceKey.NameSeparator"/>, or <paramref name="elementType"/> is a value type.</exception>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateServiceKey.ElementType">
+            <summary>The pooled element type.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateServiceKey.Name">
+            <summary>The logical pool name, exactly as supplied.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateServiceKey.RegistryName">
+            <summary>
+            The canonical name the pool is registered under: the element type name and
+            <see cref="P:DotNetCore.HayateOP.HayateServiceKey.Name"/> joined by <see cref="F:DotNetCore.HayateOP.HayateServiceKey.NameSeparator"/>.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateServiceKey.Create``1(System.String)">
+            <summary>Creates a key for <typeparamref name="T"/> under the given logical name.</summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="name">The logical pool name.</param>
+            <returns>The service key.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateServiceKey.Create(System.Type,System.String)">
+            <summary>Creates a key for the given element type under the given logical name.</summary>
+            <param name="elementType">The pooled element type.</param>
+            <param name="name">The logical pool name.</param>
+            <returns>The service key.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateServiceKey.TryCreate``1(System.String,DotNetCore.HayateOP.HayateServiceKey@)">
+            <summary>
+            Tries to create a key, returning <c>false</c> instead of throwing when the name is unusable.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="name">The logical pool name.</param>
+            <param name="key">When this method returns <c>true</c>, the created key; otherwise <c>null</c>.</param>
+            <returns><c>true</c> when a key was created.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateServiceKey.Equals(DotNetCore.HayateOP.HayateServiceKey)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateServiceKey.Equals(System.Object)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateServiceKey.GetHashCode">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateServiceKey.ToString">
+            <summary>Returns the canonical registry name.</summary>
+        </member>
         <member name="T:DotNetCore.HayateOP.HayateShardAffinityMode">
             <summary>
             The shard-affinity mode for the borrow path (2.5).
@@ -4538,6 +4769,51 @@
         </member>
         <member name="P:DotNetCore.HayateOP.IHayateObjectPoolRegistry.Count">
             <summary>The number of currently registered pools.</summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.IHayatePoolFactory">
+            <summary>
+            Creates pools at run time from a <see cref="T:DotNetCore.HayateOP.HayateServiceKey"/> — the named-pool counterpart of
+            the one-shot <see cref="T:DotNetCore.HayateOP.HayatePoolBuilder`1"/>.
+            </summary>
+            <remarks>
+            Where a builder is written against a known <c>T</c> at compile time, a factory is used when the
+            element type or the set of logical names is only known while the process is running: a
+            multi-tenant host that opens one pool per tenant, or a plugin host that pools whatever a plugin
+            declares.<br />
+            <see cref="M:DotNetCore.HayateOP.IHayatePoolFactory.GetOrCreate(DotNetCore.HayateOP.HayateServiceKey,System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/> is the usual entry point: it returns an already-registered pool for the
+            key and only builds (and registers) one when the key is new, so repeated calls with the same key
+            are cheap and never leak a second pool. <see cref="M:DotNetCore.HayateOP.IHayatePoolFactory.Create(DotNetCore.HayateOP.HayateServiceKey,System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/> deliberately always builds a fresh
+            pool and re-registers it under the key — use it when a pool has to be replaced, and dispose the
+            instance it replaces yourself (the registry does not own pool lifetime).
+            </remarks>
+            <example>
+            <code>
+            var factory = new HayatePoolFactory(registry);
+            var pool = (IHayateObjectPool&lt;MyConnection&gt;)factory.GetOrCreate(HayateServiceKey.Create&lt;MyConnection&gt;("tenant-42"));
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayatePoolFactory.Create(DotNetCore.HayateOP.HayateServiceKey,System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <summary>
+            Builds a new pool for the key and registers it under <see cref="P:DotNetCore.HayateOP.HayateServiceKey.RegistryName"/>,
+            replacing any pool already registered there.
+            </summary>
+            <param name="key">The service key identifying the pool.</param>
+            <param name="configure">An optional callback applied to the options before the pool is built;
+            the pool is built with the documented defaults when it is <c>null</c>.</param>
+            <returns>The freshly built pool (the non-generic face; the element type is on the key).</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="key"/> is <c>null</c>.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayatePoolFactory.GetOrCreate(DotNetCore.HayateOP.HayateServiceKey,System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <summary>
+            Returns the pool already registered for the key, or builds and registers a new one.
+            </summary>
+            <param name="key">The service key identifying the pool.</param>
+            <param name="configure">An optional callback applied to the options before the pool is built;
+            ignored when a pool is already registered for the key.</param>
+            <returns>The existing or newly built pool (the non-generic face; the element type is on the
+            key).</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="key"/> is <c>null</c>.</exception>
         </member>
         <member name="T:DotNetCore.HayateOP.IHayateResettable">
             <summary>

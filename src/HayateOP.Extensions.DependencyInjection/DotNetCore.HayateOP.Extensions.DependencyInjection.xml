@@ -4,9 +4,178 @@
         <name>DotNetCore.HayateOP.Extensions.DependencyInjection</name>
     </assembly>
     <members>
+        <member name="T:DotNetCore.HayateOP.HayateNamedPoolAccessor">
+            <summary>
+            Default <see cref="T:DotNetCore.HayateOP.IHayateNamedPoolAccessor"/>: named pools come from
+            <see cref="T:DotNetCore.HayateOP.HayateNamedPoolCollection`1"/>, the unnamed pool from the registry (where it is
+            registered under the bare type name when it is built) and then from the container.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateNamedPoolAccessor.#ctor(System.IServiceProvider,DotNetCore.HayateOP.IHayateObjectPoolRegistry)">
+            <summary>
+            Creates an accessor over the given container.
+            </summary>
+            <param name="services">The container used to resolve the named-pool collections and, for the
+            unnamed pool, the pool itself.</param>
+            <param name="registry">The pool registry; may be <c>null</c>, in which case the unnamed pool is
+            resolved from the container only.</param>
+            <exception cref="T:System.ArgumentNullException"><paramref name="services"/> is <c>null</c>.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateNamedPoolAccessor.GetPool``1(System.String)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateNamedPoolAccessor.GetPool``1">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateNamedPoolAccessor.TryGetPool``1(System.String,DotNetCore.HayateOP.IHayateObjectPool{``0}@)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateNamedPoolAccessor.GetPoolNames``1">
+            <inheritdoc />
+        </member>
+        <member name="T:DotNetCore.HayateOP.HayateNamedPoolCollection`1">
+            <summary>
+            Holds every named pool of one element type: the lazily built singletons behind the
+            <see cref="T:DotNetCore.HayateOP.HayateNamedPoolRegistration`1"/> declarations in the container.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <remarks>
+            A pool is built on the first request for its name and then reused, so declaring a pool costs
+            nothing until something asks for it — and asking twice never builds twice. Names that were never
+            requested stay unbuilt, which is what makes "declare a pool per tenant" affordable.<br />
+            The collection owns the pools it built and disposes them when the container is disposed; a pool
+            that was never requested is never created and therefore never disposed.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateNamedPoolCollection`1.#ctor(System.IServiceProvider,System.Collections.Generic.IEnumerable{DotNetCore.HayateOP.HayateNamedPoolRegistration{`0}})">
+            <summary>
+            Collects the declared pools of <typeparamref name="T"/>.
+            </summary>
+            <param name="services">The container, passed to a pool's factory delegate when it is built.</param>
+            <param name="registrations">Every declaration of a named pool of <typeparamref name="T"/>;
+            when two declarations share a name, the last one wins (the container's own resolution rule for
+            repeated registrations).</param>
+            <exception cref="T:System.ArgumentNullException"><paramref name="services"/> is <c>null</c>.</exception>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateNamedPoolCollection`1.Names">
+            <summary>
+            The logical names declared for this element type, in declaration order, whether or not the
+            pool has been built yet.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateNamedPoolCollection`1.TryGetPool(System.String,DotNetCore.HayateOP.IHayateObjectPool{`0}@)">
+            <summary>
+            Returns the pool declared under <paramref name="name"/>, building it on first use.
+            </summary>
+            <param name="name">The logical pool name.</param>
+            <param name="pool">When this method returns <c>true</c>, the pool; otherwise <c>null</c>.</param>
+            <returns><c>true</c> when a pool is declared under <paramref name="name"/>.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateNamedPoolCollection`1.GetPool(System.String)">
+            <summary>
+            Returns the pool declared under <paramref name="name"/>, building it on first use, and throws
+            when no pool is declared under that name.
+            </summary>
+            <param name="name">The logical pool name.</param>
+            <returns>The pool.</returns>
+            <exception cref="T:System.InvalidOperationException">No pool of <typeparamref name="T"/> is declared
+            under <paramref name="name"/>.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateNamedPoolCollection`1.Dispose">
+            <summary>Disposes every pool this collection built.</summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.HayateNamedPoolRegistration`1">
+            <summary>
+            A named-pool declaration: the service key a pool is addressed by, plus the delegate that builds it
+            when it is first asked for.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <remarks>
+            Named pools are deliberately <b>not</b> built on Microsoft.Extensions.DependencyInjection keyed
+            services: those only exist in version 8.0 and later of the abstractions package, so a keyed
+            registration would be unavailable to the net6.0 / net7.0 targets this library ships. A named pool
+            is therefore declared as one instance of this type in the container — the container's own
+            "many registrations of one service type" facility, available on every supported target — and
+            <see cref="T:DotNetCore.HayateOP.HayateNamedPoolCollection`1"/> collects them. The observable behavior is the same on
+            net48 through net10.0: one lazily built singleton per (type, name).
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateNamedPoolRegistration`1.#ctor(DotNetCore.HayateOP.HayateServiceKey,System.Func{System.IServiceProvider,DotNetCore.HayateOP.IHayateObjectPool{`0}})">
+            <summary>
+            Creates a declaration.
+            </summary>
+            <param name="key">The service key the pool is registered and addressed by.</param>
+            <param name="factory">Builds the pool when it is first requested; called at most once per
+            container, on the first request.</param>
+            <exception cref="T:System.ArgumentNullException"><paramref name="key"/> or <paramref name="factory"/> is
+            <c>null</c>.</exception>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateNamedPoolRegistration`1.Key">
+            <summary>The service key the pool is registered and addressed by.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateNamedPoolRegistration`1.Factory">
+            <summary>Builds the pool when it is first requested.</summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.IHayateNamedPoolAccessor">
+            <summary>
+            Resolves named pools — and the single unnamed pool of a type — from the container.
+            </summary>
+            <remarks>
+            A pool registered with <c>RegisterHayatePool&lt;T&gt;()</c> is resolvable as
+            <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/> directly; that stops working as soon as a second pool of the
+            same type exists, because there is then no longer one answer to "the pool of <c>T</c>". Named
+            pools are addressed through this accessor instead, which is what a typed client uses and what an
+            application asks when it wants a specific pool by name.<br />
+            Resolution never creates a pool: it returns what was registered, and throws when the name was
+            never registered. Run-time creation is <see cref="T:DotNetCore.HayateOP.IHayatePoolFactory"/>'s job, so a typo in a
+            pool name surfaces as an error rather than silently starting an unconfigured pool.
+            </remarks>
+            <example>
+            <code>
+            var primary = accessor.GetPool&lt;MyConnection&gt;("primary");
+            var replica = accessor.GetPool&lt;MyConnection&gt;("replica");
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateNamedPoolAccessor.GetPool``1(System.String)">
+            <summary>
+            Returns the named pool of <typeparamref name="T"/> registered under <paramref name="name"/>.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="name">The logical pool name.</param>
+            <returns>The registered pool.</returns>
+            <exception cref="T:System.InvalidOperationException">No pool of <typeparamref name="T"/> is
+            registered under <paramref name="name"/>.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateNamedPoolAccessor.GetPool``1">
+            <summary>
+            Returns the unnamed pool of <typeparamref name="T"/> — the one registered with
+            <c>RegisterHayatePool&lt;T&gt;()</c>.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <returns>The registered pool.</returns>
+            <exception cref="T:System.InvalidOperationException">No unnamed pool of
+            <typeparamref name="T"/> is registered.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateNamedPoolAccessor.TryGetPool``1(System.String,DotNetCore.HayateOP.IHayateObjectPool{``0}@)">
+            <summary>
+            Tries to resolve the named pool of <typeparamref name="T"/> registered under
+            <paramref name="name"/>.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="name">The logical pool name.</param>
+            <param name="pool">When this method returns <c>true</c>, the pool; otherwise <c>null</c>.</param>
+            <returns><c>true</c> when a pool is registered under <paramref name="name"/>.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateNamedPoolAccessor.GetPoolNames``1">
+            <summary>The logical names registered for <typeparamref name="T"/>.</summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <returns>The registered names; empty when <typeparamref name="T"/> has no named pool.</returns>
+        </member>
         <member name="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.AddHayatePoolSupport(Microsoft.Extensions.DependencyInjection.IServiceCollection)">
             <summary>
-            Adds the core HayateOP services (scaling strategy and an empty metrics sink) so pools can be registered.
+            Adds the core HayateOP services (scaling strategy, an empty metrics sink and the run-time pool
+            factory) so pools can be registered.
             </summary>
             <param name="services">The service collection.</param>
             <returns>The Hayate service collection for further configuration.</returns>
@@ -31,6 +200,85 @@
             services.RegisterHayatePool&lt;MyConnection&gt;(opt =&gt; opt.MaxPoolSize = 64);
             </code>
             </example>
+        </member>
+        <member name="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.AddNamedPool``1(DotNetCore.HayateOP.IHayateServiceCollection,System.String,System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <summary>
+            Registers a <b>named</b> pool of type <typeparamref name="T"/>: an independently configured
+            pool that coexists with the unnamed pool of the same type and with any other name.
+            </summary>
+            <param name="services">The Hayate service collection.</param>
+            <param name="name">The logical pool name; cannot be empty and cannot contain ':'.</param>
+            <param name="configure">Optional callback to configure the pool options.</param>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <returns>The Hayate service collection for chaining.</returns>
+            <remarks>
+            The pool is registered under the canonical name <c>{typeof(T).Name}:{name}</c> — see
+            <see cref="T:DotNetCore.HayateOP.HayateServiceKey"/> — so the management endpoints can tell the pools apart in logs,
+            statistics and snapshots. It is built on first use rather than at registration time, and it is
+            resolved through <see cref="T:DotNetCore.HayateOP.IHayateNamedPoolAccessor"/> (or injected into a typed client via
+            <see cref="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.AddPool``2(DotNetCore.HayateOP.IHayateServiceCollection,System.String,System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/>)
+            rather than as <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/>, which stays reserved for the unnamed
+            pool.<br />
+            Declaring the same name twice keeps the last declaration, as repeated DI registrations do.
+            </remarks>
+            <example>
+            <code>
+            services.AddHayatePoolSupport()
+                    .AddNamedPool&lt;MyConnection&gt;("primary", o =&gt; o.MaxPoolSize = 64)
+                    .AddNamedPool&lt;MyConnection&gt;("replica", o =&gt; o.MaxPoolSize = 16);
+            </code>
+            </example>
+        </member>
+        <member name="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.AddPool``2(DotNetCore.HayateOP.IHayateServiceCollection,System.String,System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <summary>
+            Registers a typed client <typeparamref name="TClient"/> that receives the named pool of
+            <typeparamref name="T"/> in its constructor.
+            </summary>
+            <param name="services">The Hayate service collection.</param>
+            <param name="name">The logical pool name the client is bound to.</param>
+            <param name="configure">Optional callback to configure the pool options.</param>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <typeparam name="TClient">The client type; resolved as a transient and constructed with the
+            named pool.</typeparam>
+            <returns>The Hayate service collection for chaining.</returns>
+            <remarks>
+            The client keeps a plain constructor taking <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/> and needs no
+            HayateOP attribute: the pool it is bound to is decided here, at registration. Two clients of
+            the same type can therefore be bound to different pools of the same element type by giving
+            them different names — the same shape <c>AddHttpClient&lt;TClient&gt;()</c> has.
+            </remarks>
+            <example>
+            <code>
+            services.AddHayatePoolSupport()
+                    .AddPool&lt;MyConnection, PrimaryClient&gt;("primary")
+                    .AddPool&lt;MyConnection, ReplicaClient&gt;("replica");
+            </code>
+            </example>
+        </member>
+        <member name="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.AddPool``2(DotNetCore.HayateOP.IHayateServiceCollection,System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <summary>
+            Registers a typed client <typeparamref name="TClient"/> that receives the unnamed pool of
+            <typeparamref name="T"/> — registering that pool first when it is not registered yet.
+            </summary>
+            <param name="services">The Hayate service collection.</param>
+            <param name="configure">Optional callback to configure the pool options; applied only when this
+            call registers the pool.</param>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <typeparam name="TClient">The client type; resolved as a transient and constructed with the
+            pool.</typeparam>
+            <returns>The Hayate service collection for chaining.</returns>
+            <example>
+            <code>
+            services.AddHayatePoolSupport()
+                    .AddPool&lt;MyConnection, MyClient&gt;(o =&gt; o.MaxPoolSize = 64);
+            </code>
+            </example>
+        </member>
+        <member name="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.BuildPool``1(System.IServiceProvider,System.String)">
+            <summary>
+            Builds the pool for <paramref name="poolName"/> from the container's named options and
+            services, and registers it into the pool registry when one is present.
+            </summary>
         </member>
     </members>
 </doc>
