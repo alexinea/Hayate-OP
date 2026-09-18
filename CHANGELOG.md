@@ -12,6 +12,35 @@ Breaking changes are described in full — with migration guidance — in
 
 ### Added
 
+- **Named pools, typed clients and a run-time pool factory** (N4, extending the 2.5 M11+ registry):
+  several independently configured pools of one element type can now coexist and be addressed by
+  name. `HayateServiceKey.Create<T>(name)` is the identity a named pool is addressed by — the element
+  type plus a logical name, registered under the canonical name `{TypeName}:{name}` so logs,
+  statistics, snapshots and the management endpoints tell the pools apart, while the unnamed pool of
+  the same type keeps its bare type name. On the DI side `AddNamedPool<T>(name, configure)` declares
+  one, `IHayateNamedPoolAccessor.GetPool<T>(name)` resolves it (and `GetPool<T>()` resolves the
+  unnamed one), and `AddPool<T, TClient>(name)` binds a client class to a named pool, the way
+  `AddHttpClient<TClient>()` does — the binding is decided at registration, so the client keeps a
+  plain constructor taking `IHayateObjectPool<T>` and needs no attribute. The unnamed
+  `IHayateObjectPool<T>` registration stays reserved for `RegisterHayatePool<T>()`, so "the pool of
+  `T`" never silently resolves to one of several named pools. Pools are built on first use, and
+  resolution never creates one on demand: an unknown name throws instead of silently starting an
+  unconfigured pool. `RegisterNamedHayatePool<T>(configuration, name)` is the configuration-driven
+  counterpart, merging `HayatePool:Global` with `HayatePool:Pools:{name}` exactly as
+  `RegisterHayatePool<T>` does, hot reload included. Outside a container `HayatePoolFactory` builds
+  named pools at run time — `GetOrCreate` returns the pool already registered for a key and only
+  builds one when the key is new, which is what a multi-tenant or plugin host needs. Named pools are
+  deliberately **not** built on Microsoft.Extensions.DependencyInjection keyed services: those only
+  exist in version 8.0 and later of the abstractions package, so a keyed registration would be
+  unavailable to the net6.0 / net7.0 targets this library ships, and would couple net48 behavior to
+  the version of `Microsoft.Extensions.DependencyInjection` the application happens to resolve.
+  Instead a named pool is one instance of `HayateNamedPoolRegistration<T>` in the container — the
+  container's own "many registrations of one service type" facility, available on every supported
+  target — and the observable behavior is identical from net48 through net10.0: one lazily built
+  singleton per (type, name), owned and disposed by the container. Typed registry lookups
+  (`TryGetPool<T>` / `GetPool<T>` / `GetRequiredPool<T>`) verify the element type rather than
+  handing back a pool that cannot lend the requested type, and are extension methods so
+  `IHayateObjectPoolRegistry` itself stays at its original size.
 - **Diagnostics master switch** (O11, equivalent to P89OP's `Diagnostics.Enabled = false`): the new
   `HayatePoolOptions.EnableDiagnostics` (default `true`, settable through
   `HayatePoolBuilder<T>.WithEnableDiagnostics()`) is a **master gate over the whole diagnostic

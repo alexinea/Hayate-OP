@@ -466,6 +466,41 @@ app.MapGet("/", (IHayateObjectPool<MyPooledObject> pool) =>
 app.Run();
 ```
 
+### Named pools and typed clients
+
+One pool per type is the common case, but a host talking to a primary and a replica — or to one
+backend per tenant — needs several independently sized pools of the same type. `AddNamedPool<T>`
+declares one, `IHayateNamedPoolAccessor` resolves it by name, and `AddPool<T, TClient>` binds a client
+class to a named pool so the binding is decided at registration rather than in the client's
+constructor.
+
+```csharp
+builder.Services.AddHayatePoolSupport()
+       .AddNamedPool<MyConnection>("primary", o => o.MaxPoolSize = 64)
+       .AddNamedPool<MyConnection>("replica", o => o.MaxPoolSize = 16)
+       .AddPool<MyConnection, PrimaryClient>("primary")
+       .AddPool<MyConnection, ReplicaClient>("replica");
+
+// Anywhere else:
+var replica = provider.GetRequiredService<IHayateNamedPoolAccessor>().GetPool<MyConnection>("replica");
+```
+
+A named pool is registered under `MyConnection:primary` (see `HayateServiceKey`), so logs, statistics
+and the management endpoints tell the pools apart; the unnamed `IHayateObjectPool<T>` registration
+stays reserved for the pool registered with `RegisterHayatePool<T>()`. Pools are built on first use,
+and resolution never creates one on demand — an unknown name throws instead of silently starting an
+unconfigured pool. Named pools deliberately avoid Microsoft.Extensions.DependencyInjection keyed
+services, which do not exist in the 6.0 / 7.0 abstractions this library targets, so the same code
+behaves identically from net48 through net10.0.
+
+Outside a container, `HayatePoolFactory` builds named pools at run time, for the cases where the set
+of names is only known while the process is running:
+
+```csharp
+var factory = new HayatePoolFactory(new HayateObjectPoolRegistry());
+var pool = factory.GetOrCreatePool<MyConnection>($"tenant-{id}", o => o.MaxPoolSize = 8);
+```
+
 ### Configuration from `appsettings.json`
 
 Bind global defaults and per-pool overrides directly from configuration. Global settings live under
