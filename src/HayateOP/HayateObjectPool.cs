@@ -116,6 +116,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private long _leaseTimeMinMs = long.MaxValue;
 
     private readonly bool _enableValidation;
+    // Diagnostics master switch (O11). When off, the engine writes no counter, reports nothing to
+    // IHayateMetrics and emits no per-operation debug entry — the borrow/return paths then carry no
+    // diagnostic work at all. Normalization guarantees EnableMetrics is false whenever this is false,
+    // so the metrics gate below implies it: every `if (_enableMetrics)` block may rely on diagnostics
+    // being on, and only the counter writes that are not metrics-gated need their own check.
+    private readonly bool _enableDiagnostics;
     private readonly bool _enableMetrics;
     private readonly bool _enableGenerationOptimization;
     private readonly bool _enableLeakDetection;
@@ -246,6 +252,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _enableGenerationOptimization = _options.EnableGenerationOptimization;
         _enableLeakDetection = _options.EnableLeakDetection;
         _enableEviction = _options.EnableEviction;
+        _enableDiagnostics = _options.EnableDiagnostics;
         _enableMetrics = _options.EnableMetrics;
 
         // Abandoned recovery (K2) — feature-switch snapshot (lean normalization has already forced both
@@ -702,7 +709,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         w.Generation = 1;
                     }
 
-                    Interlocked.Increment(ref _totalAcquired);
+                    // TotalAcquired is the borrow-count contract and is normally written on every borrow
+                    // whatever the metrics switch says (see docs/metrics-gating.md §2). The diagnostics
+                    // master switch is the one configuration that opts out of it, which is what makes the
+                    // pool's diagnostic surface completely free rather than merely quiet.
+                    if (_enableDiagnostics) Interlocked.Increment(ref _totalAcquired);
 
                     // Capacity-alarm probe (returns immediately internally when disabled)
                     CheckCapacityAlarm();
@@ -724,8 +735,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         }
                         _logger.LogDebug("Object borrowed from pool. Type: {Type} WaitTime: {WaitTime:F2}ms, shard: {ShardIndex}", typeof(T).Name, waitTime, shard.Index);
                     }
-                    else
+                    else if (_enableDiagnostics)
                     {
+                        // Metrics off, diagnostics on: keep the trace. Dropping this branch when
+                        // diagnostics are off is what removes the per-borrow params array (and the boxed
+                        // shard index) from the borrow path.
                         _logger.LogDebug("Object borrowed from pool. Type: {Type} shard: {ShardIndex}", typeof(T).Name, shard.Index);
                     }
 
@@ -886,7 +900,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     w.LastGetThreadId = Environment.CurrentManagedThreadId;
                     w.LeaseCount++;
 
-                    Interlocked.Increment(ref _totalAcquired);
+                    if (_enableDiagnostics) Interlocked.Increment(ref _totalAcquired);
 
                     // Capacity-alarm probe (returns immediately internally when disabled)
                     CheckCapacityAlarm();
@@ -1146,7 +1160,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             // Capacity-alarm probe — the borrow-water-level drop on return is sensed here (reset/retripped on state transition).
             CheckCapacityAlarm();
 
-            _logger.LogDebug("Object returned to pool. Type: {Type} LeaseTime: {LeaseTime:F2}ms, shard: {ShardIndex}", typeof(T).Name, w.LeaseTimeMs, shardIndex);
+            // Per-operation trace — suppressed by the diagnostics master switch (O11), which is what keeps
+            // the return path free of the params-array allocation this call would otherwise make.
+            if (_enableDiagnostics)
+            {
+                _logger.LogDebug("Object returned to pool. Type: {Type} LeaseTime: {LeaseTime:F2}ms, shard: {ShardIndex}", typeof(T).Name, w.LeaseTimeMs, shardIndex);
+            }
         }
         catch (Exception ex)
         {
@@ -1651,7 +1670,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         w.LastGetThreadId = Environment.CurrentManagedThreadId;
         w.LeaseCount++;
         _policy.OnAcquire(w.Value);
-        Interlocked.Increment(ref _totalAcquired);
+        // Borrow-count contract, gated by the diagnostics master switch alone (see the sync path).
+        if (_enableDiagnostics) Interlocked.Increment(ref _totalAcquired);
 
         // Capacity-alarm probe (returns immediately internally when disabled)
         CheckCapacityAlarm();
@@ -1708,7 +1728,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             // parked wrapper must never keep a destroyed pooled object alive. UntrackObject has already
             // removed the registry entry above, so nothing reads w.Value after this point.
             w.Value = null!;
-            _logger.LogDebug("Wrapped object destroyed. Type: {Type}", typeof(T).Name);
+            if (_enableDiagnostics) _logger.LogDebug("Wrapped object destroyed. Type: {Type}", typeof(T).Name);
         }
         catch (Exception ex)
         {
@@ -1738,7 +1758,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             _policy.OnDestroy(o);
             if (o is IDisposable d) d.Dispose();
             UntrackKey(o);
-            _logger.LogDebug("Object destroyed. Type: {Type}", typeof(T).Name);
+            if (_enableDiagnostics) _logger.LogDebug("Object destroyed. Type: {Type}", typeof(T).Name);
         }
         catch (Exception ex)
         {

@@ -120,7 +120,8 @@ public class HayatePoolOptions
     /// Special case: lean is a <i>mode</i>, not a knob — enabling it forces
     /// <see cref="EnableSharding"/>, <see cref="EnableAutoScaling"/>, <see cref="EnableValidation"/>,
     /// <see cref="EnableEviction"/>, <see cref="EnableGenerationOptimization"/>,
-    /// <see cref="EnableLeakDetection"/>, <see cref="EnableMetrics"/> and
+    /// <see cref="EnableLeakDetection"/>, <see cref="EnableDiagnostics"/>,
+    /// <see cref="EnableMetrics"/> and
     /// <see cref="EnableAllocationTracking"/> off and clears the capacity-alarm thresholds, because
     /// each of them needs per-object bookkeeping or a background timer that the fast path does not
     /// maintain. The normalized result is produced by <see cref="ApplyFeatureSwitches"/> (also
@@ -730,12 +731,48 @@ public class HayatePoolOptions
     #region Metrics
 
     /// <summary>
+    /// Master switch for the whole diagnostic surface of the general-purpose engine: the cumulative
+    /// counters, the timing statistics, the <c>IHayateMetrics</c> sink and the per-operation debug
+    /// trace.<br />
+    /// Default value: <c>true</c>.
+    /// </summary>
+    /// <remarks>
+    /// Purpose: give an extreme-lightweight deployment one hard switch that takes the entire
+    /// bookkeeping surface off the borrow and return paths, instead of trimming the individual feature
+    /// switches one by one. This is what also stops <see cref="HayatePoolStats.TotalAcquired"/> — the
+    /// one counter <see cref="EnableMetrics"/> deliberately leaves running (see
+    /// <c>docs/metrics-gating.md</c>) — so a pool with diagnostics off performs no counter write, no
+    /// metrics callback and no per-operation trace entry at all.<br />
+    /// Special case: it is a master gate, so switching it off normalizes <see cref="EnableMetrics"/>
+    /// and <see cref="EnableAllocationTracking"/> to <c>false</c> as well; the collapsed configuration
+    /// is visible through <c>GetOptions</c>. Registering a custom <c>IHayateMetrics</c> while diagnostics
+    /// are off fails the build rather than silently discarding the registration, exactly as it does with
+    /// metrics off. With diagnostics off every cumulative counter and every timing statistic reports 0,
+    /// and the engine writes no per-operation debug entry; lifecycle and problem logs
+    /// (<c>Information</c> / <c>Warning</c> / <c>Error</c>) are untouched, so construction, disposal and
+    /// failure reporting still reach the log. Counters owned by another feature switch — leak detection
+    /// and the capacity alarm — keep following their own switch.<br />
+    /// Boundary: boolean master switch, fixed at construction like every other feature switch, so
+    /// <c>ReloadConfig</c> cannot change it on a live pool.<br />
+    /// Recommended range: leave it on (the default) unless the pool sits on a measured hot path where
+    /// every counter write and trace entry is unwanted. The lean fast path forces it off, because that
+    /// path keeps no counters and writes no diagnostics by construction.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var options = new HayatePoolOptions { EnableDiagnostics = false };
+    /// </code>
+    /// </example>
+    public bool EnableDiagnostics { get; set; } = true;
+
+    /// <summary>
     /// Whether to enable metrics collection.<br />
     /// Default value: <c>false</c>.
     /// </summary>
     /// <remarks>
     /// Purpose: emit pool runtime metrics for observability.<br />
-    /// Special case: enabling it on high-frequency paths adds a small overhead.<br />
+    /// Special case: enabling it on high-frequency paths adds a small overhead; it is a sub-switch of
+    /// <see cref="EnableDiagnostics"/>, which normalizes it to <c>false</c> when the master switch is off.<br />
     /// Boundary: boolean switch.<br />
     /// Recommended range: enable in test/production; disable under extreme-performance benchmarks.
     /// </remarks>
@@ -750,7 +787,9 @@ public class HayatePoolOptions
     /// locate hidden allocations on the hot path; corroborates the benchmark's <c>B/Op</c> metric.<br />
     /// Special case: each borrow/return makes one extra allocation-query API call (near zero
     /// allocation) and still has a small overhead; the <c>net48</c> / <c>netstandard2.0</c> target
-    /// frameworks lack this API, so tracking is silently unavailable there (count stays 0).<br />
+    /// frameworks lack this API, so tracking is silently unavailable there (count stays 0). It is a
+    /// sub-switch of <see cref="EnableDiagnostics"/>, which normalizes it to <c>false</c> when the
+    /// master switch is off.<br />
     /// Boundary: boolean switch.<br />
     /// Recommended range: enable during diagnosis/tuning; disable on production hot paths.
     /// </remarks>
@@ -860,6 +899,7 @@ public class HayatePoolOptions
         RemoveAbandonedOnBorrow = false;
         RemoveAbandonedOnMaintenance = false;
 
+        EnableDiagnostics = false;
         EnableMetrics = false;
         EnableAllocationTracking = false;
 
@@ -882,11 +922,13 @@ public class HayatePoolOptions
     /// <see cref="ValidateOnBorrow"/>, <see cref="ValidateOnReturn"/> and
     /// <see cref="ValidateWhileIdle"/> stay <c>false</c>, and sizing plus reject semantics are untouched.
     /// The profile is the exact opposite of <see cref="UseLeanProfile"/>: it clears
-    /// <see cref="EnableLean"/>, so applying it after the lean profile leaves a full-featured pool.<br />
+    /// <see cref="EnableLean"/>, so applying it after the lean profile leaves a full-featured pool — and it
+    /// re-opens <see cref="EnableDiagnostics"/>, which the lean profile closed.<br />
     /// Note that the shipped defaults already enable the six core features, so the profile differs from a
     /// default-configured pool by switching the two observability features
     /// (<see cref="EnableMetrics"/>, <see cref="EnableAllocationTracking"/>) on as well. Both can be
-    /// turned back off afterwards with a normal feature call.
+    /// turned back off afterwards with a normal feature call, and <see cref="EnableDiagnostics"/> — already
+    /// on by default — is written out explicitly so the full state is visible on the profile.
     /// </remarks>
     /// <returns>The same options instance, for chaining.</returns>
     /// <example>
@@ -906,6 +948,7 @@ public class HayatePoolOptions
         EnableGenerationOptimization = true;
         EnableLeakDetection = true;
 
+        EnableDiagnostics = true;
         EnableMetrics = true;
         EnableAllocationTracking = true;
 
@@ -1028,6 +1071,10 @@ public class HayatePoolOptions
         options.OnAvailable = this.OnAvailable;
         options.OnUnavailable = this.OnUnavailable;
 
+        // Diagnostics (the master switch of the bookkeeping surface; carried explicitly so a copy
+        // never re-opens a surface its source closed)
+        options.EnableDiagnostics = this.EnableDiagnostics;
+
         // Metrics
         options.EnableMetrics = this.EnableMetrics;
 
@@ -1097,12 +1144,24 @@ public class HayatePoolOptions
             // directly (no wrapper registry to scan), so both toggles are forced off in lean mode.
             RemoveAbandonedOnBorrow = false;
             RemoveAbandonedOnMaintenance = false;
+            EnableDiagnostics = false;
             EnableMetrics = false;
             EnableAllocationTracking = false;
             EnableCircuitBreaker = false;
             WarnAtRatio = 0;
             CriticalAtRatio = 0;
             ShardAffinityMode = HayateShardAffinityMode.None;
+        }
+
+        // Diagnostics master switch normalization. Closing it closes the whole bookkeeping surface, so
+        // the two sub-switches it owns are turned off with it: leaving EnableMetrics or allocation
+        // tracking on while nothing can be recorded would present a collapsed configuration that still
+        // looks like it collects. The same "mode wins" rule as the lean block above — the disabled
+        // combination is normalized rather than rejected, and the result is visible through GetOptions.
+        if (!EnableDiagnostics)
+        {
+            EnableMetrics = false;
+            EnableAllocationTracking = false;
         }
 
         // Sharding disabled: elastic single shard

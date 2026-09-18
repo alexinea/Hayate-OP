@@ -12,7 +12,7 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 - **Generation Optimization**: Reduces validation frequency for long-lived objects.
 - **Leak Detection**: Tracks and reports potential object leaks; stack-trace capture is opt-in (`Off` / `Sampled` / `EveryAcquire`) since 2.1.
 - **Abandoned Recovery**: Optional reclamation of borrowed objects never returned past `RemoveAbandonedTimeout` (CHOPIN `AbandonedConfig` semantics; destructive, off by default).
-- **Metrics & Monitoring**: Comprehensive statistics and snapshot capabilities.
+- **Metrics & Monitoring**: Comprehensive statistics and snapshot capabilities, plus an `EnableDiagnostics` master switch that takes the whole bookkeeping surface (counters, timing stats, metrics sink, per-operation trace) off the borrow and return paths in one call.
 - **Multiple Reject Policies**: `Abort`, `Block`, `BlockTimeout`, and `CreateNew`.
 - **Dependency Injection Integration**: Seamless integration with `Microsoft.Extensions.DependencyInjection`.
 - **ASP.NET Core Endpoints**: Built-in management endpoints for monitoring and configuration.
@@ -588,7 +588,8 @@ app.Run();
 ```
 
 > The bridge is `HayateDiagnostics` (implements `IHayateMetrics`), which writes events to the
-> `HayateOP` `DiagnosticListener` when `HayatePoolOptions.EnableMetrics` is on. Subscribe via
+> `HayateOP` `DiagnosticListener` when `HayatePoolOptions.EnableMetrics` is on — and therefore only
+> while the `HayatePoolOptions.EnableDiagnostics` master switch is also on. Subscribe via
 > `DiagnosticListener.AllListeners` to capture `HayateOP.Object.Acquire`, `HayateOP.Object.OnRelease`,
 > `HayateOP.Object.Miss`, and `HayateOp.Pool.Scaled` events. Alternatively, supply it to a
 > single pool via the builder's `WithMetrics(...)`.
@@ -659,6 +660,7 @@ var options = new HayatePoolOptions
     RemoveAbandonedIntervalMs = 30000,      // maintenance-pass cadence
 
     // Metrics
+    EnableDiagnostics = true,   // master switch over the whole diagnostic surface
     EnableMetrics = false
 };
 ```
@@ -689,6 +691,7 @@ The short version of how to trim:
 | `RemoveAbandonedOnBorrow` | One bounded oldest-borrow scan per borrow when enabled; off by default → constant branch, zero cost |
 | `RemoveAbandonedOnMaintenance` | Background only: drives the shared timer, never touches the borrow or return path |
 | `WarnAtRatio` / `CriticalAtRatio` | The most expensive optional switch: when non-zero it walks every shard, taking one lock per shard, on **every** borrow and return |
+| `EnableDiagnostics` | The master switch over the whole diagnostic surface. Off, it removes the `TotalAcquired` atomic add, the metrics block and the per-operation debug trace — the general-engine configuration with the least hot-path work short of the lean path, which forces it off |
 | `EnableMetrics` | A min/max CAS loop, a metrics callback and a debug log per operation — and it is also what keeps `TotalCreated` / `TotalReleased` / `TotalMissed` alive |
 | `EnableAllocationTracking` | Two `GC.GetAllocatedBytesForCurrentThread()` calls per operation; unavailable on `net48` / `netstandard2.0` |
 | `EnableEviction`, `EnableAutoScaling`, `ValidateWhileIdle` | Background only: they drive the shared timer and never touch the borrow or return path. A pool with all of them off creates no timer at all |
@@ -711,6 +714,49 @@ HayateOP follows Semantic Versioning. Breaking changes so far:
 Full migration guidance — plus the behavioural notes worth reading before adopting (cold boot, `CreateNew` laziness, ~100 ms blocking wake-up granularity) — lives in [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md). A per-version summary of every change is in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Monitoring and Diagnostics
+
+### Turning the diagnostic surface off
+
+Every counter, timing statistic, metrics callback and per-operation debug trace the pool keeps is
+bookkeeping on the borrow and return paths. `EnableDiagnostics` is the one switch that removes all of
+it at once:
+
+```csharp
+// Fluent builder
+var pool = new HayatePoolBuilder<MyPooledObject>()
+    .WithPoolName("hot")
+    .WithEnableDiagnostics(false)
+    .Build();
+
+// Options object (the equivalent)
+var options = new HayatePoolOptions { EnableDiagnostics = false };
+```
+
+With diagnostics off, `Acquire` performs no counter write, reports nothing to `IHayateMetrics` and
+emits no trace entry; `GetStats()` and `TakeSnapshot()` still work and report 0 for every cumulative
+counter and timing statistic. Three boundaries are worth knowing:
+
+* **It is a master switch, not a peer of `EnableMetrics`.** Switching it off normalizes
+  `EnableMetrics` and `EnableAllocationTracking` off with it, and `GetOptions()` shows the collapsed
+  state. This is deliberate — a pool that cannot record anything should not advertise a collection
+  switch as on.
+* **It is the only way to stop `TotalAcquired`.** That counter is normally written on every borrow
+  whatever the metrics switch says, because it is the borrow-count contract callers verify
+  borrow/return balance against. `EnableDiagnostics = false` is an explicit statement that the balance
+  is not wanted either, so the counter stops with the rest. The full audit is in
+  [`docs/metrics-gating.md`](docs/metrics-gating.md).
+* **Lifecycle and problem logs are untouched.** `Information` / `Warning` / `Error` entries —
+  construction, disposal, capacity alarms, prepare failures, abandoned reclaims — keep being written;
+  only the per-operation `Debug` trace is suppressed. Likewise, counters owned by another switch (leak
+  detection, the capacity alarm) keep following their own switch.
+
+`RegisterHayatePool` (dependency injection) consults the master switch before attaching the custom
+sink, so a DI user is never fast-failed by a configuration they did not write. Registering a sink
+directly with `WithMetrics()` while diagnostics are off **does** fail at `Build()`, with a message
+naming both switches — a sink with no surface to write to is a mistake in either configuration.
+
+The lean fast path (`WithLean()`) forces `EnableDiagnostics` off, since that path keeps no
+bookkeeping by construction, and `UseFullProfile()` re-opens it explicitly.
 
 ### Get current statistics
 

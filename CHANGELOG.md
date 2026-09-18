@@ -12,6 +12,24 @@ Breaking changes are described in full — with migration guidance — in
 
 ### Added
 
+- **Diagnostics master switch** (O11, equivalent to P89OP's `Diagnostics.Enabled = false`): the new
+  `HayatePoolOptions.EnableDiagnostics` (default `true`, settable through
+  `HayatePoolBuilder<T>.WithEnableDiagnostics()`) is a **master gate over the whole diagnostic
+  surface** — the cumulative counters, the timing statistics, the `IHayateMetrics` sink and the
+  per-operation debug trace — rather than a peer of `EnableMetrics`. It is the one configuration that
+  also stops `TotalAcquired`, the borrow-count contract that `EnableMetrics` deliberately leaves
+  running (see `docs/metrics-gating.md`), so with diagnostics off a borrow performs no counter write,
+  no metrics callback and no trace entry at all, and every cumulative counter and timing statistic
+  reads 0. It is a master gate in the "mode wins" sense the options already use: switching it off
+  normalizes `EnableMetrics` and `EnableAllocationTracking` off with it, and the collapsed result is
+  visible through `GetOptions()`. The lean fast path forces it off (it keeps no bookkeeping by
+  construction) and `UseFullProfile()` re-opens it explicitly. Lifecycle and problem logs
+  (`Information` / `Warning` / `Error`) are untouched, so construction, disposal and failure reporting
+  still reach the log; counters owned by another switch — leak detection, the capacity alarm — keep
+  following their own switch. Registering a custom `IHayateMetrics` with diagnostics off fails the
+  build, so a sink can never be silently discarded. The dependency-injection registration consults the
+  master switch before attaching its custom sink, keeping the "a DI user is never fast-failed by a
+  configuration they did not write" semantics. See the "Diagnostics" section of the README.
 - **Abandoned-object recovery** (K2 → M4+, closing the CHOPIN `AbandonedConfig` gap): the M4 leak
   surface stays forensics-only, and borrowed objects that are never returned past
   `RemoveAbandonedTimeout` (default 300 s, aligned with CHOPIN) can now be reclaimed through

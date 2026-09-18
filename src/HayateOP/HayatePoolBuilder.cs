@@ -242,6 +242,31 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
+    /// Enables or disables the pool's whole diagnostic surface — the cumulative counters, the timing
+    /// statistics, the <c>IHayateMetrics</c> sink and the per-operation debug trace. On by default.
+    /// </summary>
+    /// <param name="enable">Whether to keep diagnostics on; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <remarks>
+    /// It is a master gate rather than a peer of <see cref="WithEnableMetrics"/>: switching it off also
+    /// normalizes metrics and allocation tracking off, and it is the only way to stop
+    /// <c>TotalAcquired</c>, which the metrics switch deliberately leaves running. Registering a custom
+    /// <c>IHayateMetrics</c> with diagnostics off fails the build, so a sink can never be silently
+    /// discarded. Sizing, timeouts and the reject policy are untouched; the lean fast path forces the
+    /// switch off.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableDiagnostics(false);
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithEnableDiagnostics(bool enable = true)
+    {
+        _options.EnableDiagnostics = enable;
+        return this;
+    }
+
+    /// <summary>
     /// Enables or disables metrics collection.
     /// </summary>
     /// <param name="enable">Whether to enable metrics; defaults to <c>true</c>.</param>
@@ -1459,11 +1484,15 @@ public class HayatePoolBuilder<T> where T : class, new()
             // Behavior change in 2.2: when a custom metrics collector is explicitly registered but
             // EnableMetrics is off, fail fast instead of silently substituting EmptyHayateMetrics
             // (which would let the user wrongly believe their custom metrics are active).
+            // O11: the diagnostics master switch closes metrics too, so the same guard covers the
+            // "diagnostics off" configuration — a sink registered against a pool that cannot record
+            // anything is a mistake either way, and the message names both switches.
             if (!ReferenceEquals(_metrics, EmptyHayateMetrics.Instance))
             {
                 throw new InvalidOperationException(
                     "HayatePool: a custom IHayateMetrics was registered via WithMetrics(), but metrics collection is disabled (EnableMetrics = false). " +
-                    "Call WithEnableMetrics(true) to activate it, or remove the WithMetrics() registration.");
+                    "Call WithEnableMetrics(true) to activate it, or remove the WithMetrics() registration. " +
+                    "Note that EnableDiagnostics = false also disables metrics — call WithEnableDiagnostics(true) to re-open the diagnostic surface.");
             }
 
             _metrics = EmptyHayateMetrics.Instance;

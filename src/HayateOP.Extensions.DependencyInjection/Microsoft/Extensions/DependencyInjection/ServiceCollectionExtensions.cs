@@ -67,16 +67,19 @@ public static class ServiceCollectionExtensions
             var loggerFactory = sp.GetService<ILoggerFactory>();
             var logger = new HayateMicrosoftLoggerAdapter<T>(loggerFactory?.CreateLogger<T>());
 
-            // Only attach the DI-registered custom metrics when the metrics master switch is enabled;
-            // otherwise keep the v2.1 semantics (the custom instance has no effect) to avoid Build()
-            // fast-failing and wrongly affecting DI users.
+            // Only attach the DI-registered custom metrics when the diagnostic surface is open — both the
+            // master switch (O11) and the metrics sub-switch; otherwise keep the v2.1 semantics (the custom
+            // instance has no effect) to avoid Build() fast-failing and wrongly affecting DI users. Note
+            // that the options instance resolved here is not normalized (ApplyFeatureSwitches runs inside
+            // Build), so the master switch has to be consulted explicitly: with diagnostics off, attaching
+            // the sink would make Build() reject a configuration the user chose deliberately.
             var builder = new HayatePoolBuilder<T>()
                 .WithPoolName(poolRegisterName)
                 .WithPolicy(policy)
                 .WithScalingStrategy(scalingStrategy)
                 .WithLogger(logger);
 
-            if (options.EnableMetrics)
+            if (options.EnableDiagnostics && options.EnableMetrics)
             {
                 builder.WithMetrics(metrics);
             }

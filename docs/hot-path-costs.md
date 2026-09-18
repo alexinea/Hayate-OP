@@ -64,8 +64,9 @@ Two caveats that matter when reading any absolute number here:
 | `ValidateOnBorrow` | One `IHayateObjectPolicy.Validate` call per borrow, plus `Destroy` on a failed verdict | Only consulted when `EnableValidation` is also on. The cost is the policy's own work — often a connection-health probe |
 | `EnableLeakDetection` | Two predicted branches when `LeakTraceCaptureMode.Off` | The scan itself runs in `TakeSnapshot()`, not here (§ diagnostic paths) |
 | `LeakTraceCaptureMode` | `Off` nothing; `Sampled` one `Interlocked.Increment` plus a modulo every N borrows; `EveryAcquire` **one call-stack capture per borrow** | The dominant cost of the whole leak-detection surface: tens of microseconds and 10-40 KB per borrow for `EveryAcquire` |
-| `EnableMetrics` | A min/max CAS-loop update, an `IHayateMetrics.RecordObjectAcquired` call and a debug log entry | Shares the already-running stopwatch for the wait time |
-| `EnableAllocationTracking` | Two `GC.GetAllocatedBytesForCurrentThread()` calls (one before, one after) plus a counter pair | Unavailable on `net48` / `netstandard2.0`, where the counters stay 0 |
+| `EnableDiagnostics` (**master**) | When off, removes the `TotalAcquired` atomic add, the whole `EnableMetrics` block and the per-borrow debug trace — one branch otherwise | The only switch that stops `TotalAcquired`, which `EnableMetrics` deliberately leaves running. Implied by `EnableLean` |
+| `EnableMetrics` | A min/max CAS-loop update, an `IHayateMetrics.RecordObjectAcquired` call and a debug log entry | Shares the already-running stopwatch for the wait time. Requires `EnableDiagnostics` |
+| `EnableAllocationTracking` | Two `GC.GetAllocatedBytesForCurrentThread()` calls (one before, one after) plus a counter pair | Unavailable on `net48` / `netstandard2.0`, where the counters stay 0. Requires `EnableDiagnostics` |
 | `WarnAtRatio` / `CriticalAtRatio` | When either is non-zero, `CheckCapacityAlarm` runs on every borrow **and** every return and walks every shard to compute the utilization ratio | The walk takes one `SpinLock` per shard (`_shards.Sum(s => s.Count)`), so this is the most expensive optional switch per operation. At the default 0 it is one branch |
 | `EnableCircuitBreaker` | One predicted branch when off (and in lean mode, which forces it off); one volatile read when on and the pool is available; while the breaker is open the borrow throws before touching any shard, wait gate or policy | The probe side is a timer that exists only while the pool is unavailable — see the background workers table |
 | `WaitForWarmup` | One branch when off; when on, borrows block on the warm-up signal until pre-warm finishes | The block is one-time per pool |
@@ -86,8 +87,9 @@ it stores the pooled value directly instead of a wrapper.
 | :--- | :--- | :--- |
 | `EnableLean` | Replaces the general engine entirely | No registry probe, no free-list lock |
 | `ValidateOnReturn` | One `Validate` call per return, plus `Destroy` on a failed verdict | Also requires `EnableValidation` |
-| `EnableMetrics` | A min/max CAS-loop update for the lease time, the `TotalReleased` counter and an `IHayateMetrics.RecordObjectReleased` call | — |
-| `EnableAllocationTracking` | Two allocation queries plus a counter pair | — |
+| `EnableDiagnostics` (**master**) | When off, removes the whole `EnableMetrics` block and the per-return debug trace — one branch otherwise | Implied by `EnableLean` |
+| `EnableMetrics` | A min/max CAS-loop update for the lease time, the `TotalReleased` counter and an `IHayateMetrics.RecordObjectReleased` call | Requires `EnableDiagnostics` |
+| `EnableAllocationTracking` | Two allocation queries plus a counter pair | Requires `EnableDiagnostics` |
 | `WarnAtRatio` / `CriticalAtRatio` | Same shard-walking utilisation probe as on the borrow path | — |
 | `EnableAutoScaling` | A watermark check after a rejected return | Only when `MinPoolSize > 0` and the pool fell below it |
 
@@ -121,22 +123,31 @@ A pool with all of them disabled creates **no timer at all**.
 | Scenario | Configuration |
 | :--- | :--- |
 | High-frequency pooling of small, stateless objects | `UseLeanProfile()` — 27.1 ns / 0 B, parity with `DefaultObjectPool` |
+| General engine on a measured hot path, bookkeeping not needed | `WithEnableDiagnostics(false)` — keeps sharding, validation, eviction and the async surface, but drops every counter, the metrics sink and the per-operation trace. The nearest general-engine equivalent of the lean profile's diagnostic stance |
 | Connection / session pool | Keep validation (`ValidateOnBorrow`) and eviction; keep leak detection with `LeakTraceCaptureMode.Off`; turn metrics and allocation tracking off. The cost that matters is the policy's `Validate`, not the pool's |
 | Batch processing | Sharding on; eviction and the capacity alarm off — objects churn continuously and the watermark only adds a shard walk per operation |
 | Latency-critical steady state | Leave the capacity alarm at 0 and enable it only while tuning; it is the one switch that takes a lock per shard on every borrow and return |
 | Memory-constrained host | Eviction on with a short `MaxIdleTime`; metrics and allocation tracking off |
 | Contract that must never block | `RejectPolicy = CreateOnDemand` (or the lean path), which creates on a miss instead of waiting out the timeout |
 
-## 4. The switch that also gates three counters
+## 4. The two switches above the counters
 
-`EnableMetrics` is not only an observability switch — it also decides whether three of the
-four cumulative counters are written at all. With metrics off, `TotalCreated`,
-`TotalReleased` and `TotalMissed` stop being maintained (they report 0), while
+Counting is nested, not flat. `EnableMetrics` is not only an observability switch — it also
+decides whether three of the four cumulative counters are written at all. With metrics off,
+`TotalCreated`, `TotalReleased` and `TotalMissed` stop being maintained (they report 0), while
 `TotalAcquired` keeps being incremented unconditionally on every borrow. Turning metrics
 off therefore buys back those counter writes, and anything reading the statistics object
-has to know which of the two groups it is reading. The full audit — including why
-`TotalAcquired` is deliberately left unconditional — is in
-[`docs/metrics-gating.md`](metrics-gating.md).
+has to know which of the two groups it is reading.
+
+Above it, `EnableDiagnostics` is the master switch over the whole surface. It is the one
+configuration that also stops `TotalAcquired` and the per-operation debug trace — the trace
+is written whenever metrics are *off* and diagnostics are *on*, so trimming it needed a
+switch above both — which makes it the general-engine configuration with the least hot-path
+work short of the lean path itself. Switching it off normalizes `EnableMetrics` and
+`EnableAllocationTracking` off with it, so the two sub-switches below it imply nothing about
+each other but both imply the master switch. The audit — including why `TotalAcquired` is
+deliberately left unconditional under `EnableMetrics`, and what the master switch does and
+does not touch — is in [`docs/metrics-gating.md`](metrics-gating.md).
 
 ## See also
 

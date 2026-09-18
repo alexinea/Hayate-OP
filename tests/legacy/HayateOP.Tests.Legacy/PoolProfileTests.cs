@@ -43,6 +43,7 @@ namespace DotNetCore.HayateOP.Tests
                 EnableEviction = false,
                 EnableGenerationOptimization = false,
                 EnableLeakDetection = false,
+                EnableDiagnostics = false,
                 EnableMetrics = false,
                 EnableAllocationTracking = false,
                 WarnAtRatio = 0,
@@ -108,6 +109,7 @@ namespace DotNetCore.HayateOP.Tests
             Assert.True(options.EnableEviction);
             Assert.True(options.EnableGenerationOptimization);
             Assert.True(options.EnableLeakDetection);
+            Assert.True(options.EnableDiagnostics);
             Assert.True(options.EnableMetrics);
             Assert.True(options.EnableAllocationTracking);
         }
@@ -145,11 +147,13 @@ namespace DotNetCore.HayateOP.Tests
             var fullLast = new HayatePoolOptions().UseLeanProfile().UseFullProfile();
             Assert.False(fullLast.EnableLean);
             Assert.True(fullLast.EnableSharding);
+            Assert.True(fullLast.EnableDiagnostics);
             Assert.True(fullLast.EnableMetrics);
 
             var leanLast = new HayatePoolOptions().UseFullProfile().UseLeanProfile();
             Assert.True(leanLast.EnableLean);
             Assert.False(leanLast.EnableSharding);
+            Assert.False(leanLast.EnableDiagnostics);
             Assert.False(leanLast.EnableMetrics);
         }
 

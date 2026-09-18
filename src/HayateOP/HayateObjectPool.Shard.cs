@@ -13,6 +13,11 @@ public partial class HayatePoolBasic<T>
     {
         private readonly IHayateLogger _logger;
 
+        // Diagnostics master switch (O11), snapshotted at construction like every other feature switch.
+        // With diagnostics off the shard writes no debug entry at all, so a borrow or a return no longer
+        // builds the params array (and boxes the counters) those traces would pass to the logger.
+        private readonly bool _enableDiagnostics;
+
         // Free-object linked list: Add appends to the tail and TryTake removes from the head, naturally preserving FIFO order.
         // Remove performs an O(1) unlink via HayateObject<T>.Node.
         // The old implementation rebuilt the queue with ConcurrentQueue + "ToList -> Remove -> Clear -> Enqueue";
@@ -145,6 +150,7 @@ public partial class HayatePoolBasic<T>
             // The borrowed list exists only to serve abandoned recovery; with both toggles off the
             // shard never maintains it (options are normalized by IsValid before the shards are built).
             _trackBorrowed = options.RemoveAbandonedOnBorrow || options.RemoveAbandonedOnMaintenance;
+            _enableDiagnostics = options.EnableDiagnostics;
         }
 
         public void UpdateMaxSize(int newMaxSize)
@@ -220,7 +226,7 @@ public partial class HayatePoolBasic<T>
                 _logger.LogWarning("[Shard {Index}] capacity exceeded, object rejected and will be destroyed by caller (shard size: {Size}, max: {Max})",
                     Index, size, currentMax);
             }
-            else if (accepted)
+            else if (accepted && _enableDiagnostics)
             {
                 _logger.LogDebug("[Shard {Index}] Object added to shard (current size: {Size})", Index, size);
             }
@@ -253,7 +259,13 @@ public partial class HayatePoolBasic<T>
                 // borrow — the first candidate the abandoned scan (K2) examines.
                 if (_trackBorrowed) w.BorrowedNode = _borrowed.AddLast(w);
 
-                _logger.LogDebug("[Shard {Index}] Object taken from shard (current size: {Size})", Index, _list.Count);
+                // Suppressed by the diagnostics master switch. Gating it also keeps the trace's params
+                // array — and the interpolation work behind it — out of the owned spin lock.
+                if (_enableDiagnostics)
+                {
+                    _logger.LogDebug("[Shard {Index}] Object taken from shard (current size: {Size})", Index, _list.Count);
+                }
+
                 return true;
             }
             finally { if (taken) _lock.Exit(); }
@@ -341,7 +353,7 @@ public partial class HayatePoolBasic<T>
                 if (taken) _lock.Exit();
             }
 
-            if (claimed)
+            if (claimed && _enableDiagnostics)
             {
                 _logger.LogDebug("[Shard {Index}] Borrowed object claimed for abandoned recovery (current borrowed: {Count})", Index, _borrowed.Count);
             }
@@ -418,7 +430,7 @@ public partial class HayatePoolBasic<T>
                 if (taken) _lock.Exit();
             }
 
-            if (claimed)
+            if (claimed && _enableDiagnostics)
             {
                 _logger.LogDebug("[Shard {Index}] Object removed from shard (current size: {Size})", Index, size);
             }

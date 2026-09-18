@@ -1484,6 +1484,27 @@
             </code>
             </example>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEnableDiagnostics(System.Boolean)">
+            <summary>
+            Enables or disables the pool's whole diagnostic surface — the cumulative counters, the timing
+            statistics, the <c>IHayateMetrics</c> sink and the per-operation debug trace. On by default.
+            </summary>
+            <param name="enable">Whether to keep diagnostics on; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <remarks>
+            It is a master gate rather than a peer of <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEnableMetrics(System.Boolean)"/>: switching it off also
+            normalizes metrics and allocation tracking off, and it is the only way to stop
+            <c>TotalAcquired</c>, which the metrics switch deliberately leaves running. Registering a custom
+            <c>IHayateMetrics</c> with diagnostics off fails the build, so a sink can never be silently
+            discarded. Sizing, timeouts and the reject policy are untouched; the lean fast path forces the
+            switch off.
+            </remarks>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithEnableDiagnostics(false);
+            </code>
+            </example>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEnableMetrics(System.Boolean)">
             <summary>
             Enables or disables metrics collection.
@@ -2591,7 +2612,8 @@
             Special case: lean is a <i>mode</i>, not a knob — enabling it forces
             <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableSharding"/>, <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableAutoScaling"/>, <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableValidation"/>,
             <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableEviction"/>, <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableGenerationOptimization"/>,
-            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLeakDetection"/>, <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableMetrics"/> and
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLeakDetection"/>, <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableDiagnostics"/>,
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableMetrics"/> and
             <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableAllocationTracking"/> off and clears the capacity-alarm thresholds, because
             each of them needs per-object bookkeeping or a background timer that the fast path does not
             maintain. The normalized result is produced by <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/> (also
@@ -3153,6 +3175,41 @@
             the threshold was reached. Exceptions thrown inside it are caught and logged by the pool.
             </remarks>
         </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableDiagnostics">
+            <summary>
+            Master switch for the whole diagnostic surface of the general-purpose engine: the cumulative
+            counters, the timing statistics, the <c>IHayateMetrics</c> sink and the per-operation debug
+            trace.<br />
+            Default value: <c>true</c>.
+            </summary>
+            <remarks>
+            Purpose: give an extreme-lightweight deployment one hard switch that takes the entire
+            bookkeeping surface off the borrow and return paths, instead of trimming the individual feature
+            switches one by one. This is what also stops <see cref="P:DotNetCore.HayateOP.HayatePoolStats.TotalAcquired"/> — the
+            one counter <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableMetrics"/> deliberately leaves running (see
+            <c>docs/metrics-gating.md</c>) — so a pool with diagnostics off performs no counter write, no
+            metrics callback and no per-operation trace entry at all.<br />
+            Special case: it is a master gate, so switching it off normalizes <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableMetrics"/>
+            and <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableAllocationTracking"/> to <c>false</c> as well; the collapsed configuration
+            is visible through <c>GetOptions</c>. Registering a custom <c>IHayateMetrics</c> while diagnostics
+            are off fails the build rather than silently discarding the registration, exactly as it does with
+            metrics off. With diagnostics off every cumulative counter and every timing statistic reports 0,
+            and the engine writes no per-operation debug entry; lifecycle and problem logs
+            (<c>Information</c> / <c>Warning</c> / <c>Error</c>) are untouched, so construction, disposal and
+            failure reporting still reach the log. Counters owned by another feature switch — leak detection
+            and the capacity alarm — keep following their own switch.<br />
+            Boundary: boolean master switch, fixed at construction like every other feature switch, so
+            <c>ReloadConfig</c> cannot change it on a live pool.<br />
+            Recommended range: leave it on (the default) unless the pool sits on a measured hot path where
+            every counter write and trace entry is unwanted. The lean fast path forces it off, because that
+            path keeps no counters and writes no diagnostics by construction.
+            </remarks>
+            <example>
+            <code>
+            var options = new HayatePoolOptions { EnableDiagnostics = false };
+            </code>
+            </example>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableMetrics">
             <summary>
             Whether to enable metrics collection.<br />
@@ -3160,7 +3217,8 @@
             </summary>
             <remarks>
             Purpose: emit pool runtime metrics for observability.<br />
-            Special case: enabling it on high-frequency paths adds a small overhead.<br />
+            Special case: enabling it on high-frequency paths adds a small overhead; it is a sub-switch of
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableDiagnostics"/>, which normalizes it to <c>false</c> when the master switch is off.<br />
             Boundary: boolean switch.<br />
             Recommended range: enable in test/production; disable under extreme-performance benchmarks.
             </remarks>
@@ -3175,7 +3233,9 @@
             locate hidden allocations on the hot path; corroborates the benchmark's <c>B/Op</c> metric.<br />
             Special case: each borrow/return makes one extra allocation-query API call (near zero
             allocation) and still has a small overhead; the <c>net48</c> / <c>netstandard2.0</c> target
-            frameworks lack this API, so tracking is silently unavailable there (count stays 0).<br />
+            frameworks lack this API, so tracking is silently unavailable there (count stays 0). It is a
+            sub-switch of <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableDiagnostics"/>, which normalizes it to <c>false</c> when the
+            master switch is off.<br />
             Boundary: boolean switch.<br />
             Recommended range: enable during diagnosis/tuning; disable on production hot paths.
             </remarks>
@@ -3266,11 +3326,13 @@
             <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ValidateOnBorrow"/>, <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ValidateOnReturn"/> and
             <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ValidateWhileIdle"/> stay <c>false</c>, and sizing plus reject semantics are untouched.
             The profile is the exact opposite of <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.UseLeanProfile"/>: it clears
-            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLean"/>, so applying it after the lean profile leaves a full-featured pool.<br />
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLean"/>, so applying it after the lean profile leaves a full-featured pool — and it
+            re-opens <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableDiagnostics"/>, which the lean profile closed.<br />
             Note that the shipped defaults already enable the six core features, so the profile differs from a
             default-configured pool by switching the two observability features
             (<see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableMetrics"/>, <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableAllocationTracking"/>) on as well. Both can be
-            turned back off afterwards with a normal feature call.
+            turned back off afterwards with a normal feature call, and <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableDiagnostics"/> — already
+            on by default — is written out explicitly so the full state is visible on the profile.
             </remarks>
             <returns>The same options instance, for chaining.</returns>
             <example>
