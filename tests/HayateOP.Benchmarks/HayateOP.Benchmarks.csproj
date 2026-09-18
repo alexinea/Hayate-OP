@@ -23,6 +23,10 @@
 		     fallback; NuGet reports that as NU1701, suppressed here because the reference is
 		     deliberate and benchmark-only, so the warning would otherwise repeat on every restore. -->
 		<PackageReference Include="TinyPools" Version="1.0.1" NoWarn="NU1701" />
+		<!-- O8->M1+: Hertzole PowerPools head-to-head reference column. Unlike TinyPools this package
+		     ships a full modern TFM ladder (netstandard2.0 through net9.0), so net10.0 resolves the
+		     net9.0 asset by nearest-TFM selection with no asset-target fallback and no NU1701. -->
+		<PackageReference Include="Hertzole.PowerPools" Version="1.0.0" />
 	</ItemGroup>
 
 </Project>

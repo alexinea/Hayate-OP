@@ -948,12 +948,13 @@ builder.Services.AddOpenTelemetry()
 ## Performance
 
 BenchmarkDotNet compares HayateOP against `Microsoft.Extensions.ObjectPool.DefaultObjectPool<T>`
-(baseline), plain `new` (no-pool lower bound), marklauter `MSL.Pool` and RRode `TinyPools` across the
-`Acquire`, `Release` and `AcquireAsync` paths, with `[MemoryDiagnoser]` / `[ThreadingDiagnoser]` and
-P50/P90/P95/P99 latency columns. `MSL.Pool` exposes an async-only lease API and `TinyPools` a
-synchronous-only one, so the two cover complementary halves of the matrix: `MSL.Pool` appears in the
-`Release`, `AcquireAsync` and concurrent suites, `TinyPools` in the `Acquire+Release`, `Release` and
-concurrent suites, and neither appears in the other's.
+(baseline), plain `new` (no-pool lower bound), marklauter `MSL.Pool`, RRode `TinyPools` and Hertzole
+`PowerPools` across the `Acquire`, `Release` and `AcquireAsync` paths, with `[MemoryDiagnoser]` /
+`[ThreadingDiagnoser]` and P50/P90/P95/P99 latency columns. `MSL.Pool` exposes an async-only lease API
+and `TinyPools` and `PowerPools` synchronous-only ones, so the lines cover complementary halves of the
+matrix: `MSL.Pool` appears in the `Release`, `AcquireAsync` and concurrent suites, `TinyPools` and
+`PowerPools` in the `Acquire+Release`, `Release` and concurrent suites, and none of them appears in the
+other's.
 
 ```bash
 dotnet run -c Release --project tests/HayateOP.Benchmarks
