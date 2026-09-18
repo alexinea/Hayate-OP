@@ -5,7 +5,8 @@
 //                                  optional feature off) / Sharded4 (sharding only) / Full
 //   * reference baselines        : Microsoft.Extensions.ObjectPool (MEOP, Baseline) + plain `new` (no pool, allocation lower bound)
 //                                  + marklauter MSL.Pool 7.2.1 (the N5 head-to-head line)
-//   * async dimension            : MEOP and plain `new` expose no async API -> N/A (not present in the matrix);
+//                                  + RRode TinyPools 1.0.1 (the T8 head-to-head line)
+//   * async dimension            : MEOP / plain `new` / TinyPools expose no async API -> N/A (not present in the matrix);
 //                                  MSL.Pool exposes *only* an async API -> N/A in the synchronous suites
 //   * concurrency dimension      : 100-thread Parallel.For borrow/return (throughput + contention)
 //
@@ -112,6 +113,14 @@ public class HayateOpBenchmarks
     // warm-up and payload are identical to every other row so the columns stay comparable.
     private Pool<PooledObject> _msl = null!;
 
+    // RRode TinyPools 1.0.1 (T8). The smallest pool in the matrix: a Queue of idle items behind a
+    // single lock, with a per-borrow PooledObject<T> lease wrapper that hands the item back when it
+    // is disposed. The library has no asynchronous API and no min-size, timeout, metrics or
+    // eviction surface at all, so it appears in the synchronous and concurrent suites and is N/A in
+    // the asynchronous one. Its capacity constructor argument is a maximum-retained bound, which is
+    // the same retention semantics the MEOP reference row uses.
+    private TinyPools.ObjectPool<PooledObject> _tinyPools = null!;
+
     private IHayateObjectPool<PooledObject> _allOff = null!;          // general engine, every optional feature off
     private IHayateObjectPool<PooledObject> _lean = null!;            // lean (wrapper-free) fast path: EnableLean
     private IHayateObjectPool<PooledObject> _ap = null!;              // lean + ArrayPool direct-storage backend (O-D)
@@ -206,6 +215,16 @@ public class HayateOpBenchmarks
             },
             TimeProvider.System);
 
+        // RRode TinyPools (T8), built through the public capacity-taking constructor. The library has
+        // no min-size notion: the capacity argument bounds how many objects it retains and anything
+        // returned beyond that bound is dropped for garbage collection, which is exactly the
+        // contract of the MEOP row's MaximumRetained. MaxPoolSize is therefore the capacity basis.
+        // The warm-up line below uses the same borrow/return idiom as every other row; note that for
+        // this library that idiom leaves one idle item rather than MaxPoolSize, and the steady state
+        // (create path out of the measurement) is established by BenchmarkDotNet's own warm-up
+        // iterations - verified in docs/benchmarks/2026-09-18-t8-tinypools-line.md.
+        _tinyPools = new TinyPools.ObjectPool<PooledObject>(() => new PooledObject(), MaxPoolSize);
+
         // Warm up (borrow fully, then return) so the steady state never hits the create path.
         for (var i = 0; i < MaxPoolSize; i++) _meop.Return(_meop.Get());
         for (var i = 0; i < MaxPoolSize; i++) _allOff.Release(_allOff.Acquire());
@@ -214,6 +233,7 @@ public class HayateOpBenchmarks
         for (var i = 0; i < MaxPoolSize; i++) _sharded4.Release(_sharded4.Acquire());
         for (var i = 0; i < MaxPoolSize; i++) _full.Release(_full.Acquire());
         for (var i = 0; i < MaxPoolSize; i++) _msl.Release(_msl.LeaseAsync().GetAwaiter().GetResult());
+        for (var i = 0; i < MaxPoolSize; i++) _tinyPools.GetObject().Dispose();
     }
 
     [GlobalCleanup]
@@ -225,6 +245,7 @@ public class HayateOpBenchmarks
         _sharded4.Dispose();
         _full.Dispose();
         _msl.Dispose();
+        // TinyPools' ObjectPool<T> is not IDisposable: it holds nothing that needs releasing.
     }
 
     // ── Suite 1: single-threaded Acquire+Release (all implementations side by side) ──
@@ -245,6 +266,18 @@ public class HayateOpBenchmarks
         var obj = new PooledObject();
         obj.Data++;
         return obj;
+    }
+
+    // TinyPools leases through a wrapper that returns the item on Dispose; it has a synchronous
+    // acquire path but no asynchronous one, the mirror image of MEOP and plain `new` being absent
+    // from the asynchronous suite.
+    [Benchmark(Description = "Acquire+Release | TinyPools")]
+    [BenchmarkCategory("reference")]
+    public void TinyPools_AcquireRelease()
+    {
+        var lease = _tinyPools.GetObject();
+        lease.Object.Data++;
+        lease.Dispose();
     }
 
     [Benchmark(Description = "Acquire+Release | Hayate AllOff")]
@@ -324,6 +357,14 @@ public class HayateOpBenchmarks
     {
         var obj = await _msl.LeaseAsync();
         _msl.Release(obj);
+    }
+
+    [Benchmark(Description = "Release | TinyPools")]
+    [BenchmarkCategory("reference")]
+    public void TinyPools_Release()
+    {
+        var lease = _tinyPools.GetObject();
+        lease.Dispose();
     }
 
     // ── Suite 3: full AcquireAsync path (MEOP / plain new have no async API -> N/A) ──
@@ -427,6 +468,18 @@ public class HayateOpBenchmarks
             var obj = _msl.LeaseAsync().GetAwaiter().GetResult();
             obj.Data++;
             _msl.Release(obj);
+        });
+    }
+
+    [Benchmark(Description = "Concurrent-100 | TinyPools")]
+    [BenchmarkCategory("concurrent")]
+    public void TinyPools_Concurrent100()
+    {
+        Parallel.For(0, ThreadCount, _ =>
+        {
+            var lease = _tinyPools.GetObject();
+            lease.Object.Data++;
+            lease.Dispose();
         });
     }
 

@@ -18,6 +18,11 @@
 		<PackageReference Include="Microsoft.Extensions.ObjectPool" Version="10.0.3" />
 		<!-- N5: marklauter MSL.Pool head-to-head reference column (net10-only, async-only leasing API). -->
 		<PackageReference Include="MSL.Pool" Version="7.2.1" />
+		<!-- T8: RRode TinyPools head-to-head reference column. The package ships a net40-only asset
+		     (built 2016, MIT), which still resolves on net10.0 through the net461 asset-target
+		     fallback; NuGet reports that as NU1701, suppressed here because the reference is
+		     deliberate and benchmark-only, so the warning would otherwise repeat on every restore. -->
+		<PackageReference Include="TinyPools" Version="1.0.1" NoWarn="NU1701" />
 	</ItemGroup>
 
 </Project>
