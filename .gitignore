@@ -338,3 +338,12 @@ NuGet.config
 
 # Endpoints XML 文档为震荡构建产物（增量/全新编译内容漂移约 44 行），移出 git 跟踪、由构建再生成
 src/HayateOP.Extensions.Endpoints/DotNetCore.HayateOP.Extensions.Endpoints.xml
+
+# 调研报告 / 工作状态（禁止提交）
+research/
+reports/
+
+# 工作目录 / 本地发布产物（禁止提交）
+.zcode/
+.workbuddy/
+nuget_pub/
