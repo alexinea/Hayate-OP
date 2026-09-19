@@ -16,6 +16,10 @@ public class HayatePoolBuilder<T> where T : class, new()
     private IHayateLogger _logger;
     private string _poolName;
 
+    // The eviction rule of the maintenance run. Null means "HayateDefaultEvictionPolicy<T>.Instance",
+    // i.e. exactly the rule the pool applied before the extension point existed.
+    private IHayateEvictionPolicy<T>? _evictionPolicy;
+
     // Pool-level logger factory and the "explicit logger" flag. Defaults to no factory plus the
     // built-in singleton logger, identical to the behavior before 2.4; an explicit WithLogger
     // takes precedence over the factory (see ResolveLogger).
@@ -1023,6 +1027,39 @@ public class HayatePoolBuilder<T> where T : class, new()
         return this;
     }
 
+    /// <summary>
+    /// Installs the rule the background eviction run applies to idle objects (the pluggable form of
+    /// CHOPIN's <c>EvictionPolicyClassName</c>).
+    /// </summary>
+    /// <param name="policy">The rule to apply. Must not be <c>null</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="policy"/> is <c>null</c>.</exception>
+    /// <remarks>
+    /// Without this call — and when <see cref="HayateDefaultEvictionPolicy{T}.Instance"/> is passed,
+    /// which is the same thing — the pool evaluates
+    /// <see cref="HayateDefaultEvictionPolicy{T}"/>: evict on expired lifetime, on exceeded idle time,
+    /// or on soft-min idleness above the shard's share of
+    /// <see cref="HayatePoolOptions.MinPoolSize"/>. A custom policy replaces that rule for the run
+    /// entirely, so a policy that returns <c>false</c> always keeps every idle object (abandoned
+    /// recovery and an explicit <see cref="IHayateObjectPool{T}.Evict(HayateEvictReason)"/> still
+    /// work — neither goes through the policy).<br />
+    /// The policy is code, not configuration, so it is installed here rather than through
+    /// <see cref="HayatePoolOptions"/>; a pool built by the dependency-injection or configuration
+    /// registrations keeps the default. It is not consulted in lean mode, which runs without idle
+    /// eviction, and it is ignored while <see cref="HayatePoolOptions.EnableEviction"/> is off.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithEvictionPolicy(new RetireHeavilyUsedObjects());
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithEvictionPolicy(IHayateEvictionPolicy<T> policy)
+    {
+        _evictionPolicy = policy ?? throw new ArgumentNullException(nameof(policy));
+        return this;
+    }
+
     #endregion
 
     #region Creation
@@ -1498,6 +1535,19 @@ public class HayatePoolBuilder<T> where T : class, new()
             _metrics = EmptyHayateMetrics.Instance;
         }
 
+        // Same fail-fast rule for the eviction policy: a custom rule installed on a pool that never
+        // runs an eviction scan (EnableEviction = false, or the lean profile, which forces it off)
+        // would silently never be consulted. Passing the default policy is not a custom rule — it is
+        // what a pool without a policy holds anyway — so that combination stays valid.
+        if (!_options.EnableEviction && _evictionPolicy is not null &&
+            !ReferenceEquals(_evictionPolicy, HayateDefaultEvictionPolicy<T>.Instance))
+        {
+            throw new InvalidOperationException(
+                "HayatePool: a custom IHayateEvictionPolicy was registered via WithEvictionPolicy(), but idle eviction is disabled (EnableEviction = false), so the policy would never be consulted. " +
+                "Call WithEnableEviction(true) to activate it, or remove the WithEvictionPolicy() registration. " +
+                "Note that the lean profile (UseLeanProfile/WithLean) disables eviction by construction.");
+        }
+
         // Resolve the logger by pool name (explicit WithLogger takes precedence -> factory ->
         // built-in singleton).
         var logger = ResolveLogger();
@@ -1509,7 +1559,8 @@ public class HayatePoolBuilder<T> where T : class, new()
             _metrics,
             logger,
             _poolName,
-            _shutdownHook);
+            _shutdownHook,
+            _evictionPolicy);
 
         logger.LogInformation("HayatePool [{PoolName}] initialized successfully", _poolName);
 

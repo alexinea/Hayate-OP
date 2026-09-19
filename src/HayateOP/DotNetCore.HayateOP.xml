@@ -383,6 +383,117 @@
             <param name="poolName">The name of the pool that is unavailable.</param>
             <param name="reason">The reported failure reason, or <c>null</c> when there is none.</param>
         </member>
+        <member name="T:DotNetCore.HayateOP.HayateDefaultEvictionPolicy`1">
+            <summary>
+            The rule every pool applies when no eviction policy is installed — the rule the background
+            eviction run used before the <see cref="T:DotNetCore.HayateOP.IHayateEvictionPolicy`1"/> extension point existed:
+            </summary>
+            <list type="bullet">
+            <item><description>the object has outlived its maximum lifetime
+            (<see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/>) — it is expired regardless of how busy the pool is;</description></item>
+            <item><description>the object has been idle longer than <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxIdleTime"/>;</description></item>
+            <item><description>or the object has been idle longer than
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.SoftMinEvictableIdleTime"/> <em>and</em> its shard still holds more idle
+            objects than its share of <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MinPoolSize"/>, so the pool shrinks back
+            towards its minimum instead of waiting the full idle time out.</description></item>
+            </list>
+            <remarks>
+            Stateless and therefore thread-safe and free to share: <see cref="P:DotNetCore.HayateOP.HayateDefaultEvictionPolicy`1.Instance"/> is a single instance
+            per element type, and it is what a pool that was not given a policy holds. A pool recognizes this
+            instance and keeps the built-in evaluation for its log line, which is why installing it explicitly
+            is the same as installing nothing.
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateDefaultEvictionPolicy`1.Instance">
+            <summary>
+            The shared, stateless instance. Every pool that is not given another policy evaluates its
+            eviction run through this one.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateDefaultEvictionPolicy`1.ShouldEvict(DotNetCore.HayateOP.HayateEvictionCandidate{`0}@)">
+            <summary>
+            Evaluates the three rules above, in the order the run has always applied them.
+            </summary>
+            <param name="candidate">The idle object under test.</param>
+            <returns><c>true</c> when the object is expired, idle too long, or softly idle above the minimum.</returns>
+        </member>
+        <member name="T:DotNetCore.HayateOP.HayateEvictionCandidate`1">
+            <summary>
+            One idle object offered to an <see cref="T:DotNetCore.HayateOP.IHayateEvictionPolicy`1"/>: the pooled instance plus the
+            timings and thresholds the background eviction run measured for it.
+            </summary>
+            <typeparam name="T">The pooled element type.</typeparam>
+            <remarks>
+            The value is a snapshot — the pool builds it when the object is tested and the policy only reads
+            it. The object itself is handed over as <see cref="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.Item"/> so a policy can inspect its real state
+            (an open socket, a connection that answered a probe) rather than deciding on age alone; the
+            bookkeeping wrapper the pool keeps around it stays internal, so a policy cannot corrupt the
+            lifecycle metadata by writing to it.<br />
+            Every duration is already measured in <see cref="T:System.TimeSpan"/> and every threshold is the value the
+            pool is actually running with (including the defaults it filled in), so a policy never has to
+            reach back into <see cref="T:DotNetCore.HayateOP.HayatePoolOptions"/> — and it keeps working when the options are hot
+            reloaded.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateEvictionCandidate`1.#ctor(`0,System.TimeSpan,System.TimeSpan,System.Int32,System.Int32,System.Int32,System.TimeSpan,System.TimeSpan,System.TimeSpan,System.Int32)">
+            <summary>
+            Creates a candidate. The pool builds these on every eviction run; the constructor is public so
+            a policy can be unit-tested without a pool.
+            </summary>
+            <param name="item">The idle object under test.</param>
+            <param name="age">Time since the object was created (the <see cref="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.MaxLifeTime"/> basis).</param>
+            <param name="idleTime">Time since the object was last returned (the <see cref="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.MaxIdleTime"/> basis).</param>
+            <param name="leaseCount">Number of times the object has been borrowed.</param>
+            <param name="idleCount">Idle objects in the shard holding this object, this one included.</param>
+            <param name="minIdleCount">The shard's share of the minimum pool size (see <see cref="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.MinIdleCount"/>).</param>
+            <param name="maxLifeTime">The configured maximum lifetime.</param>
+            <param name="maxIdleTime">The configured maximum idle time.</param>
+            <param name="softMinEvictableIdleTime">The configured soft minimum evictable idle time.</param>
+            <param name="shardIndex">Index of the shard the object currently belongs to.</param>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.Item">
+            <summary>The idle pooled instance the run is testing. Never <c>null</c>: only idle objects are candidates.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.Age">
+            <summary>Time since <see cref="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.Item"/> was created — the quantity <see cref="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.MaxLifeTime"/> bounds.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.IdleTime">
+            <summary>Time since <see cref="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.Item"/> was last returned — the quantity <see cref="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.MaxIdleTime"/> bounds.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.LeaseCount">
+            <summary>
+            How many times <see cref="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.Item"/> has been borrowed so far. Unlike the other measurements this
+            is a lifetime total, so it is the axis to use when the object's freshness is what matters
+            (retire a pooled object after a fixed number of leases) rather than the wall clock.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.IdleCount">
+            <summary>
+            Idle objects in the shard at the moment of the test, this candidate included — the quantity the
+            soft minimum is compared against.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.MinIdleCount">
+            <summary>
+            The shard's share of <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MinPoolSize"/> —
+            <c>MinPoolSize / ShardCount</c>, integer division, exactly the figure the run has always
+            compared <see cref="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.IdleCount"/> against. Idle objects above this count are the ones the pool is
+            allowed to shed, so a soft-idle verdict should always be combined with
+            <c>IdleCount &gt; MinIdleCount</c>.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.MaxLifeTime">
+            <summary>The configured maximum lifetime (<see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/>).</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.MaxIdleTime">
+            <summary>The configured maximum idle time (<see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxIdleTime"/>).</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.SoftMinEvictableIdleTime">
+            <summary>The configured soft minimum evictable idle time (<see cref="P:DotNetCore.HayateOP.HayatePoolOptions.SoftMinEvictableIdleTime"/>).</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateEvictionCandidate`1.ShardIndex">
+            <summary>Index of the shard the object currently belongs to (diagnostics only).</summary>
+        </member>
         <member name="T:DotNetCore.HayateOP.HayateEvictReason">
             <summary>
             The categorization basis for <see cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.Evict(DotNetCore.HayateOP.HayateEvictReason)"/>.
@@ -694,7 +805,7 @@
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.UntrackKey(`0)">
             <summary>When only a bare object reference (no wrapper) is available, scans all shards to remove the registry entry.</summary>
         </member>
-        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.#ctor(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0},DotNetCore.HayateOP.HayatePoolOptions,DotNetCore.HayateOP.Scaling.IHayateScalingStrategy,DotNetCore.HayateOP.Metrics.IHayateMetrics,DotNetCore.HayateOP.Logging.IHayateLogger,System.String,DotNetCore.HayateOP.IHayateShutdownHook)">
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.#ctor(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0},DotNetCore.HayateOP.HayatePoolOptions,DotNetCore.HayateOP.Scaling.IHayateScalingStrategy,DotNetCore.HayateOP.Metrics.IHayateMetrics,DotNetCore.HayateOP.Logging.IHayateLogger,System.String,DotNetCore.HayateOP.IHayateShutdownHook,DotNetCore.HayateOP.IHayateEvictionPolicy{`0})">
             <exception cref="T:System.ArgumentNullException">Thrown if policy, options, scalingStrategy, metrics, logger, or poolName is null.</exception>
             <exception cref="T:System.InvalidOperationException">Thrown if the configured options are invalid.</exception>
         </member>
@@ -961,6 +1072,14 @@
             A debounced flip: only the thread that successfully flips the state via CAS fires the callback once;
             falling back to the low-water mark silently resets (no callback), and re-crossing the line can fire again.
             when disabled (WarnAtRatio = 0 and CriticalAtRatio = 0) the caller's read-only flag short-circuits it at zero cost.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.LogEviction(System.Int32,DotNetCore.HayateOP.HayateEvictionCandidate{`0}@)">
+            <summary>
+            Logs one eviction. A pool running the built-in rule keeps the historical line, whose three flags
+            are re-derived from the candidate (they are what the default policy evaluated); a custom policy
+            gets a line naming the rule and the measurements it decided on, so an unexpected eviction can be
+            traced back to the policy that produced it.
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.ReclaimAbandoned(System.Int32)">
@@ -2016,6 +2135,35 @@
             <example>
             <code>
             var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithNumTestsPerEvictionRun(16);
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEvictionPolicy(DotNetCore.HayateOP.IHayateEvictionPolicy{`0})">
+            <summary>
+            Installs the rule the background eviction run applies to idle objects (the pluggable form of
+            CHOPIN's <c>EvictionPolicyClassName</c>).
+            </summary>
+            <param name="policy">The rule to apply. Must not be <c>null</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="policy"/> is <c>null</c>.</exception>
+            <remarks>
+            Without this call — and when <see cref="P:DotNetCore.HayateOP.HayateDefaultEvictionPolicy`1.Instance"/> is passed,
+            which is the same thing — the pool evaluates
+            <see cref="T:DotNetCore.HayateOP.HayateDefaultEvictionPolicy`1"/>: evict on expired lifetime, on exceeded idle time,
+            or on soft-min idleness above the shard's share of
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MinPoolSize"/>. A custom policy replaces that rule for the run
+            entirely, so a policy that returns <c>false</c> always keeps every idle object (abandoned
+            recovery and an explicit <see cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.Evict(DotNetCore.HayateOP.HayateEvictReason)"/> still
+            work — neither goes through the policy).<br />
+            The policy is code, not configuration, so it is installed here rather than through
+            <see cref="T:DotNetCore.HayateOP.HayatePoolOptions"/>; a pool built by the dependency-injection or configuration
+            registrations keeps the default. It is not consulted in lean mode, which runs without idle
+            eviction, and it is ignored while <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableEviction"/> is off.
+            </remarks>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithEvictionPolicy(new RetireHeavilyUsedObjects());
             </code>
             </example>
         </member>
@@ -4598,6 +4746,66 @@
             Destroys every parked object; the pool cannot be reused afterwards.
             </summary>
             <inheritdoc />
+        </member>
+        <member name="T:DotNetCore.HayateOP.IHayateEvictionPolicy`1">
+             <summary>
+             Decides whether an idle pooled object should be destroyed by the background eviction run — the
+             pluggable form of the rule the pool otherwise applies on its own (the counterpart of CHOPIN's
+             <c>EvictionPolicyClassName</c>).
+             </summary>
+             <typeparam name="T">The pooled element type.</typeparam>
+             <remarks>
+             Install a policy with <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEvictionPolicy(DotNetCore.HayateOP.IHayateEvictionPolicy{`0})"/>. A pool that installs
+             none asks <see cref="P:DotNetCore.HayateOP.HayateDefaultEvictionPolicy`1.Instance"/>, whose verdict is exactly the rule
+             the pool applied before this extension point existed: lifetime exceeded, idle time exceeded, or
+             soft-idle past the shard's share of <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MinPoolSize"/>.
+             <para>
+             The policy is the whole rule for the run — it is asked about every candidate and its answer
+             decides. A policy that never returns <c>true</c> therefore turns idle eviction off, which is a
+             supported configuration (a pool whose objects are expensive and safe to keep); the pool still
+             reclaims abandoned objects through K2 and still honours an explicit
+             <see cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.Evict(DotNetCore.HayateOP.HayateEvictReason)"/> call, neither of which goes through
+             this interface.
+             </para>
+             <para>
+             Only idle objects are offered. An object that is currently borrowed never reaches the policy, and
+             no verdict can make one evictable: the shard re-checks ownership in its claim protocol, so an
+             object handed out between the test and the removal is skipped rather than destroyed under the
+             borrower. Each shard contributes at most <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.NumTestsPerEvictionRun"/>
+             objects per run, taken from the head of its idle list — a policy sees the oldest idles first, not
+             the whole pool.
+             </para>
+             <para>
+             The policy runs on the maintenance timer, so it must return quickly and must not block that
+             thread. It is called concurrently from the shards' runs and should be stateless (or thread-safe);
+             an exception it throws is caught by the run and logged, like any other background-eviction failure.
+             </para>
+             </remarks>
+             <example>
+             <code>
+             private sealed class RetireWellUsedConnections : IHayateEvictionPolicy&lt;Connection&gt;
+             {
+                 public bool ShouldEvict(in HayateEvictionCandidate&lt;Connection&gt; candidate)
+                     =&gt; candidate.LeaseCount &gt;= 1_000
+                        || candidate.Age &gt; candidate.MaxLifeTime
+                        || candidate.IdleTime &gt; candidate.MaxIdleTime;
+             }
+            
+             var pool = new HayatePoolBuilder&lt;Connection&gt;()
+                 .WithEvictionPolicy(new RetireWellUsedConnections())
+                 .WithMaxLifeTime(TimeSpan.FromMinutes(30))
+                 .Build();
+             </code>
+             </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateEvictionPolicy`1.ShouldEvict(DotNetCore.HayateOP.HayateEvictionCandidate{`0}@)">
+            <summary>
+            Returns <c>true</c> when the tested object must be destroyed.
+            </summary>
+            <param name="candidate">
+            The idle object under test and the timings, thresholds and idle count the run measured for it.
+            </param>
+            <returns><c>true</c> to evict the object, <c>false</c> to leave it in the pool.</returns>
         </member>
         <member name="M:DotNetCore.HayateOP.IHayateObjectPool.GetStats">
             <summary>Returns a point-in-time snapshot of pool statistics (counts, timings, allocation tracking).</summary>

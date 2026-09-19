@@ -24,6 +24,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private readonly IHayateLogger _logger;
     private readonly IHayateMetrics _metrics;
 
+    // O7: the rule the background eviction run applies. Never null — a pool that was not given a
+    // policy holds HayateDefaultEvictionPolicy<T>.Instance. The run always asks the policy, so there is
+    // exactly one implementation of the rule; _useCustomEvictionPolicy only picks the log line.
+    private readonly IHayateEvictionPolicy<T> _evictionPolicy;
+    private readonly bool _useCustomEvictionPolicy;
+
     // The original pool-level single _objectMap (ConcurrentDictionary<T, HayateObject<T>>) has been split by shard,
     // and moved into each Shard's internal registry (see HayateObjectPool.Shard.cs). Registry entries are written on object create/destroy
     // to their owning shard, eliminating the non-converging bucket-array peak caused by multiple shards writing the same table concurrently.
@@ -227,7 +233,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         IHayateMetrics metrics,
         IHayateLogger logger,
         string poolName,
-        IHayateShutdownHook? shutdownHook = null)
+        IHayateShutdownHook? shutdownHook = null,
+        IHayateEvictionPolicy<T>? evictionPolicy = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -235,6 +242,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _name = poolName ?? throw new ArgumentNullException(nameof(poolName));
+
+        // O7: the eviction rule of the maintenance run. Null (the common case) means the built-in
+        // default, and an explicitly installed default instance is recognized as the same thing, so
+        // only a genuine custom rule takes the alternate log line.
+        _evictionPolicy = evictionPolicy ?? HayateDefaultEvictionPolicy<T>.Instance;
+        _useCustomEvictionPolicy = !ReferenceEquals(_evictionPolicy, HayateDefaultEvictionPolicy<T>.Instance);
 
         if (!_options.IsValid())
         {
@@ -1961,6 +1974,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             int sampleCapacity = _options.NumTestsPerEvictionRun < 1 ? 1 : _options.NumTestsPerEvictionRun;
             var evictionSample = new HayateObject<T>[sampleCapacity];
 
+            // The shard's share of the minimum pool size: the floor the soft-minimum-idle rule compares
+            // the idle count against, computed once per run rather than per candidate.
+            var minIdlePerShard = _options.MinPoolSize / _shards.Length;
+
             foreach (var shard in _shards)
             {
                 // Batched check (reuses the sampling buffer to avoid the long-tail allocation of ToArray on the entire idle list each time)
@@ -1973,16 +1990,22 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     // Skip objects currently in use
                     if (w.IsBorrowed) continue;
 
-                    // Decide whether to evict (Stopwatch ticks → seconds conversion)
-                    var isExpired = (now - w.CreatedAt) / (double)Stopwatch.Frequency > _options.MaxLifeTime.TotalSeconds;
-                    var isIdleTooLong = (now - w.LastReleasedAt) / (double)Stopwatch.Frequency > _options.MaxIdleTime.TotalSeconds;
-                    var isSoftIdle = (now - w.LastReleasedAt) / (double)Stopwatch.Frequency > _options.SoftMinEvictableIdleTime.TotalSeconds;
+                    // O7: the policy decides. The pool always goes through it — the default policy is
+                    // just another implementation of the rule this scan used to inline, which keeps a
+                    // custom rule from being one code path and the built-in rule another.
+                    var candidate = new HayateEvictionCandidate<T>(
+                        w.Value,
+                        TimeSpan.FromSeconds((now - w.CreatedAt) / (double)Stopwatch.Frequency),
+                        TimeSpan.FromSeconds((now - w.LastReleasedAt) / (double)Stopwatch.Frequency),
+                        w.LeaseCount,
+                        shard.Count,
+                        minIdlePerShard,
+                        _options.MaxLifeTime,
+                        _options.MaxIdleTime,
+                        _options.SoftMinEvictableIdleTime,
+                        shard.Index);
 
-                    // Soft-minimum-idle logic
-                    // Only evict soft-idle objects when the idle count exceeds the minimum pool size
-                    var shouldEvictSoft = isSoftIdle && shard.Count > _options.MinPoolSize / _shards.Length;
-
-                    if (isExpired || isIdleTooLong || shouldEvictSoft)
+                    if (_evictionPolicy.ShouldEvict(in candidate))
                     {
                         // Only the caller that successfully claims may destroy: if the object is currently borrowed (Remove returns false),
                         // it must never be destroyed, or it would corrupt the business thread using it.
@@ -1991,8 +2014,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                             Destroy(w);
                             evictedCount++;
 
-                            _logger.LogInformation("[Shard {Index}] Evicting object. Type: {Type} Expired: {Expired} IdleTooLong: {IdleTooLong} SoftIdle: {SoftIdle}",
-                                shard.Index, typeof(T).Name, isExpired, isIdleTooLong, shouldEvictSoft);
+                            LogEviction(shard.Index, candidate);
                         }
                     }
                 }
@@ -2007,6 +2029,31 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         {
             _logger.LogError(ex, "Eviction callback failed");
         }
+    }
+
+    /// <summary>
+    /// Logs one eviction. A pool running the built-in rule keeps the historical line, whose three flags
+    /// are re-derived from the candidate (they are what the default policy evaluated); a custom policy
+    /// gets a line naming the rule and the measurements it decided on, so an unexpected eviction can be
+    /// traced back to the policy that produced it.
+    /// </summary>
+    private void LogEviction(int shardIndex, in HayateEvictionCandidate<T> candidate)
+    {
+        if (_useCustomEvictionPolicy)
+        {
+            _logger.LogInformation("[Shard {Index}] Eviction policy {Policy} selected an object. Type: {Type} Age: {Age} Idle: {Idle} IdleCount: {IdleCount} LeaseCount: {LeaseCount}",
+                shardIndex, _evictionPolicy.GetType().Name, typeof(T).Name,
+                candidate.Age, candidate.IdleTime, candidate.IdleCount, candidate.LeaseCount);
+            return;
+        }
+
+        var isExpired = candidate.Age > candidate.MaxLifeTime;
+        var isIdleTooLong = candidate.IdleTime > candidate.MaxIdleTime;
+        var isSoftIdle = candidate.IdleTime > candidate.SoftMinEvictableIdleTime
+                         && candidate.IdleCount > candidate.MinIdleCount;
+
+        _logger.LogInformation("[Shard {Index}] Evicting object. Type: {Type} Expired: {Expired} IdleTooLong: {IdleTooLong} SoftIdle: {SoftIdle}",
+            shardIndex, typeof(T).Name, isExpired, isIdleTooLong, isSoftIdle);
     }
 
     /// <summary>
