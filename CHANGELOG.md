@@ -12,6 +12,26 @@ Breaking changes are described in full — with migration guidance — in
 
 ### Added
 
+- **Pluggable eviction rule** (O7, the counterpart of CHOPIN's `EvictionPolicyClassName`):
+  `IHayateEvictionPolicy<T>` decides whether an idle object leaves the pool during the background
+  eviction run and is installed with `HayatePoolBuilder<T>.WithEvictionPolicy(...)`. The policy is
+  asked about every idle candidate and its verdict is what the run acts on — it **replaces** the
+  built-in rule rather than extending it, so a policy that always returns `false` keeps every idle
+  object. A pool that installs none asks `HayateDefaultEvictionPolicy<T>.Instance`, which is exactly
+  the rule the run applied before the extension point existed (expired lifetime, exceeded idle time,
+  or soft-min idleness above the shard's share of `MinPoolSize`), so existing behavior and the
+  eviction log line are unchanged. A candidate carries everything a rule needs without reaching into
+  the options — the idle instance itself, its `Age`, its `IdleTime`, its `LeaseCount`, the shard's
+  `IdleCount` and its `MinIdleCount`, and the effective `MaxLifeTime` / `MaxIdleTime` /
+  `SoftMinEvictableIdleTime` — which also keeps a policy correct across a configuration reload. Only
+  idle objects are offered: a borrowed object never reaches a policy, and no verdict can destroy one
+  under its borrower, because the shard re-checks ownership in its claim protocol before anything is
+  removed; each shard contributes at most `NumTestsPerEvictionRun` candidates, taken from the head of
+  its idle list. Installing a custom policy on a pool that never runs an eviction scan
+  (`EnableEviction = false`, or the lean fast path, which disables idle eviction by construction)
+  fails the build instead of leaving a rule that can never be consulted. Abandoned-object recovery
+  (K2) and the explicit `Evict(reason)` API do not go through the policy. See the "Custom eviction
+  policy" section of the README.
 - **A `System.Diagnostics.Metrics` meter in the core package** (N6): the pool instrument set —
   `HayatePoolAcquire`, `HayatePoolRelease`, `HayatePoolMiss`, `HayatePoolScaled`, the
   `HayatePoolWaitTime` histogram and the `HayatePoolSize` / `HayatePoolAvailable` observable gauges —

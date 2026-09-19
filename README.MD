@@ -8,7 +8,7 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 - **Sharding Support**: Reduces lock contention through sharded architecture.
 - **Auto-Scaling**: Dynamically adjusts pool size based on usage patterns (aggressive scale-up / conservative scale-down steps).
 - **Object Validation**: Validates objects on borrow, return, and while idle.
-- **Eviction Policy**: Automatically removes expired or idle objects.
+- **Eviction Policy**: Automatically removes expired or idle objects on a background run, under a rule you can replace (`IHayateEvictionPolicy<T>`).
 - **Generation Optimization**: Reduces validation frequency for long-lived objects.
 - **Leak Detection**: Tracks and reports potential object leaks; stack-trace capture is opt-in (`Off` / `Sampled` / `EveryAcquire`) since 2.1.
 - **Abandoned Recovery**: Optional reclamation of borrowed objects never returned past `RemoveAbandonedTimeout` (CHOPIN `AbandonedConfig` semantics; destructive, off by default).
@@ -890,6 +890,49 @@ Semantics and costs:
   working. Reclamation is a documented opt-in contract, not a safety net.
 - Both toggles are forced off in lean mode (no wrapper registry) and default to `false`, so the
   default configuration stays forensics-only — exactly the M4 behavior.
+
+### Custom eviction policy
+
+The background eviction run removes an idle object when the pool's rule says so. That rule is a
+pluggable object: `IHayateEvictionPolicy<T>` is asked about each idle candidate, and its answer is
+what the run acts on.
+
+```csharp
+// Retire a pooled connection after 1,000 leases, or on the usual time rules.
+private sealed class RetireWellUsedConnections : IHayateEvictionPolicy<Connection>
+{
+    public bool ShouldEvict(in HayateEvictionCandidate<Connection> candidate)
+        => candidate.LeaseCount >= 1_000
+           || candidate.Age > candidate.MaxLifeTime
+           || candidate.IdleTime > candidate.MaxIdleTime;
+}
+
+var pool = new HayatePoolBuilder<Connection>()
+    .WithMaxLifeTime(TimeSpan.FromMinutes(30))
+    .WithEvictionPolicy(new RetireWellUsedConnections())
+    .Build();
+```
+
+A candidate carries the idle instance (`Item`), its `Age`, its `IdleTime`, its `LeaseCount`, its
+shard's `IdleCount` and `MinIdleCount`, and the effective `MaxLifeTime` / `MaxIdleTime` /
+`SoftMinEvictableIdleTime` — so a policy never reads `HayatePoolOptions` and stays correct across a
+configuration reload. `MinIdleCount` is the shard's share of `MinPoolSize`
+(`MinPoolSize / ShardCount`, integer division), which is exactly why the built-in soft-idle rule is
+`IdleTime > SoftMinEvictableIdleTime && IdleCount > MinIdleCount`.
+
+A pool without `WithEvictionPolicy` evaluates `HayateDefaultEvictionPolicy<T>.Instance` — the rule
+above, and the rule the pool applied before this extension point existed, so installing that instance
+explicitly is the same as installing nothing. The policy owns the decision: one that always returns
+`false` keeps every idle object (the configuration for expensive objects that are safe to keep). The
+explicit `Evict(reason)` API and abandoned-object recovery are unaffected, because neither goes
+through the policy.
+
+Only idle objects are offered. A borrowed object never reaches a policy, and no verdict can destroy
+one under its borrower: after the verdict the shard re-checks ownership in its claim protocol, so an
+object lent out between the test and the removal is skipped. Each shard contributes at most
+`NumTestsPerEvictionRun` candidates per run, taken from the head of its idle list, and a custom policy
+on a pool that never runs an eviction scan (`EnableEviction = false`, or the lean profile, which
+disables idle eviction by construction) fails the build rather than silently never running.
 
 ### Reload configuration at runtime
 
