@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using DotNetCore.HayateOP;
@@ -206,6 +207,87 @@ public class HayatePreparationPoolTests
         var conn = pool.Acquire(); // blocking chain, same semantics as the async path
         Assert.Same(item, conn);
         Assert.True(conn.Connected);
+    }
+
+    [Fact(Timeout = 30_000)]
+    public async Task AsyncBorrow_ShouldNotBlockTheCallingThreadWhileWaiting()
+    {
+        using var inner = TakeTheOnlyObject(out var taken);
+        using var pool = inner.WithPreparation(new ReconnectingStrategy());
+
+        // The call must return at once and leave the wait on the returned task. Before the inner borrow
+        // was awaited asynchronously this call blocked the calling thread for the whole acquire timeout.
+        var stopwatch = Stopwatch.StartNew();
+        var pending = pool.AcquireAsync();
+        stopwatch.Stop();
+
+        Assert.False(pending.IsCompleted);
+        Assert.True(stopwatch.ElapsedMilliseconds < 100,
+            $"AcquireAsync must return without waiting, but it took {stopwatch.ElapsedMilliseconds} ms.");
+
+        // Hand the object back: the suspended borrow resumes and completes with it.
+        inner.Release(taken);
+        Assert.Same(taken, await pending);
+    }
+
+    [Fact(Timeout = 30_000)]
+    public async Task AsyncBorrowWithTimeout_ShouldSurfaceTheInnerTimeout()
+    {
+        using var inner = TakeTheOnlyObject(out var taken);
+        using var pool = inner.WithPreparation(new ReconnectingStrategy());
+
+        var stopwatch = Stopwatch.StartNew();
+        var ex = await Assert.ThrowsAsync<TimeoutException>(
+            () => pool.AcquireAsync(TimeSpan.FromMilliseconds(200)));
+        stopwatch.Stop();
+
+        // The timeout reaches the inner pool instead of being dropped, so the wait converges on the
+        // supplied budget rather than running into the inner pool's 5 s default acquire timeout.
+        Assert.Contains("timed out acquiring an object asynchronously", ex.Message);
+        Assert.True(stopwatch.ElapsedMilliseconds < 3_000,
+            $"The borrow must converge on the supplied timeout, but it took {stopwatch.ElapsedMilliseconds} ms.");
+
+        inner.Release(taken);
+    }
+
+    [Fact(Timeout = 30_000)]
+    public void SyncBorrowWithTimeout_ShouldSurfaceTheInnerTimeout()
+    {
+        using var inner = TakeTheOnlyObject(out var taken);
+        using var pool = inner.WithPreparation(new ReconnectingStrategy());
+
+        var stopwatch = Stopwatch.StartNew();
+        var ex = Assert.Throws<TimeoutException>(() => pool.Acquire(TimeSpan.FromMilliseconds(200)));
+        stopwatch.Stop();
+
+        Assert.Contains("timed out acquiring an object asynchronously", ex.Message);
+        Assert.True(stopwatch.ElapsedMilliseconds < 3_000,
+            $"The borrow must converge on the supplied timeout, but it took {stopwatch.ElapsedMilliseconds} ms.");
+
+        inner.Release(taken);
+    }
+
+    /// <summary>
+    /// Builds a single-slot bounded pool and takes its only object, so the next borrow has neither an
+    /// object to take nor room to create one — the deterministic "the pool must make the caller wait"
+    /// setup.
+    /// </summary>
+    private static IHayateObjectPool<Connection> TakeTheOnlyObject(out Connection taken)
+    {
+        var pool = new HayatePoolBuilder<Connection>()
+            .WithMinSize(1)
+            .WithMaxSize(1)
+            .WithShardCount(1)
+            .WithEnableAutoScaling(false)
+            .WithEnableEviction(false)
+            .WithEnableGenerationOptimization(false)
+            .WithEnableLeakDetection(false)
+            .WithValidateOnBorrow(false)
+            .WithValidateOnReturn(false)
+            .Build();
+
+        taken = pool.Acquire();
+        return pool;
     }
 
     [Fact(Timeout = 30_000)]

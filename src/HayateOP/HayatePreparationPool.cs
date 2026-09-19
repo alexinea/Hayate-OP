@@ -21,9 +21,17 @@ namespace DotNetCore.HayateOP;
 /// default 3) is exhausted, the last exception propagates to the caller. A retry borrows again from the inner
 /// pool, which may create a fresh object; the strategy then sees that object and typically reports
 /// it ready or prepares it with the initial handshake.<br />
+/// <b>Asynchronous borrows.</b> <see cref="HayatePreparationPool{T}.AcquireAsync(CancellationToken)"/>
+/// awaits the inner pool's own asynchronous borrow, and
+/// <see cref="HayatePreparationPool{T}.AcquireAsync(TimeSpan, CancellationToken)"/> forwards its
+/// <c>timeout</c> to it as well. A borrow that has to wait therefore suspends the borrowing context
+/// instead of occupying a thread, and the wait converges on the inner pool's own timeout contract
+/// (the inner pool's <see cref="TimeoutException"/>, or its cancellation when the token is
+/// cancelled).<br />
 /// <b>Sync over async.</b> The synchronous <see cref="HayatePreparationPool{T}.Acquire()"/> runs the same chain by blocking on
-/// it (<c>GetAwaiter().GetResult()</c>). That keeps the semantics identical across the sync and
-/// async paths (like HikariCP's <c>getConnection</c> testing connections under the hood), but a
+/// it (<c>GetAwaiter().GetResult()</c>), and <see cref="HayatePreparationPool{T}.Acquire(TimeSpan)"/>
+/// forwards its <c>timeout</c> to the inner pool. That keeps the semantics identical across the sync
+/// and async paths (like HikariCP's <c>getConnection</c> testing connections under the hood), but a
 /// strategy doing real I/O will block the calling thread, and blocking on tasks under a
 /// <see cref="SynchronizationContext"/> can deadlock — under such a host, borrow asynchronously.
 /// </remarks>
@@ -86,8 +94,13 @@ public sealed class HayatePreparationPool<T> : IHayateObjectPool<T> where T : cl
     /// <inheritdoc />
     public T Acquire() => AcquireAsync().GetAwaiter().GetResult();
 
+    /// <summary>
+    /// Acquires an object from the inner pool, waiting at most <paramref name="timeout"/> for one to
+    /// become available, and runs the preparation chain before delivering it — blocking on the
+    /// asynchronous chain.
+    /// </summary>
     /// <inheritdoc />
-    public T Acquire(TimeSpan timeout) => AcquireAsync().GetAwaiter().GetResult();
+    public T Acquire(TimeSpan timeout) => AcquireAsync(timeout).GetAwaiter().GetResult();
 
     /// <summary>
     /// Acquires an object from the inner pool and runs the preparation chain (ready-check, then
@@ -98,17 +111,37 @@ public sealed class HayatePreparationPool<T> : IHayateObjectPool<T> where T : cl
     /// not-ready object goes through <see cref="IHayatePreparationStrategy{T}.PrepareAsync"/>; a
     /// failed prepare discards the object and retries with another borrow. When the attempt budget
     /// is exhausted the last prepare failure propagates, so a caller never receives a silently
-    /// broken object — it either gets a usable one or the reconnect error.
+    /// broken object — it either gets a usable one or the reconnect error.<br />
+    /// The borrow itself is awaited asynchronously, so a borrow that has to wait suspends the caller
+    /// rather than blocking a thread for the whole of the inner pool's acquire timeout.
     /// </remarks>
     /// <inheritdoc />
-    public async Task<T> AcquireAsync(CancellationToken cancellationToken = default)
+    public Task<T> AcquireAsync(CancellationToken cancellationToken = default)
+        => AcquireAsyncCore(null, cancellationToken);
+
+    /// <inheritdoc />
+    public Task<T> AcquireAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+        => AcquireAsyncCore(timeout, cancellationToken);
+
+    /// <summary>
+    /// Runs the borrow-and-prepare chain, forwarding the optional <paramref name="timeout"/> to the
+    /// inner pool's borrow.
+    /// </summary>
+    private async Task<T> AcquireAsyncCore(TimeSpan? timeout, CancellationToken cancellationToken)
     {
         Exception? lastFailure = null;
         for (var attempt = 1; attempt <= _maxPrepareAttempts; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var item = _inner.Acquire();
+            // The inner pool's asynchronous borrow, with the timeout forwarded when there is one: an
+            // exhausted pool suspends this context (no thread held for the duration of the wait), and a
+            // borrow that never completes within the timeout surfaces the inner pool's TimeoutException.
+            // Nothing is held yet, so an unsuccessful borrow simply propagates — there is no object to
+            // discard.
+            var item = timeout.HasValue
+                ? await _inner.AcquireAsync(timeout.Value, cancellationToken).ConfigureAwait(false)
+                : await _inner.AcquireAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 if (await _strategy.IsReadyAsync(item, cancellationToken).ConfigureAwait(false))
@@ -135,10 +168,6 @@ public sealed class HayatePreparationPool<T> : IHayateObjectPool<T> where T : cl
             $"The preparation strategy failed for {_maxPrepareAttempts} consecutive objects; the last failure is attached.",
             lastFailure);
     }
-
-    /// <inheritdoc />
-    public Task<T> AcquireAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
-        => AcquireAsync(cancellationToken);
 
     /// <summary>
     /// Returns an object to the inner pool; delegated unchanged.

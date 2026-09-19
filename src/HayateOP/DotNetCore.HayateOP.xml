@@ -4012,9 +4012,17 @@
              default 3) is exhausted, the last exception propagates to the caller. A retry borrows again from the inner
              pool, which may create a fresh object; the strategy then sees that object and typically reports
              it ready or prepares it with the initial handshake.<br />
+             <b>Asynchronous borrows.</b> <see cref="M:DotNetCore.HayateOP.HayatePreparationPool`1.AcquireAsync(System.Threading.CancellationToken)"/>
+             awaits the inner pool's own asynchronous borrow, and
+             <see cref="M:DotNetCore.HayateOP.HayatePreparationPool`1.AcquireAsync(System.TimeSpan,System.Threading.CancellationToken)"/> forwards its
+             <c>timeout</c> to it as well. A borrow that has to wait therefore suspends the borrowing context
+             instead of occupying a thread, and the wait converges on the inner pool's own timeout contract
+             (the inner pool's <see cref="T:System.TimeoutException"/>, or its cancellation when the token is
+             cancelled).<br />
              <b>Sync over async.</b> The synchronous <see cref="M:DotNetCore.HayateOP.HayatePreparationPool`1.Acquire"/> runs the same chain by blocking on
-             it (<c>GetAwaiter().GetResult()</c>). That keeps the semantics identical across the sync and
-             async paths (like HikariCP's <c>getConnection</c> testing connections under the hood), but a
+             it (<c>GetAwaiter().GetResult()</c>), and <see cref="M:DotNetCore.HayateOP.HayatePreparationPool`1.Acquire(System.TimeSpan)"/>
+             forwards its <c>timeout</c> to the inner pool. That keeps the semantics identical across the sync
+             and async paths (like HikariCP's <c>getConnection</c> testing connections under the hood), but a
              strategy doing real I/O will block the calling thread, and blocking on tasks under a
              <see cref="T:System.Threading.SynchronizationContext"/> can deadlock — under such a host, borrow asynchronously.
              </remarks>
@@ -4056,6 +4064,11 @@
             <inheritdoc />
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.Acquire(System.TimeSpan)">
+            <summary>
+            Acquires an object from the inner pool, waiting at most <paramref name="timeout"/> for one to
+            become available, and runs the preparation chain before delivering it — blocking on the
+            asynchronous chain.
+            </summary>
             <inheritdoc />
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.AcquireAsync(System.Threading.CancellationToken)">
@@ -4068,12 +4081,20 @@
             not-ready object goes through <see cref="M:DotNetCore.HayateOP.IHayatePreparationStrategy`1.PrepareAsync(`0,System.Threading.CancellationToken)"/>; a
             failed prepare discards the object and retries with another borrow. When the attempt budget
             is exhausted the last prepare failure propagates, so a caller never receives a silently
-            broken object — it either gets a usable one or the reconnect error.
+            broken object — it either gets a usable one or the reconnect error.<br />
+            The borrow itself is awaited asynchronously, so a borrow that has to wait suspends the caller
+            rather than blocking a thread for the whole of the inner pool's acquire timeout.
             </remarks>
             <inheritdoc />
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.AcquireAsync(System.TimeSpan,System.Threading.CancellationToken)">
             <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.AcquireAsyncCore(System.Nullable{System.TimeSpan},System.Threading.CancellationToken)">
+            <summary>
+            Runs the borrow-and-prepare chain, forwarding the optional <paramref name="timeout"/> to the
+            inner pool's borrow.
+            </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.Release(`0)">
             <summary>
