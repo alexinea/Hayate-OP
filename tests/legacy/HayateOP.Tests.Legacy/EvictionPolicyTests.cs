@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 
 namespace DotNetCore.HayateOP.Tests;
@@ -47,6 +48,33 @@ public class EvictionPolicyTests
     private static readonly TimeSpan MaxLife = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan MaxIdle = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan SoftIdle = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// How long a test waits for an effect of the background eviction run before calling it absent.
+    /// </summary>
+    private static readonly TimeSpan ScanDeadline = TimeSpan.FromSeconds(20);
+
+    /// <summary>
+    /// Waits until <paramref name="condition"/> holds, up to <paramref name="timeout"/>.
+    /// </summary>
+    /// <remarks>
+    /// The eviction run fires on its own schedule, so a test that observes one of its effects has to
+    /// wait for the effect, not for a fixed duration: a sleep long enough when the class runs alone can
+    /// elapse before the first tick when the whole suite is competing for the CPU. Polling keeps the
+    /// case fast in the common one and reliable under load, and the deadline turns a genuine
+    /// regression into a failure instead of into a hang.
+    /// </remarks>
+    private static bool WaitFor(Func<bool> condition, TimeSpan timeout)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        while (stopwatch.Elapsed < timeout)
+        {
+            if (condition()) return true;
+            Thread.Sleep(25);
+        }
+
+        return condition();
+    }
 
     /// <summary>Builds a candidate by hand, the way the run would measure it.</summary>
     private static HayateEvictionCandidate<TestObject> Candidate(
@@ -102,7 +130,8 @@ public class EvictionPolicyTests
 
         Assert.Equal(5, pool.GetStats().PooledCount);
 
-        // Two eviction cycles at the builder's minimum interval.
+        // Two eviction cycles at the builder's minimum interval. This is an observation window rather
+        // than a deadline — the assertion is that nothing was evicted, so a late tick cannot fail it.
         Thread.Sleep(2500);
 
         Assert.Equal(5, pool.GetStats().PooledCount);
@@ -141,9 +170,10 @@ public class EvictionPolicyTests
 
         Assert.Equal(3, pool.GetStats().PooledCount);
 
-        Thread.Sleep(2500);
-
-        Assert.Equal(0, pool.GetStats().PooledCount);
+        // The policy says "evict everything", so the pool must empty once the run has had a pass —
+        // whichever pass of however many it needs, inside the deadline.
+        Assert.True(WaitFor(() => pool.GetStats().PooledCount == 0, ScanDeadline),
+            "the eviction run should have emptied the pool before the deadline");
 
         // An emptied pool still serves the next borrow.
         var replacement = pool.Acquire();
@@ -171,7 +201,9 @@ public class EvictionPolicyTests
         var item = pool.Acquire();
         pool.Release(item);
 
-        Thread.Sleep(1500);
+        // Wait for the run to actually offer a candidate instead of sleeping for a fixed period.
+        Assert.True(WaitFor(() => policy.Candidates.Length > 0, ScanDeadline),
+            "the background eviction run should have offered a candidate before the deadline");
 
         var candidates = policy.Candidates;
         Assert.NotEmpty(candidates);
