@@ -6,6 +6,7 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 
 - **High Performance Core**: Optimized for both single-threaded and multi-threaded scenarios.
 - **Sharding Support**: Reduces lock contention through sharded architecture.
+- **Configuration Presets**: `HayatePoolPreset` names eight ready-made configurations — `Default`, `Lean`, `Full`, `HighThroughput`, `LowLatency`, `MemoryConstrained`, `ConnectionPool`, `BatchProcessing` — and they stay composable: a preset owns its field set, and a later `With*` call overrules it.
 - **Borrow Order**: `Fifo` (default) or `Lifo` hand-out order from the idle list, selected with `HayateBorrowStrategy`.
 - **Auto-Scaling**: Dynamically adjusts pool size based on usage patterns (aggressive scale-up / conservative scale-down steps).
 - **Object Validation**: Validates objects on borrow, return, and while idle.
@@ -131,6 +132,43 @@ using var connections = HayatePool.Simple<MyConnection>(8, () => new MyConnectio
 
 When you need anything tuned — a minimum idle count, an interval, a single feature switch — reach for
 `HayatePoolBuilder<T>` instead; nothing set by the shortcut is hidden afterwards.
+
+### Configuration presets
+
+`HayatePoolPreset` names the configurations the pool is most often asked to take, so a common shape costs
+one word instead of forty settings. A preset is a starting point rather than a lock: it assigns the
+options it owns, leaves every other option at the value it already had, and a later `With*` call still
+overrules it.
+
+```csharp
+using DotNetCore.HayateOP;
+
+using var pool = new HayatePoolBuilder<MyConnection>()
+    .WithPreset(HayatePoolPreset.ConnectionPool)
+    .WithMaxSize(32)                     // sizing is yours: the preset does not own it
+    .Build();
+
+// Without a builder, or on an options object you already have:
+var options = HayatePoolPresets.Create(HayatePoolPreset.HighThroughput);
+new HayatePoolOptions().UsePreset(HayatePoolPreset.MemoryConstrained);
+```
+
+| Preset | Reach for it when | What it changes | What to know |
+| :--- | :--- | :--- | :--- |
+| `Default` | You want the shipped behaviour, or an explicit reset | The whole option surface, restored from the shipped defaults | The only preset that owns sizing, timeouts, the reject policy and the callbacks — it clears them |
+| `Lean` | A pure borrow/return workload on a hot path | The wrapper-free fast path: no sharding, no background pass, no per-object bookkeeping | The fast path has nowhere to keep per-object state, so the feature switches are forced off and a LIFO borrow order fails the build |
+| `Full` | Bringing a pool up, or diagnosing one | Every optional feature switch on: sharding, auto-scaling, validation, eviction, generation optimization, leak detection, metrics, allocation tracking | Nothing validates until you ask it to, and the numeric thresholds keep their shipped values |
+| `HighThroughput` | A busy pool where creation is the expensive part | Scale up below the shipped threshold in steps of eight, scale down slowly, retain objects for 15 idle minutes, optional bookkeeping off | Leak forensics is off — the first switch to turn back on when an object goes missing |
+| `LowLatency` | A request path where a background pass is a latency spike | No scaling, validation, eviction or generation pass and no optional bookkeeping, plus the first acquire waits for the warm floor | With eviction off nothing is ever retired: pair it with `WithValidateOnBorrow` or a `MaxLifeTime` where a stale object is a real risk |
+| `MemoryConstrained` | A footprint that has to stay small | One shard, a zero idle floor, quick reclamation (1 minute idle, 10-second scan), diagnostics off | The zero floor arrives with `CreateOnDemand`: with a block policy the second borrower would wait out the whole acquire timeout |
+| `ConnectionPool` | Expensive, finite external handles | Bounded capacity, `ValidateOnBorrow` plus an idle validation sweep, recycling at 30 minutes, abandoned-handle reclaim at 60 seconds, circuit breaker, metrics | Validation only does something for a pooled type that implements `IHayateValidatable`; for any other type it reports healthy, so the preset is safe to apply regardless of the pooled type |
+| `BatchProcessing` | Bursty bulk work that then drains | A one-second scaling reaction, scale-up at 60% in steps of ten, capacity released after 2 idle minutes, a 5-minute leak threshold | The leak warning is moved out of the way of a healthy run rather than switched off — a batch worker may legitimately hold its object for minutes |
+
+An unrecognised preset value throws rather than being ignored, and `WithPreset(HayatePoolOptions)` applies a
+preset of your own through the same path, so a configuration your team keeps in its own code composes
+exactly like the catalogue does. `HayatePoolOptions.UsePreset(...)` is the same call on an options object,
+and both preserve a value set afterwards — `WithPreset(X).WithMaxSize(256)` keeps X and changes only the
+ceiling.
 
 ### Fluent Builder & Auto-Scaling
 

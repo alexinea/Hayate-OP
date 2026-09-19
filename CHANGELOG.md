@@ -12,6 +12,32 @@ Breaking changes are described in full — with migration guidance — in
 
 ### Added
 
+- **Configuration presets** (C6): `HayatePoolPreset` names eight configurations for the shapes the pool
+  is most often asked to take — `Default` (the shipped defaults), `Lean` (the wrapper-free fast path),
+  `Full` (every feature switch on), `HighThroughput` (scale up early and in large steps, retain objects
+  well past a lull, bookkeeping off), `LowLatency` (no background pass and no optional bookkeeping that
+  can take a shard lock, first acquire waits for the warm floor), `MemoryConstrained` (one shard, zero
+  idle floor, quick reclamation), `ConnectionPool` (bounded capacity, validate before a handle is handed
+  out, scheduled recycling plus abandoned-handle reclaim, circuit breaker, metrics) and `BatchProcessing`
+  (react every second, grow in steps of ten, release the burst capacity once the batch drains). All three
+  entry points route through one catalogue — `HayatePoolPresets.Create(preset)`,
+  `HayatePoolOptions.UsePreset(preset)` and `HayatePoolBuilder<T>.WithPreset(preset)` — and the builder
+  also accepts a caller-supplied `HayatePoolOptions`, which is how a team keeps a named configuration of
+  its own beside this one. A preset is a starting point rather than a lock: it assigns the options it owns
+  and leaves every other option at the value it already had, so a preset composes with ordinary
+  configuration, and any option it does own is overruled by a later `With*` call. That contract is checked
+  rather than asserted — a case primes every writable option with a value other than the shipped default,
+  applies each preset, and verifies that owned options follow the preset while unowned ones survive
+  untouched. Sizing, timeouts and the reject policy are deliberately not owned, because the right ceiling
+  depends on the machine and the workload; `MemoryConstrained` is the exception in that direction, where
+  a zero idle floor *is* the trade-off, and it therefore also selects
+  `HayatePoolRejectPolicy.CreateOnDemand`, since the block policies only shortcut creation while the pool
+  tracks nothing and the next borrower would otherwise wait out the whole acquire timeout. `Default` is
+  the exception in the other direction and owns the whole surface, sizing and callbacks included, so it
+  doubles as an explicit reset to the shipped behaviour. An unrecognised preset value is rejected rather
+  than ignored — the same fail-fast rule the borrow-order switch follows. No existing option, signature or
+  default changed. See the "Configuration presets" section of the README.
+
 - **Explicit borrow order** (O8): `HayateBorrowStrategy` selects which end of a shard's idle list a
   borrow is served from, and `HayatePoolBuilder<T>.WithBorrowStrategy(...)` installs it. `Fifo` — the
   default, and the order every release before the switch used — hands out the longest-idle object;
