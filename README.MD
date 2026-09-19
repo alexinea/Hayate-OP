@@ -1014,6 +1014,51 @@ pool.ReloadConfig(config =>
 });
 ```
 
+### Pre-warming the pool
+
+The construction-time warm-up fills the configured minimum before the pool is handed over. `PreWarm`
+does the same thing on demand, for any target, at any point in the pool's life:
+
+```csharp
+using var pool = new HayatePoolBuilder<MyResource>()
+    .WithMaxSize(32)
+    .Build();
+
+var created = pool.PreWarm(32);   // pay the creation cost before the traffic arrives
+
+var resource = pool.Acquire();    // served from the warmed set — nothing is created here
+```
+
+The count is a floor on *idle* objects, not on total objects, so calling it after borrowing creates
+replacements instead of finding the pool already full. The pool's own ceiling still applies — the
+maximum pool size, or the retained-object limit in the unbounded model — and a request above it warms
+up to the ceiling rather than failing. A negative count throws `ArgumentOutOfRangeException`, and a
+creation failure throws `InvalidOperationException` instead of being logged and swallowed: the
+construction-time warm-up keeps going because the pool is still usable, but here the caller asked for
+the objects explicitly. The call is safe alongside concurrent borrows and returns, and concurrent calls
+never take the pool past its ceiling — a caller that finds the target already met creates nothing and
+returns `0`.
+
+Two things the call deliberately does **not** do. It does not change the configuration: warming beyond
+the configured minimum is not a retention promise, so the extra objects age like any other idle object
+and are reclaimed by the idle timeout and by background scale-down. And it does not prepare anything: on
+a pool carrying a preparation strategy every borrow still runs the readiness check, so warming removes
+the creation cost but never turns a warmed object into a ready one.
+
+| Pool model | What `PreWarm` warms |
+| :--- | :--- |
+| Sharded engine | The shortfall, created round-robin; capacity is read per shard, so a pool that has scaled down warms to what it currently allows |
+| Lean fast path | The shortfall, through the reservation path that enforces the ceiling on the live count |
+| Unbounded pool | Up to `MaxIdle`, claimed and parked in the same order a return uses; this model creates on a miss and has no background warm-up, so this call is the only way to make its first borrows cheap |
+| Preparation decorator | Forwards to the inner pool; the objects it creates are created, not prepared |
+| Specialized pools | The default-capacity base pool (`StringBuilderPool` / `MemoryStreamPool`), not the tiering layer |
+
+```csharp
+// After a reload raised the minimum, pay for the new floor now rather than on the next borrow:
+pool.ReloadConfig(config => config.MinPoolSize = 40);
+pool.PreWarm(40);
+```
+
 ### Clear all objects
 
 ```csharp

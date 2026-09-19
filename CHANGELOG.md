@@ -12,6 +12,40 @@ Breaking changes are described in full — with migration guidance — in
 
 ### Added
 
+- **On-demand pre-warming** (O-F): `IHayateObjectPool<T>.PreWarm(int count)` tops the pool up to a
+  requested number of idle objects and returns how many it created, so a process can pay the creation
+  cost up front instead of letting the first borrowers pay it. The count is a floor on *idle* objects,
+  not on total objects — objects currently lent out do not count towards it, so warming after a burst
+  creates replacements rather than finding the pool already full. The pool's own ceiling still applies,
+  the maximum pool size in the sharded engine and the retained-object limit in the unbounded model, and
+  a request above the ceiling warms to the ceiling instead of failing. A negative count is rejected with
+  `ArgumentOutOfRangeException`, and a creation failure is reported with `InvalidOperationException`
+  rather than logged and swallowed: the construction-time warm-up carries on because the pool is still
+  usable, but here the caller asked for the objects explicitly. The call is safe alongside concurrent
+  borrows and returns, and concurrent calls never take the pool past its ceiling — a caller that finds
+  the target already met creates nothing and returns `0`. This is the explicit counterpart of the
+  construction-time warm-up switch rather than a replacement for it: construction warms the configured
+  minimum, synchronously or in the background according to `WaitForWarmup`, while this call warms any
+  target at any time — after a configuration reload raised the minimum, or to pre-pay creation without
+  making the first borrow wait for it. Warming beyond the configured minimum is not a retention promise,
+  so the extra objects age like every other idle object and are reclaimed by the idle timeout and by
+  background scale-down; that the options themselves are left alone is checked rather than asserted, by
+  a case that warms a pool and then verifies `MinPoolSize` and `MaxPoolSize` are exactly what they were.
+  Every pool model answers the call. The sharded engine creates the shortfall round-robin and reads
+  capacity per shard instead of deriving it from the configured maximum, so a pool that has already
+  scaled down warms to what it currently allows and a shard that loses the last slot to a concurrent
+  return has the object destroyed through the single destroy path rather than the live count pushed past
+  the ceiling. The lean fast path creates through its reservation path, which enforces the ceiling on the
+  live count. The unbounded model claims a slot and parks the object in the same claim-then-park order a
+  return uses, which keeps its resident count and its idle queue in lockstep under concurrent borrows,
+  returns and warm-ups; having no background warm-up of its own, it is the model where this call is the
+  only way to make the first borrows cheap. The preparation decorator forwards to the inner pool, as it
+  does for eviction, and the specialized pools warm their default-capacity base pool rather than the
+  tiering layer. A warmed object is not a prepared one — warming creates and stops there, so every borrow
+  still runs the preparation chain and the first borrows pay the readiness check and any repair exactly
+  as before. No existing signature, option or default changed; `PreWarm` is an addition to the interface,
+  alongside `Evict`. See the "Pre-warming the pool" section of the README.
+
 - **Configuration presets** (C6): `HayatePoolPreset` names eight configurations for the shapes the pool
   is most often asked to take — `Default` (the shipped defaults), `Lean` (the wrapper-free fast path),
   `Full` (every feature switch on), `HighThroughput` (scale up early and in large steps, retain objects
