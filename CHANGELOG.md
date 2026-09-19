@@ -12,6 +12,22 @@ Breaking changes are described in full — with migration guidance — in
 
 ### Added
 
+- **A `System.Diagnostics.Metrics` meter in the core package** (N6): the pool instrument set —
+  `HayatePoolAcquire`, `HayatePoolRelease`, `HayatePoolMiss`, `HayatePoolScaled`, the
+  `HayatePoolWaitTime` histogram and the `HayatePoolSize` / `HayatePoolAvailable` observable gauges —
+  is now published by `HayateMetricsMeter` on a meter of the core package's own (name `"HayateOP"`),
+  so a consumer that references nothing but `DotNetCore.HayateOP` can observe a pool with
+  `dotnet-counters monitor --counters HayateOP`, or through the OpenTelemetry .NET SDK's
+  `AddMeter("HayateOP")`, and needs no exporter package. The instrument names, units, tags,
+  descriptions and the pull-based gauges live in that one implementation: the OpenTelemetry package's
+  `HayateOtelMetrics` is now the meter-name and packaging front for it and keeps its
+  `"DotNetCore.HayateOP"` meter name and its public tag constants (which now alias the core ones), so
+  existing subscriptions and the instrument inventory are unchanged. A pool takes **one** sink — the
+  core meter or the bridge meter — rather than both, since both publish the same instruments and
+  wiring both would count every event twice. `Meter` is part of the .NET 6+ base class library, so
+  the type is compiled out on netstandard2.0/net48 rather than pulling a NuGet dependency into the
+  core package, and the gauges remain pull-based: their callbacks run on collection only, never on the
+  borrow or return path. See the "OpenTelemetry metrics" section of the README.
 - **Named pools, typed clients and a run-time pool factory** (N4, extending the 2.5 M11+ registry):
   several independently configured pools of one element type can now coexist and be addressed by
   name. `HayateServiceKey.Create<T>(name)` is the identity a named pool is addressed by — the element

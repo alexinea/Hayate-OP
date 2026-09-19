@@ -1029,6 +1029,40 @@ builder.Services.AddOpenTelemetry()
     .WithMetrics(m => m.AddMeter("DotNetCore.HayateOP"));
 ```
 
+#### The core package's own meter (`HayateOP`)
+
+The instrument set above is implemented once, in `HayateMetricsMeter` in the core package; the
+OpenTelemetry package is the meter-name and packaging front for it. The exporter package is
+therefore optional — `Meter` is a .NET 6+ base class library type (`System.Diagnostics.Metrics`), so
+a pool can be observed with nothing but `DotNetCore.HayateOP`.
+
+```csharp
+using DotNetCore.HayateOP;
+using DotNetCore.HayateOP.Metrics;
+
+var registry = new HayateObjectPoolRegistry();
+using var meter = new HayateMetricsMeter(registry);   // meter name "HayateOP"
+
+var pool = new HayatePoolBuilder<MyPooledObject>()
+    .WithPoolName("orders")
+    .WithEnableMetrics(true)   // counters and the wait-time histogram are gated on it …
+    .WithMetrics(meter)        // … and on EnableDiagnostics, the master switch, on by default
+    .Build();
+
+// The observable gauges read the pools out of the registry.
+registry.Register("orders", pool);
+```
+
+```bash
+dotnet-counters monitor --counters HayateOP
+```
+
+`HayateMetricsMeter(registry, meterName)` publishes under another name — that is the overload the
+OpenTelemetry bridge uses to keep its `DotNetCore.HayateOP` meter. Attach **one** sink per pool,
+either the core meter or the bridge: both publish the same instruments, so wiring both to one pool
+would count every event twice. On netstandard2.0 / net48 no meter is compiled into the core package
+at all, and the lean fast path keeps no counters by construction, so its counters read zero.
+
 ## Performance
 
 BenchmarkDotNet compares HayateOP against `Microsoft.Extensions.ObjectPool.DefaultObjectPool<T>`
