@@ -6,6 +6,7 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 
 - **High Performance Core**: Optimized for both single-threaded and multi-threaded scenarios.
 - **Sharding Support**: Reduces lock contention through sharded architecture.
+- **Borrow Order**: `Fifo` (default) or `Lifo` hand-out order from the idle list, selected with `HayateBorrowStrategy`.
 - **Auto-Scaling**: Dynamically adjusts pool size based on usage patterns (aggressive scale-up / conservative scale-down steps).
 - **Object Validation**: Validates objects on borrow, return, and while idle.
 - **Eviction Policy**: Automatically removes expired or idle objects on a background run, under a rule you can replace (`IHayateEvictionPolicy<T>`).
@@ -723,6 +724,7 @@ The short version of how to trim:
 | :--- | :--- |
 | `EnableLean` | Removes the wrapper allocation, the shard lock, the return-side registry probe and every diagnostic write — about 10.6x against the same feature set |
 | `EnableSharding` | One extra idle-list probe per shard on a miss; free in single-threaded steady state |
+| `BorrowStrategy` | `Fifo` (the default) reads the end the borrow path has always read — no added cost; `Lifo` costs one predicted branch on a constructor-time flag |
 | `EnableGenerationOptimization` | One extra `Stopwatch.GetTimestamp()` per borrow — the only switch that adds a QPC read to the borrow path |
 | `ValidateOnBorrow` / `ValidateOnReturn` | One `IHayateObjectPolicy.Validate` call per borrow / return; the policy's own work (often a health probe) dominates |
 | `LeakTraceCaptureMode` | The real cost of the leak-detection surface: `EveryAcquire` captures a call stack on every borrow; `Off` (the default) costs two branches |
@@ -933,6 +935,36 @@ object lent out between the test and the removal is skipped. Each shard contribu
 `NumTestsPerEvictionRun` candidates per run, taken from the head of its idle list, and a custom policy
 on a pool that never runs an eviction scan (`EnableEviction = false`, or the lean profile, which
 disables idle eviction by construction) fails the build rather than silently never running.
+
+### Borrow order (FIFO / LIFO)
+
+A borrow is served from one end of the shard's idle list, and which end is a choice:
+
+```csharp
+var pool = new HayatePoolBuilder<Connection>()
+    .WithBorrowStrategy(HayateBorrowStrategy.Lifo)   // hand back the connection that came in last
+    .Build();
+```
+
+`Fifo` (the default) hands out the longest-idle object; `Lifo` hands out the object that came back
+most recently. The idle list is kept in return order either way, so the switch changes the order of
+borrows and nothing else — in particular the eviction scan still samples the oldest-returned end, which
+is why the same `IHayateEvictionPolicy<T>` sees the same cold objects under either strategy, and
+abandoned recovery still examines the oldest borrow first.
+
+Rules of thumb: `Lifo` suits a tight borrow/use/return loop, or an instance whose per-instance state is
+cheap to keep and worth keeping warm; `Fifo` suits an instance whose state should age uniformly, or one
+where spreading usage across the idle set is the point. The default reproduces the behaviour of every
+release before the switch, so a pool that never calls `WithBorrowStrategy` is unaffected.
+
+`Lifo` applies to the general-purpose engine, sharded or collapsed to a single shard. The lean fast
+path holds no ordered idle list — it has a single fast lane plus a slot array — so asking for `Lifo` on
+a lean pool fails the build rather than being silently turned into the default:
+
+```csharp
+// Throws InvalidOperationException: the lean fast path cannot honour a borrow order.
+new HayatePoolBuilder<Connection>().WithLean().WithBorrowStrategy(HayateBorrowStrategy.Lifo).Build();
+```
 
 ### Reload configuration at runtime
 

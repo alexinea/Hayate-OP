@@ -12,6 +12,20 @@ Breaking changes are described in full — with migration guidance — in
 
 ### Added
 
+- **Explicit borrow order** (O8): `HayateBorrowStrategy` selects which end of a shard's idle list a
+  borrow is served from, and `HayatePoolBuilder<T>.WithBorrowStrategy(...)` installs it. `Fifo` — the
+  default, and the order every release before the switch used — hands out the longest-idle object;
+  `Lifo` hands out the one that came back most recently, which keeps a small working set hot in the CPU
+  caches and is the order the reference CHOPIN pool hard-codes. The idle list itself is unchanged: it
+  is still kept in return order, so its head is the oldest-returned end under both strategies, the
+  eviction scan therefore keeps offering the coldest objects to the `IHayateEvictionPolicy<T>`, and
+  abandoned-object recovery keeps walking its own list oldest-borrow-first. The switch governs the
+  general-purpose engine; the lean fast path keeps no ordered idle list, so `Lifo` on a lean pool fails
+  the build instead of being accepted and ignored — the outcome this item exists to remove. An
+  unrecognised enum value falls back to `Fifo`, the same robustness rule the shard-affinity mode
+  follows. On the borrow path the strategy costs one predicted branch on a constructor-time flag, so a
+  pool that does not set it behaves and measures exactly as before. See the "Borrow order" section of
+  the README.
 - **Pluggable eviction rule** (O7, the counterpart of CHOPIN's `EvictionPolicyClassName`):
   `IHayateEvictionPolicy<T>` decides whether an idle object leaves the pool during the background
   eviction run and is installed with `HayatePoolBuilder<T>.WithEvictionPolicy(...)`. The policy is
