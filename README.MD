@@ -352,8 +352,11 @@ var conn = await pool.AcquireAsync();    // ready or repaired, or the reconnect 
 Every borrow runs `IsReadyAsync`; a not-ready object goes through `PrepareAsync` (the reconnect).
 A failed prepare hands the object to `onDiscard` and retries with another borrow (budget
 `maxPrepareAttempts`, default 3), then throws `HayatePoolPreparationException` with the last
-failure attached — a caller never receives a silently broken object. The synchronous `Acquire`
-runs the identical chain by blocking; the six policy hooks are unchanged.
+failure attached — a caller never receives a silently broken object. The asynchronous borrow awaits
+the inner pool's own asynchronous borrow and forwards the timeout to it, so a borrow that has to wait
+suspends the caller instead of occupying a thread, and `AcquireAsync(timeout, …)` converges on the
+timeout it was given. The synchronous `Acquire` runs the identical chain by blocking (its `timeout`
+overload forwards the timeout as well); the six policy hooks are unchanged.
 
 ### Specialized pools
 

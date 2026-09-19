@@ -117,6 +117,17 @@ Breaking changes are described in full — with migration guidance — in
 
 ### Changed
 
+- **Asynchronous preparation borrows are actually asynchronous** (A4, behavioral fix of N3): the
+  borrows of `HayatePreparationPool<T>` did not await anything — `AcquireAsync` ran the inner pool's
+  *synchronous* `Acquire()` inside the asynchronous method, so a borrow that had to wait occupied a
+  thread for the whole of the inner acquire timeout (5 s by default) and the `timeout` argument of
+  `AcquireAsync(TimeSpan, …)` — and of the synchronous `Acquire(TimeSpan)` — was silently dropped.
+  The chain now awaits the inner pool's own asynchronous borrow and forwards the timeout to it, so an
+  exhausted pool suspends the borrowing context instead of a thread, and a borrow converges on the
+  timeout it was given (surfacing the inner pool's `TimeoutException`). No public signature changed:
+  the synchronous `Acquire`/`Acquire(TimeSpan)` still block their caller by design — they now block on
+  a borrow that honours the timeout. The lean, bounded, keyed and unbounded inner pools all gain the
+  behavior, since the fix lives in the wrapper.
 - **Performance gate promotion machinery** (Q1): `scripts/bench-compare.py` now implements the
   allocation gate that the threshold table always documented — allocation growth `>= allocFailBytes`
   fails and `>= allocWarnBytes` warns (previously both keys were parsed but never referenced) — and
