@@ -282,6 +282,19 @@ Breaking changes are described in full — with migration guidance — in
   `SpecializedStringBuilderFormatBenchmarks` separates the helpers' own writes (no `object[]`, no
   boxing) from the engine's fixed borrow-cycle bookkeeping floor.
 
+### Fixed
+
+- **The ArrayPool storage switch now survives an option copy** (follow-up to O-D):
+  `HayatePoolOptions.CopyTo` never carried `EnableArrayPoolStorage`, so every copy-based surface lost the
+  storage shape without saying so. `GetOptions()` reported a fixed-buffer lean pool for a pool that runs
+  on the rented-slot backend, and the configuration binding and the DI registration dropped a bound
+  `EnableArrayPoolStorage` between the bound options and the builder — the setting was accepted, reported
+  as off, and never applied. The switch now travels with `EnableLean`, which is the execution mode it
+  belongs to. A reflection-driven copy-fidelity case writes a value other than the shipped default into
+  **every** writable option and asserts the copy carries it, so an option declared without its `CopyTo`
+  line fails the suite instead of reaching a release; reverting the fix fails three of the four new cases
+  while the circuit-breaker non-aliasing case keeps passing.
+
 ## [2.7.0] - 2026-09-14
 
 Usability and ecosystem release, no breaking API change. Highlights: nullable
