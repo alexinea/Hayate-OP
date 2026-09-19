@@ -37,8 +37,16 @@
             "DotNetCore.HayateOP" Meter; without an SDK, <c>dotnet-counters</c> can observe it directly.
             </para>
             <para>
-            Decoupling constraint: this class does not access any internal pool state — events come via the
-            <see cref="T:DotNetCore.HayateOP.Metrics.IHayateMetrics"/> callbacks, and gauges are read from the public
+            The instrument set itself — names, units, tags, descriptions, and the pull-based gauges — lives in
+            <see cref="T:DotNetCore.HayateOP.Metrics.HayateMetricsMeter"/> in the core package, and this class is the meter-name and
+            packaging front for it. Both packages therefore publish one and the same instrument set, and a
+            consumer picks whichever meter name it subscribes to rather than attaching both sinks to one pool
+            (which would count every event twice). The core meter (<c>"HayateOP"</c>) is the shorter name, kept
+            aligned in style with the reference libraries in the benchmark matrix.
+            </para>
+            <para>
+            Decoupling constraint: neither the bridge nor the core meter accesses internal pool state — events
+            come via the <see cref="T:DotNetCore.HayateOP.Metrics.IHayateMetrics"/> callbacks, and gauges are read from the public
             <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/> + <see cref="M:DotNetCore.HayateOP.IHayateObjectPool.GetStats"/>.
             </para>
             </summary>

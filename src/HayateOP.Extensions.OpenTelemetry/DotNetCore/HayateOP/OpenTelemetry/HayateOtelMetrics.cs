@@ -1,9 +1,5 @@
 using DotNetCore.HayateOP.Metrics;
 using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Diagnostics.Metrics;
-using System.Linq;
 
 namespace DotNetCore.HayateOP.OpenTelemetry;
 
@@ -13,7 +9,7 @@ namespace DotNetCore.HayateOP.OpenTelemetry;
 public class HayateOtelMetricsOptions
 {
     /// <summary>
-    /// The <see cref="Meter"/> name (Meter.Name). Defaults to "DotNetCore.HayateOP".
+    /// The <see cref="System.Diagnostics.Metrics.Meter"/> name (Meter.Name). Defaults to "DotNetCore.HayateOP".
     /// </summary>
     public string MeterName { get; set; } = "DotNetCore.HayateOP";
 }
@@ -34,36 +30,37 @@ public class HayateOtelMetricsOptions
 /// </list>
 /// </para>
 /// <para>
-/// This package has zero external NuGet dependencies: <see cref="Meter"/> is built into the
+/// This package has zero external NuGet dependencies: <see cref="System.Diagnostics.Metrics.Meter"/> is built into the
 /// .NET 6+ base class library (System.Diagnostics.DiagnosticSource). Consumers bring their own
 /// OpenTelemetry SDK + Exporter (OTLP / Prometheus / InMemory …) to subscribe to the
 /// "DotNetCore.HayateOP" Meter; without an SDK, <c>dotnet-counters</c> can observe it directly.
 /// </para>
 /// <para>
-/// Decoupling constraint: this class does not access any internal pool state — events come via the
-/// <see cref="IHayateMetrics"/> callbacks, and gauges are read from the public
+/// The instrument set itself — names, units, tags, descriptions, and the pull-based gauges — lives in
+/// <see cref="HayateMetricsMeter"/> in the core package, and this class is the meter-name and
+/// packaging front for it. Both packages therefore publish one and the same instrument set, and a
+/// consumer picks whichever meter name it subscribes to rather than attaching both sinks to one pool
+/// (which would count every event twice). The core meter (<c>"HayateOP"</c>) is the shorter name, kept
+/// aligned in style with the reference libraries in the benchmark matrix.
+/// </para>
+/// <para>
+/// Decoupling constraint: neither the bridge nor the core meter accesses internal pool state — events
+/// come via the <see cref="IHayateMetrics"/> callbacks, and gauges are read from the public
 /// <see cref="IHayateObjectPoolRegistry"/> + <see cref="IHayateObjectPool.GetStats"/>.
 /// </para>
 /// </summary>
 public sealed class HayateOtelMetrics : IHayateMetrics, IDisposable
 {
     /// <summary>Pool-name tag key (OTel convention: lowercase dotted).</summary>
-    public const string TagPoolName = "pool.name";
+    public const string TagPoolName = HayateMetricsMeter.TagPoolName;
 
     /// <summary>Return-validity tag key.</summary>
-    public const string TagValid = "valid";
+    public const string TagValid = HayateMetricsMeter.TagValid;
 
     /// <summary>Scaling-action tag key (expand / shrink).</summary>
-    public const string TagAction = "action";
+    public const string TagAction = HayateMetricsMeter.TagAction;
 
-    private readonly Meter _meter;
-    private readonly Counter<long> _acquire;
-    private readonly Counter<long> _release;
-    private readonly Counter<long> _miss;
-    private readonly Counter<long> _scaled;
-    private readonly Histogram<double> _waitTime;
-    private readonly IHayateObjectPoolRegistry? _registry;
-    private bool _disposed;
+    private readonly HayateMetricsMeter _meter;
 
     /// <summary>
     /// Creates the bridge instance.
@@ -75,93 +72,26 @@ public sealed class HayateOtelMetrics : IHayateMetrics, IDisposable
     /// <param name="options">Optional configuration (meter name, etc.).</param>
     public HayateOtelMetrics(IHayateObjectPoolRegistry? registry = null, HayateOtelMetricsOptions? options = null)
     {
-        _registry = registry;
         var opts = options ?? new HayateOtelMetricsOptions();
-        var version = typeof(HayateOtelMetrics).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
-
-        _meter = new Meter(opts.MeterName, version);
-
-        _acquire = _meter.CreateCounter<long>("HayatePoolAcquire", description: "Total number of objects acquired (HayateOP)");
-        _release = _meter.CreateCounter<long>("HayatePoolRelease", description: "Total number of objects released (HayateOP)");
-        _miss = _meter.CreateCounter<long>("HayatePoolMiss", description: "Total number of pool misses requiring a new object (HayateOP)");
-        _scaled = _meter.CreateCounter<long>("HayatePoolScaled", description: "Total number of scaling events (HayateOP)");
-        _waitTime = _meter.CreateHistogram<double>("HayatePoolWaitTime", unit: "ms", description: "Object acquire wait time in milliseconds (HayateOP)");
-
-        // ObservableGauge: pulls GetStats() per pool at observation time. GetStats internally builds a
-        // lightweight snapshot, and the callback is driven only by listeners (SDK collection period /
-        // MeterListener.RecordObservableInstruments), never on the borrow/return hot path.
-        _meter.CreateObservableGauge("HayatePoolSize", ObservePoolSize, unit: "{object}",
-            description: "Current capacity of each object pool (HayateOP)");
-        _meter.CreateObservableGauge("HayatePoolAvailable", ObservePoolAvailable, unit: "{object}",
-            description: "Current available (idle) objects in each pool (HayateOP)");
+        _meter = new HayateMetricsMeter(registry, opts.MeterName);
     }
 
     /// <inheritdoc />
     public void RecordObjectAcquired(string poolName, object item, double elapsedMilliseconds)
-    {
-        _acquire.Add(1, new KeyValuePair<string, object?>(TagPoolName, poolName));
-        _waitTime.Record(elapsedMilliseconds, new KeyValuePair<string, object?>(TagPoolName, poolName));
-    }
+        => _meter.RecordObjectAcquired(poolName, item, elapsedMilliseconds);
 
     /// <inheritdoc />
     public void RecordObjectReleased(string poolName, object item, bool isValid)
-    {
-        _release.Add(1,
-            new KeyValuePair<string, object?>(TagPoolName, poolName),
-            new KeyValuePair<string, object?>(TagValid, isValid));
-    }
+        => _meter.RecordObjectReleased(poolName, item, isValid);
 
     /// <inheritdoc />
     public void RecordObjectMiss(string poolName)
-    {
-        _miss.Add(1, new KeyValuePair<string, object?>(TagPoolName, poolName));
-    }
+        => _meter.RecordObjectMiss(poolName);
 
     /// <inheritdoc />
     public void RecordPoolScaled(string poolName, string action, int oldSize, int newSize)
-    {
-        _scaled.Add(1,
-            new KeyValuePair<string, object?>(TagPoolName, poolName),
-            new KeyValuePair<string, object?>(TagAction, action));
-    }
-
-    private IEnumerable<Measurement<double>> ObservePoolSize()
-        => ObservePools(s => s.CurrentSize);
-
-    private IEnumerable<Measurement<double>> ObservePoolAvailable()
-        => ObservePools(s => s.PooledCount);
-
-    private IEnumerable<Measurement<double>> ObservePools(Func<HayatePoolStats, double> selector)
-    {
-        if (_disposed || _registry is null)
-            yield break;
-
-        foreach (var name in _registry.Names)
-        {
-            if (!_registry.TryGet(name, out var pool))
-                continue;
-
-            // A single pool failure must not break the whole collection cycle.
-            HayatePoolStats stats;
-            try
-            {
-                stats = pool.GetStats();
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[HayateOtelMetrics] GetStats failed for pool '{name}': {ex.Message}");
-                continue;
-            }
-
-            yield return new Measurement<double>(selector(stats), new KeyValuePair<string, object?>(TagPoolName, name));
-        }
-    }
+        => _meter.RecordPoolScaled(poolName, action, oldSize, newSize);
 
     /// <summary>Disposes the Meter (unregisters all metrics; idempotent).</summary>
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        _meter.Dispose();
-    }
+    public void Dispose() => _meter.Dispose();
 }

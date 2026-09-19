@@ -4901,6 +4901,82 @@
             <param name="categoryName">The log category name (defaults to the pool name from <c>HayatePoolBuilder&lt;T&gt;.WithPoolName</c>, or the element type name if unspecified).</param>
             <returns>The logger instance; must not return <c>null</c>.</returns>
         </member>
+        <member name="T:DotNetCore.HayateOP.Metrics.HayateMetricsMeter">
+            <summary>
+            Publishes pool activity on the <c>"HayateOP"</c> <see cref="T:System.Diagnostics.Metrics.Meter"/>: an
+            <see cref="T:DotNetCore.HayateOP.Metrics.IHayateMetrics"/> sink built on <see cref="N:System.Diagnostics.Metrics"/>, the
+            instrumentation API the .NET runtime, <c>dotnet-counters</c> and the OpenTelemetry .NET SDK all
+            consume.
+            </summary>
+            <remarks>
+            This is the core package's own meter, so a consumer that references nothing but
+            <c>DotNetCore.HayateOP</c> can observe a pool without pulling in an exporter package:
+            <c>AddMeter("HayateOP")</c> or <c>dotnet-counters monitor --counters HayateOP</c> is enough. The
+            dedicated <c>DotNetCore.HayateOP.Extensions.OpenTelemetry</c> package publishes the same
+            instrument set under its own meter name and adds the DI/Prometheus wiring; pick one meter per
+            pool rather than attaching both sinks, which would count every event twice.<br />
+            The instruments are pull-based for the gauges (read on collection, never on the borrow path)
+            and push-based for the counters and the histogram, mirroring the layout of the libraries this
+            package is benchmarked against.<br />
+            <c>Meter</c> is part of the .NET 6+ base class library, so this type exists on net6.0 and above
+            only: on net48 / netstandard2.0 it is compiled out rather than dragging a NuGet dependency into
+            the core package. The lean fast path keeps no counters at all and therefore reports zeros — the
+            same rule as <see cref="P:DotNetCore.HayateOP.HayatePoolStats.TotalCreated"/>.
+            </remarks>
+            <example>
+            <code>
+            var registry = new HayateObjectPoolRegistry();
+            var meter = new HayateMetricsMeter(registry);
+            var pool = new HayatePoolBuilder&lt;MyObject&gt;().WithMetrics(meter).Build();
+            // dotnet-counters monitor --counters HayateOP
+            </code>
+            </example>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Metrics.HayateMetricsMeter.MeterName">
+            <summary>The default meter name (<c>"HayateOP"</c>); see
+            <see cref="M:DotNetCore.HayateOP.Metrics.HayateMetricsMeter.#ctor(DotNetCore.HayateOP.IHayateObjectPoolRegistry,System.String)"/> to override it.</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Metrics.HayateMetricsMeter.TagPoolName">
+            <summary>Pool-name tag key (OTel convention: lowercase dotted).</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Metrics.HayateMetricsMeter.TagValid">
+            <summary>Return-validity tag key.</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Metrics.HayateMetricsMeter.TagAction">
+            <summary>Scaling-action tag key (expand / shrink).</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Metrics.HayateMetricsMeter.#ctor(DotNetCore.HayateOP.IHayateObjectPoolRegistry,System.String)">
+            <summary>
+            Creates the sink and publishes its instruments.
+            </summary>
+            <param name="registry">
+            The pool registry the observable gauges read from. May be <c>null</c> — the gauges are still
+            created but report nothing, which suits a consumer that only cares about the event counters.
+            </param>
+            <param name="meterName">
+            The meter name to publish under; <c>null</c>/blank uses <see cref="F:DotNetCore.HayateOP.Metrics.HayateMetricsMeter.MeterName"/>. The
+            OpenTelemetry package passes its own name through here, so both packages share one
+            implementation of the instrument set.
+            </param>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Metrics.HayateMetricsMeter.Name">
+            <summary>The meter name this sink publishes under.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Metrics.HayateMetricsMeter.RecordObjectAcquired(System.String,System.Object,System.Double)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Metrics.HayateMetricsMeter.RecordObjectReleased(System.String,System.Object,System.Boolean)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Metrics.HayateMetricsMeter.RecordObjectMiss(System.String)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Metrics.HayateMetricsMeter.RecordPoolScaled(System.String,System.String,System.Int32,System.Int32)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Metrics.HayateMetricsMeter.Dispose">
+            <summary>Disposes the meter (unregisters every instrument; idempotent).</summary>
+        </member>
         <member name="T:DotNetCore.HayateOP.Metrics.IHayateMetrics">
             <summary>
             Diagnostic metrics interface for object pools.
