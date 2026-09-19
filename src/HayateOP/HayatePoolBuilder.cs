@@ -144,6 +144,59 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
+    /// Applies a named configuration preset.
+    /// </summary>
+    /// <param name="preset">The preset to apply.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="preset"/> is not a defined preset.</exception>
+    /// <remarks>
+    /// The wide-surface counterpart of <see cref="WithLeanProfile"/> and <see cref="WithFullProfile"/>: a
+    /// preset assigns the options it owns and leaves every other option at the value it already had, so a
+    /// later feature call still overrules it — <c>WithPreset(ConnectionPool).WithMaxSize(32)</c> keeps the
+    /// preset's validation and reclaim behaviour and changes only the ceiling. See
+    /// <see cref="HayatePoolPreset"/> for the field set each preset owns.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithPreset(HayatePoolPreset.HighThroughput)
+    ///     .WithMaxSize(256)
+    ///     .Build();
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithPreset(HayatePoolPreset preset)
+    {
+        _options.UsePreset(preset);
+        return this;
+    }
+
+    /// <summary>
+    /// Applies a caller-supplied preset: every option is taken from <paramref name="preset"/>.
+    /// </summary>
+    /// <param name="preset">The options to take the configuration from.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="preset"/> is <c>null</c>.</exception>
+    /// <remarks>
+    /// The extension point of the preset catalogue: a team can keep its own named configuration beside
+    /// <see cref="HayatePoolPreset"/> and apply it the same way. Unlike the enumerated presets this
+    /// overload replaces the whole option surface — that is what "my preset" means — and a later feature
+    /// call still overrules it. The preset is copied, so mutating it afterwards does not reconfigure the
+    /// pool, and the builder-side registrations (<see cref="WithPolicy"/>, <see cref="WithMetrics"/>,
+    /// <see cref="WithLogger"/>, the pool name) are not part of the options and stay untouched.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var options = new HayatePoolOptions { MaxPoolSize = 128 }.UseFullProfile();
+    /// var pool = new HayatePoolBuilder&lt;MyResource&gt;().WithPreset(options).Build();
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithPreset(HayatePoolOptions preset)
+    {
+        (preset ?? throw new ArgumentNullException(nameof(preset))).CopyTo(_options);
+        return this;
+    }
+
+    /// <summary>
     /// Enables or disables sharding.
     /// </summary>
     /// <param name="enable">Whether to enable sharding; defaults to <c>true</c>.</param>

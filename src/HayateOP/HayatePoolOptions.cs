@@ -977,6 +977,31 @@ public class HayatePoolOptions
         return this;
     }
 
+    /// <summary>
+    /// Applies a named preset: the ready-made configuration catalogue behind <see cref="HayatePoolPreset"/>.
+    /// </summary>
+    /// <param name="preset">The preset to apply.</param>
+    /// <returns>The same options instance, for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="preset"/> is not a defined preset.</exception>
+    /// <remarks>
+    /// The named counterpart of <see cref="UseLeanProfile"/> and <see cref="UseFullProfile"/>, and the
+    /// same mechanism: the preset assigns the options it owns and leaves every other option alone, so it
+    /// can be applied first and tuned afterwards, in either call order, and a later feature call still
+    /// overrules it. See <see cref="HayatePoolPreset"/> for the field set each preset owns.<br />
+    /// <see cref="HayatePoolPreset.Default"/> is the exception: it owns the whole surface, including
+    /// sizing, timeouts, the reject policy and the callbacks, and therefore restores the shipped defaults.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var options = new HayatePoolOptions { MaxPoolSize = 256 }.UsePreset(HayatePoolPreset.ConnectionPool);
+    /// </code>
+    /// </example>
+    public HayatePoolOptions UsePreset(HayatePoolPreset preset)
+    {
+        HayatePoolPresets.Apply(preset, this);
+        return this;
+    }
+
     #endregion
 
     /// <summary>
