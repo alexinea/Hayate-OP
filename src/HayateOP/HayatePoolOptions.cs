@@ -1028,8 +1028,11 @@ public class HayatePoolOptions
         options.CreationRetryCount = this.CreationRetryCount;
         options.CreationRetryDelay = this.CreationRetryDelay;
 
-        // Execution mode
+        // Execution mode (the ArrayPool storage switch is part of the mode, not of the bookkeeping
+        // surface, so it travels with it: a copy that dropped it would silently hand back a pool
+        // configured for a storage shape its source never had)
         options.EnableLean = this.EnableLean;
+        options.EnableArrayPoolStorage = this.EnableArrayPoolStorage;
 
         // Sharding
         options.EnableSharding = this.EnableSharding;
