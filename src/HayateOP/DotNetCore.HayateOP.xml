@@ -194,6 +194,30 @@
             </summary>
             <value>The time span elapsed from start to now.</value>
         </member>
+        <member name="T:DotNetCore.HayateOP.HayateBorrowStrategy">
+            <summary>
+            The end of a shard's idle list a borrow is served from (2.8).
+            The idle list is kept in return order — the tail is always the most recently returned object —
+            so this switch only chooses which end is handed out next. It never reorders the list, and it
+            does not change what the eviction scan samples.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateBorrowStrategy.Fifo">
+            <summary>
+            First in, first out (default): the borrow takes the oldest returned object, that is the head
+            of the idle list. This reproduces the behaviour of every release before the switch existed.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateBorrowStrategy.Lifo">
+            <summary>
+            Last in, first out: the borrow takes the most recently returned object, that is the tail of
+            the idle list. Handing back the object that came in last keeps a small working set hot in the
+            CPU caches, and it is the order the reference CHOPIN pool hard-codes. Objects that are never
+            picked stay at the head and age out through the ordinary eviction rules.<br />
+            Applies to the general-purpose engine only. The lean fast path keeps no ordered idle list, so
+            a lean pool rejects this value at build time rather than accepting a knob it cannot honour.
+            </summary>
+        </member>
         <member name="T:DotNetCore.HayateOP.HayateCircuitBreakerOptions">
             <summary>
             Circuit-breaker settings for the pool-level availability guard, used when
@@ -1360,6 +1384,12 @@
             copied. The caller may reuse the same buffer across shards / invocations to avoid
             per-call array allocations. The buffer is overwritten from index 0 each call.
             </summary>
+            <remarks>
+            "Head" is the oldest-returned end of the list. That end does not follow
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.BorrowStrategy"/>: LIFO changes which object is served next,
+            not the order the list is kept in, so a sampler that wants the coldest objects keeps
+            getting them under either strategy.
+            </remarks>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.SafeDispose(DotNetCore.HayateOP.HayateObject{`0},System.String)">
             <summary>
@@ -1879,6 +1909,28 @@
             <code>
             var builder = new HayatePoolBuilder&lt;MyResource&gt;()
                 .WithCustomShardAffinity(() =&gt; Thread.CurrentThread.ManagedThreadId % 8);
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithBorrowStrategy(DotNetCore.HayateOP.HayateBorrowStrategy)">
+            <summary>
+            Sets the end of the idle list a borrow is served from: <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Fifo"/>
+            (the default) hands out the oldest returned object, <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Lifo"/> the
+            most recently returned one.
+            </summary>
+            <param name="strategy">The borrow order to use.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="strategy"/> is not one of the
+            supported borrow strategies.</exception>
+            <remarks>
+            Both strategies use the same idle list and the same eviction behaviour, so this switches the
+            order of borrows only. It is not available on the lean fast path, which keeps no ordered idle
+            list — asking for Lifo there fails the build rather than being ignored.
+            </remarks>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithBorrowStrategy(HayateBorrowStrategy.Lifo);
             </code>
             </example>
         </member>
@@ -2923,6 +2975,24 @@
             borrow fall back to a sequential scan. Only invoked when <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ShardAffinityMode"/> is
             Custom (at most once per borrow).
             </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.BorrowStrategy">
+            <summary>
+            The end of a shard's idle list a borrow is served from. Defaults to
+            <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Fifo"/>, which is the behaviour of every release before the
+            switch existed.
+            </summary>
+            <remarks>
+            The idle list is stored in return order either way; only the end that is handed out next
+            differs. Lifo keeps the most recently returned instance hot, which suits a consumer that
+            borrows, uses and returns in a tight loop; Fifo spreads usage across the whole idle set,
+            which suits an instance whose per-instance state should age uniformly.<br />
+            The eviction scan samples the oldest-returned end under both strategies, so the objects
+            offered to the <see cref="T:DotNetCore.HayateOP.IHayateEvictionPolicy`1"/> do not depend on this setting.<br />
+            Scope: the general-purpose engine (sharded or collapsed to a single shard). The lean fast
+            path keeps no ordered idle list, so <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Lifo"/> on a lean pool
+            fails the build instead of being silently ignored. Unknown enum values fall back to Fifo.
+            </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableAutoScaling">
             <summary>

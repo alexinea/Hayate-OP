@@ -18,11 +18,20 @@ public partial class HayatePoolBasic<T>
         // builds the params array (and boxes the counters) those traces would pass to the logger.
         private readonly bool _enableDiagnostics;
 
-        // Free-object linked list: Add appends to the tail and TryTake removes from the head, naturally preserving FIFO order.
+        // Free-object linked list, kept in return order: Add appends to the tail, and TryTake removes
+        // from whichever end the configured borrow strategy selects — the head for FIFO (the default,
+        // and what every release before the switch did) or the tail for LIFO. The list is never
+        // reordered, so the head is the oldest-returned object in both modes; the eviction sampler
+        // reads that end, which is why switching the borrow order does not change what a policy sees.
         // Remove performs an O(1) unlink via HayateObject<T>.Node.
         // The old implementation rebuilt the queue with ConcurrentQueue + "ToList -> Remove -> Clear -> Enqueue";
         // during the rebuild window concurrent TryTake / Add could lose objects or produce duplicates, so it was replaced entirely with a linked list.
         private readonly LinkedList<HayateObject<T>> _list = new();
+
+        // Borrow order, snapshotted at construction from HayatePoolOptions.BorrowStrategy. It only
+        // decides which end of _list a borrow is served from, so the borrow path pays one predicted
+        // readonly read (and the dispatch folds away entirely for the FIFO default).
+        private readonly bool _takeNewest;
 
         // Borrowed-object linked list (K2, abandoned recovery). Maintained only when abandoned recovery
         // is enabled (_trackBorrowed): TryTake appends on borrow (FIFO — the head is the oldest borrow),
@@ -151,6 +160,9 @@ public partial class HayatePoolBasic<T>
             // shard never maintains it (options are normalized by IsValid before the shards are built).
             _trackBorrowed = options.RemoveAbandonedOnBorrow || options.RemoveAbandonedOnMaintenance;
             _enableDiagnostics = options.EnableDiagnostics;
+            // Options are normalized before the shards are built, so an unrecognised value has already
+            // fallen back to Fifo and "not Lifo" is the complete test.
+            _takeNewest = options.BorrowStrategy == HayateBorrowStrategy.Lifo;
         }
 
         public void UpdateMaxSize(int newMaxSize)
@@ -243,7 +255,10 @@ public partial class HayatePoolBasic<T>
             {
                 _lock.Enter(ref taken);
 
-                var node = _list.First;
+                // FIFO (default) serves the head, the oldest returned object; LIFO serves the tail,
+                // the object that came back last. Both ends are read through the same node walk, so
+                // the strategy costs the borrow path one predicted branch and nothing else.
+                var node = _takeNewest ? _list.Last : _list.First;
                 if (node == null) return false;
 
                 w = node.Value;
@@ -454,6 +469,12 @@ public partial class HayatePoolBasic<T>
         /// copied. The caller may reuse the same buffer across shards / invocations to avoid
         /// per-call array allocations. The buffer is overwritten from index 0 each call.
         /// </summary>
+        /// <remarks>
+        /// "Head" is the oldest-returned end of the list. That end does not follow
+        /// <see cref="HayatePoolOptions.BorrowStrategy"/>: LIFO changes which object is served next,
+        /// not the order the list is kept in, so a sampler that wants the coldest objects keeps
+        /// getting them under either strategy.
+        /// </remarks>
         public int SnapshotHead(HayateObject<T>[] buffer, int count)
         {
             if (buffer is null) throw new ArgumentNullException(nameof(buffer));

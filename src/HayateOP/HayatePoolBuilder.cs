@@ -635,6 +635,36 @@ public class HayatePoolBuilder<T> where T : class, new()
         return this;
     }
 
+    /// <summary>
+    /// Sets the end of the idle list a borrow is served from: <see cref="HayateBorrowStrategy.Fifo"/>
+    /// (the default) hands out the oldest returned object, <see cref="HayateBorrowStrategy.Lifo"/> the
+    /// most recently returned one.
+    /// </summary>
+    /// <param name="strategy">The borrow order to use.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="strategy"/> is not one of the
+    /// supported borrow strategies.</exception>
+    /// <remarks>
+    /// Both strategies use the same idle list and the same eviction behaviour, so this switches the
+    /// order of borrows only. It is not available on the lean fast path, which keeps no ordered idle
+    /// list — asking for Lifo there fails the build rather than being ignored.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithBorrowStrategy(HayateBorrowStrategy.Lifo);
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithBorrowStrategy(HayateBorrowStrategy strategy)
+    {
+        if (strategy != HayateBorrowStrategy.Fifo && strategy != HayateBorrowStrategy.Lifo)
+        {
+            throw new ArgumentOutOfRangeException(nameof(strategy), "Unknown borrow strategy");
+        }
+        _options.BorrowStrategy = strategy;
+        return this;
+    }
+
     #endregion
 
     #region Timeout
@@ -1546,6 +1576,18 @@ public class HayatePoolBuilder<T> where T : class, new()
                 "HayatePool: a custom IHayateEvictionPolicy was registered via WithEvictionPolicy(), but idle eviction is disabled (EnableEviction = false), so the policy would never be consulted. " +
                 "Call WithEnableEviction(true) to activate it, or remove the WithEvictionPolicy() registration. " +
                 "Note that the lean profile (UseLeanProfile/WithLean) disables eviction by construction.");
+        }
+
+        // Same fail-fast rule for the borrow order: the lean fast path stores the pooled value directly
+        // in a bounded buffer and holds no ordered idle list, so an explicit LIFO request cannot be
+        // honoured there. The default (FIFO) is what a pool that never asked for anything holds, so
+        // that combination stays valid — the guard fires only on a request it cannot satisfy, which is
+        // what keeps the switch from being an option that is accepted and then ignored.
+        if (_options.EnableLean && _options.BorrowStrategy != HayateBorrowStrategy.Fifo)
+        {
+            throw new InvalidOperationException(
+                "HayatePool: BorrowStrategy was set to Lifo via WithBorrowStrategy(), but the pool runs the lean fast path (UseLeanProfile/WithLean), which keeps no ordered idle list and cannot honour a borrow order. " +
+                "Remove the WithBorrowStrategy() call, or leave the lean fast path.");
         }
 
         // Resolve the logger by pool name (explicit WithLogger takes precedence -> factory ->

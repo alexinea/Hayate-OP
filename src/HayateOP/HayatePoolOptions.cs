@@ -209,6 +209,28 @@ public class HayatePoolOptions
 
     #endregion
 
+    #region Borrow order
+
+    /// <summary>
+    /// The end of a shard's idle list a borrow is served from. Defaults to
+    /// <see cref="HayateBorrowStrategy.Fifo"/>, which is the behaviour of every release before the
+    /// switch existed.
+    /// </summary>
+    /// <remarks>
+    /// The idle list is stored in return order either way; only the end that is handed out next
+    /// differs. Lifo keeps the most recently returned instance hot, which suits a consumer that
+    /// borrows, uses and returns in a tight loop; Fifo spreads usage across the whole idle set,
+    /// which suits an instance whose per-instance state should age uniformly.<br />
+    /// The eviction scan samples the oldest-returned end under both strategies, so the objects
+    /// offered to the <see cref="IHayateEvictionPolicy{T}"/> do not depend on this setting.<br />
+    /// Scope: the general-purpose engine (sharded or collapsed to a single shard). The lean fast
+    /// path keeps no ordered idle list, so <see cref="HayateBorrowStrategy.Lifo"/> on a lean pool
+    /// fails the build instead of being silently ignored. Unknown enum values fall back to Fifo.
+    /// </remarks>
+    public HayateBorrowStrategy BorrowStrategy { get; set; } = HayateBorrowStrategy.Fifo;
+
+    #endregion
+
     #region Scaling strategy
 
     /// <summary>
@@ -1014,6 +1036,7 @@ public class HayatePoolOptions
         options.ShardCount = this.ShardCount;
         options.ShardAffinityMode = this.ShardAffinityMode;
         options.CustomShardAffinity = this.CustomShardAffinity;
+        options.BorrowStrategy = this.BorrowStrategy;
 
         // Scaling
         options.EnableAutoScaling = this.EnableAutoScaling;
@@ -1218,6 +1241,16 @@ public class HayatePoolOptions
                  ShardAffinityMode != HayateShardAffinityMode.Custom)
         {
             ShardAffinityMode = HayateShardAffinityMode.None;
+        }
+
+        // Borrow-order normalization: an unrecognised value falls back to the default instead of
+        // leaving the shard with an end it cannot decide on (the same robustness rule as the affinity
+        // mode above). A Lifo request is deliberately *not* rewritten on the lean fast path: that
+        // combination cannot be honoured, and silently turning it into Fifo is exactly the
+        // "accepted but never applied" outcome this switch exists to avoid. It fails the build instead.
+        if (BorrowStrategy != HayateBorrowStrategy.Fifo && BorrowStrategy != HayateBorrowStrategy.Lifo)
+        {
+            BorrowStrategy = HayateBorrowStrategy.Fifo;
         }
 
         // Capacity alarm threshold normalization: negative values are treated as disabled (0), and
