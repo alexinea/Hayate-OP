@@ -345,6 +345,45 @@ public partial class HayatePoolBasic<T>
     }
 
     /// <summary>
+    /// Warms the lean buffer on demand: the shortfall between the requested idle count and what the buffer
+    /// holds right now is created through the reservation path and parked in the buffer.
+    /// </summary>
+    /// <remarks>
+    /// The reservation path enforces the pool ceiling on the live count (idle + borrowed), so warming never
+    /// pushes a lean pool past its maximum. A created object can still lose the race for the last slot to a
+    /// concurrent return; it is destroyed through the single lean destroy path, which also releases its
+    /// reservation, and the warm-up stops there rather than retrying against a moving ceiling.
+    /// </remarks>
+    private int PreWarmLean(int count)
+    {
+        if (!_leanRetentionEnabled) return 0;
+
+        var target = Math.Min(count, _leanCapacity);
+        var remaining = target - CountLeanIdle();
+        if (remaining <= 0) return 0;
+
+        var warmed = 0;
+        for (var i = 0; i < remaining; i++)
+        {
+            if (!TryGrowLean(out var item)) break;
+            if (!TryReturnLean(item))
+            {
+                DestroyLean(item);
+                break;
+            }
+
+            warmed++;
+        }
+
+        if (warmed > 0)
+        {
+            _logger.LogInformation("Object pool [{PoolName}] pre-warmed on demand with {Count} objects (lean mode)", _name, warmed);
+        }
+
+        return warmed;
+    }
+
+    /// <summary>
     /// Destroys every idle object retained by the lean buffer. Borrowed objects are untouched, so
     /// their reservations stay accounted for and they re-enter the buffer normally on return.
     /// </summary>

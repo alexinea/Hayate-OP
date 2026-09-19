@@ -206,6 +206,17 @@ public sealed class HayatePreparationPool<T> : IHayateObjectPool<T> where T : cl
     public int Evict(HayateEvictReason reason) => _inner.Evict(reason);
 
     /// <summary>
+    /// Forwards the warm-up to the inner pool.
+    /// </summary>
+    /// <remarks>
+    /// Warming creates objects only: every borrow still runs the preparation chain, so a warmed object is not
+    /// a ready one, and the first borrows pay the readiness check (and any repair) exactly as before. What the
+    /// warm-up removes is the creation cost, the same as it does for an undecorated pool.
+    /// </remarks>
+    /// <inheritdoc />
+    public int PreWarm(int count) => _inner.PreWarm(count);
+
+    /// <summary>
     /// Disposes the inner pool. The preparation strategy carries no resources of its own.
     /// </summary>
     /// <inheritdoc />

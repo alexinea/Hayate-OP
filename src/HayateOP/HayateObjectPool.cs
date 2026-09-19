@@ -421,6 +421,85 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     }
 
     /// <summary>
+    /// Creates idle objects until the pool holds at least <paramref name="count"/> of them, and returns how
+    /// many this call created. See <see cref="IHayateObjectPool{T}.PreWarm"/> for the contract.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
+    /// <exception cref="InvalidOperationException">The policy could not create a value after the configured
+    /// number of retries.</exception>
+    public int PreWarm(int count)
+    {
+        if (count < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(count), count, "The pre-warm count must be non-negative.");
+        }
+
+        // The two storage models keep different books — the sharded engine counts a free list per shard, the
+        // lean buffer finds its free slots by scan — so each warms in its own terms. Both honour the same
+        // contract: a floor on idle objects, never past the pool's own ceiling, and a reported failure.
+        return _enableLean ? PreWarmLean(count) : PreWarmWrappedObjects(count);
+    }
+
+    /// <summary>
+    /// Warms the sharded engine: the shortfall between the requested idle count and what the shards hold
+    /// right now is created round-robin, skipping every shard already at its current capacity.
+    /// </summary>
+    /// <remarks>
+    /// Capacity is read per shard instead of derived from <see cref="HayatePoolOptions.MaxPoolSize"/>, so a
+    /// pool that has already scaled down warms to what it currently allows — the same ceiling the next
+    /// borrow would meet. A shard can also reject an object that was just created for it (a concurrent
+    /// return took the last slot first); that object is destroyed through the single destroy path and the
+    /// shard is skipped, so warming never pushes the live count past the ceiling.
+    /// </remarks>
+    private int PreWarmWrappedObjects(int count)
+    {
+        var target = Math.Min(count, _options.MaxPoolSize);
+
+        var idle = 0;
+        foreach (var shard in _shards) idle += shard.Count;
+        var remaining = target - idle;
+        if (remaining <= 0) return 0;
+
+        var warmed = 0;
+        var index = 0;
+        var skipped = 0;
+
+        while (remaining > 0 && skipped < _shards.Length)
+        {
+            var shard = _shards[index];
+
+            if (shard.Count >= shard.MaxSize)
+            {
+                skipped++;
+            }
+            else
+            {
+                var w = CreateWrappedObject(shard);
+                if (shard.Add(w))
+                {
+                    warmed++;
+                    remaining--;
+                    skipped = 0;
+                }
+                else
+                {
+                    Destroy(w);
+                    skipped++;
+                }
+            }
+
+            if (++index == _shards.Length) index = 0;
+        }
+
+        if (warmed > 0)
+        {
+            _logger.LogInformation("Object pool [{PoolName}] pre-warmed on demand with {Count} objects", _name, warmed);
+        }
+
+        return warmed;
+    }
+
+    /// <summary>
     /// Starts the single background timer that drives eviction, auto-scaling and idle validation.
     /// Returns without creating a timer when all three concerns are disabled, so a pool that needs no
     /// background work holds no timer handle and performs no periodic wake-ups.

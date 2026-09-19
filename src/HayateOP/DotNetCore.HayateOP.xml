@@ -833,6 +833,28 @@
             <exception cref="T:System.ArgumentNullException">Thrown if policy, options, scalingStrategy, metrics, logger, or poolName is null.</exception>
             <exception cref="T:System.InvalidOperationException">Thrown if the configured options are invalid.</exception>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.PreWarm(System.Int32)">
+            <summary>
+            Creates idle objects until the pool holds at least <paramref name="count"/> of them, and returns how
+            many this call created. See <see cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.PreWarm(System.Int32)"/> for the contract.
+            </summary>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
+            <exception cref="T:System.InvalidOperationException">The policy could not create a value after the configured
+            number of retries.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.PreWarmWrappedObjects(System.Int32)">
+            <summary>
+            Warms the sharded engine: the shortfall between the requested idle count and what the shards hold
+            right now is created round-robin, skipping every shard already at its current capacity.
+            </summary>
+            <remarks>
+            Capacity is read per shard instead of derived from <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/>, so a
+            pool that has already scaled down warms to what it currently allows — the same ceiling the next
+            borrow would meet. A shard can also reject an object that was just created for it (a concurrent
+            return took the last slot first); that object is destroyed through the single destroy path and the
+            shard is skipped, so warming never pushes the live count past the ceiling.
+            </remarks>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.StartBackgroundTasks">
             <summary>
             Starts the single background timer that drives eviction, auto-scaling and idle validation.
@@ -1230,6 +1252,18 @@
             Pre-creates <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MinPoolSize"/> objects into the lean buffer.
             Never creates more than <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/>.
             </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.PreWarmLean(System.Int32)">
+            <summary>
+            Warms the lean buffer on demand: the shortfall between the requested idle count and what the buffer
+            holds right now is created through the reservation path and parked in the buffer.
+            </summary>
+            <remarks>
+            The reservation path enforces the pool ceiling on the live count (idle + borrowed), so warming never
+            pushes a lean pool past its maximum. A created object can still lose the race for the last slot to a
+            concurrent return; it is destroyed through the single lean destroy path, which also releases its
+            reservation, and the warm-up stops there rather than retrying against a moving ceiling.
+            </remarks>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.ClearLean">
             <summary>
@@ -4586,6 +4620,17 @@
         <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.Evict(DotNetCore.HayateOP.HayateEvictReason)">
             <inheritdoc />
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.PreWarm(System.Int32)">
+            <summary>
+            Forwards the warm-up to the inner pool.
+            </summary>
+            <remarks>
+            Warming creates objects only: every borrow still runs the preparation chain, so a warmed object is not
+            a ready one, and the first borrows pay the readiness check (and any repair) exactly as before. What the
+            warm-up removes is the creation cost, the same as it does for an undecorated pool.
+            </remarks>
+            <inheritdoc />
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.Dispose">
             <summary>
             Disposes the inner pool. The preparation strategy carries no resources of its own.
@@ -5047,6 +5092,28 @@
             </summary>
             <inheritdoc />
         </member>
+        <member name="M:DotNetCore.HayateOP.HayateUnboundedPool`1.PreWarm(System.Int32)">
+            <summary>
+            Creates objects until the retained set holds at least <paramref name="count"/> idle objects, and
+            returns how many this call created.
+            </summary>
+            <param name="count">The number of idle objects to retain; must not be negative.</param>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
+            <remarks>
+            This model's ceiling is <see cref="P:DotNetCore.HayateOP.HayateUnboundedPool`1.MaxIdle"/> — a limit on the resident set, not on concurrent demand
+            — so a request above it warms up to <c>MaxIdle</c>. Objects currently lent out are not idle and do not
+            count towards <paramref name="count"/>. Warming is the only way to make the first borrows cheap in
+            this model: it creates on a miss, and it has no background warm-up of its own.<br />
+            The objects go straight into the idle queue; they have never been used, so there is nothing to reset
+            or validate on the way in.
+            </remarks>
+            <example>
+            <code>
+            new HayateUnboundedPool&lt;Buffer&gt;(64).PreWarm(64);
+            </code>
+            </example>
+            <inheritdoc />
+        </member>
         <member name="M:DotNetCore.HayateOP.HayateUnboundedPool`1.Dispose">
             <summary>
             Destroys every parked object; the pool cannot be reused afterwards.
@@ -5246,6 +5313,41 @@
             <example>
             <code>
             int evicted = pool.Evict(HayateEvictReason.Idle);
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPool`1.PreWarm(System.Int32)">
+            <summary>
+            Creates idle objects until the pool holds at least <paramref name="count"/> of them, and returns how
+            many objects this call created.
+            </summary>
+            <param name="count">The number of idle — immediately borrowable — objects the pool should hold; must
+            not be negative.</param>
+            <returns>The number of objects created by this call: <c>0</c> when the pool already holds
+            <paramref name="count"/> idle objects or more, and <c>0</c> for a pool model that retains no idle
+            objects at all.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
+            <exception cref="T:System.InvalidOperationException">An object could not be created after the configured
+            number of attempts.</exception>
+            <remarks>
+            The count is a floor on <i>idle</i> objects, not on total objects: objects currently lent out do not
+            count towards it, so calling this after borrowing creates replacements. The pool's own ceiling still
+            applies — the maximum pool size in the sharded engine, the retained-object limit in the unbounded
+            model — and a request above that ceiling warms up to the ceiling instead of failing.<br />
+            This is the explicit counterpart of the construction-time warm-up switch: that one warms the
+            configured minimum during construction (synchronously, or in the background and awaited by the first
+            borrow when the wait is enabled), while this call warms any target afterwards — after raising the
+            minimum through a configuration reload, or to pay the creation cost up front without making the first
+            borrow wait for it. Warming beyond the configured minimum is <b>not</b> a retention promise: the extra
+            objects age like every other idle object and are reclaimed by the idle timeout and by background
+            scale-down.<br />
+            The call is safe alongside concurrent borrows and returns, and concurrent calls never take the pool
+            past its ceiling. A creation failure is reported rather than swallowed — unlike during construction,
+            here the caller asked for the objects explicitly.
+            </remarks>
+            <example>
+            <code>
+            pool.PreWarm(32);   // the next 32 borrows need not create anything
             </code>
             </example>
         </member>

@@ -339,6 +339,63 @@ public class HayateUnboundedPool<T> : IHayateObjectPool<T> where T : class, new(
     }
 
     /// <summary>
+    /// Creates objects until the retained set holds at least <paramref name="count"/> idle objects, and
+    /// returns how many this call created.
+    /// </summary>
+    /// <param name="count">The number of idle objects to retain; must not be negative.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
+    /// <remarks>
+    /// This model's ceiling is <see cref="MaxIdle"/> — a limit on the resident set, not on concurrent demand
+    /// — so a request above it warms up to <c>MaxIdle</c>. Objects currently lent out are not idle and do not
+    /// count towards <paramref name="count"/>. Warming is the only way to make the first borrows cheap in
+    /// this model: it creates on a miss, and it has no background warm-up of its own.<br />
+    /// The objects go straight into the idle queue; they have never been used, so there is nothing to reset
+    /// or validate on the way in.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// new HayateUnboundedPool&lt;Buffer&gt;(64).PreWarm(64);
+    /// </code>
+    /// </example>
+    /// <inheritdoc />
+    public int PreWarm(int count)
+    {
+        if (count < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(count), count, "The pre-warm count must be non-negative.");
+        }
+
+        var target = Math.Min(count, MaxIdle);
+        var created = 0;
+
+        while (true)
+        {
+            // The same claim-then-park order as Release, so the resident count and the queue stay in
+            // lockstep under concurrent borrows, returns and warm-ups.
+            var current = Volatile.Read(ref _pooledCount);
+            if (current >= target) break;
+            if (Interlocked.CompareExchange(ref _pooledCount, current + 1, current) != current) continue;
+
+            T item;
+            try
+            {
+                item = _factory();
+            }
+            catch
+            {
+                Interlocked.Decrement(ref _pooledCount);
+                throw;
+            }
+
+            Interlocked.Increment(ref _totalCreated);
+            _idle.Enqueue(item);
+            created++;
+        }
+
+        return created;
+    }
+
+    /// <summary>
     /// Destroys every parked object; the pool cannot be reused afterwards.
     /// </summary>
     /// <inheritdoc />

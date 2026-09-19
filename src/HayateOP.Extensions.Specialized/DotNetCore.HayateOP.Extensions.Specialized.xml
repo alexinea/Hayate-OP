@@ -532,6 +532,17 @@
         <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.Evict(DotNetCore.HayateOP.HayateEvictReason)">
             <inheritdoc />
         </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.PreWarm(System.Int32)">
+            <summary>
+            Warms the base pool — the one that serves every request within the default capacity.
+            </summary>
+            <remarks>
+            The capacity tiers are not warmed: a tier exists because a caller asked for that specific capacity, and
+            a warm-up targets the size the pool is normally used at. The count is a floor on idle streams, and the
+            base pool's own maximum still applies.
+            </remarks>
+            <inheritdoc />
+        </member>
         <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.Dispose">
             <inheritdoc />
         </member>
@@ -1412,6 +1423,17 @@
             <inheritdoc />
         </member>
         <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.Evict(DotNetCore.HayateOP.HayateEvictReason)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.PreWarm(System.Int32)">
+            <summary>
+            Warms the base pool — the one that serves every request within the default capacity.
+            </summary>
+            <remarks>
+            The capacity tiers are not warmed: a tier exists because a caller asked for that specific capacity, and
+            a warm-up targets the size the pool is normally used at. The count is a floor on idle builders, and the
+            base pool's own maximum still applies.
+            </remarks>
             <inheritdoc />
         </member>
         <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.Dispose">

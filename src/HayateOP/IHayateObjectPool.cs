@@ -137,4 +137,39 @@ public interface IHayateObjectPool<T> : IHayateObjectPool where T : class
     /// </code>
     /// </example>
     int Evict(HayateEvictReason reason);
+
+    /// <summary>
+    /// Creates idle objects until the pool holds at least <paramref name="count"/> of them, and returns how
+    /// many objects this call created.
+    /// </summary>
+    /// <param name="count">The number of idle — immediately borrowable — objects the pool should hold; must
+    /// not be negative.</param>
+    /// <returns>The number of objects created by this call: <c>0</c> when the pool already holds
+    /// <paramref name="count"/> idle objects or more, and <c>0</c> for a pool model that retains no idle
+    /// objects at all.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
+    /// <exception cref="InvalidOperationException">An object could not be created after the configured
+    /// number of attempts.</exception>
+    /// <remarks>
+    /// The count is a floor on <i>idle</i> objects, not on total objects: objects currently lent out do not
+    /// count towards it, so calling this after borrowing creates replacements. The pool's own ceiling still
+    /// applies — the maximum pool size in the sharded engine, the retained-object limit in the unbounded
+    /// model — and a request above that ceiling warms up to the ceiling instead of failing.<br />
+    /// This is the explicit counterpart of the construction-time warm-up switch: that one warms the
+    /// configured minimum during construction (synchronously, or in the background and awaited by the first
+    /// borrow when the wait is enabled), while this call warms any target afterwards — after raising the
+    /// minimum through a configuration reload, or to pay the creation cost up front without making the first
+    /// borrow wait for it. Warming beyond the configured minimum is <b>not</b> a retention promise: the extra
+    /// objects age like every other idle object and are reclaimed by the idle timeout and by background
+    /// scale-down.<br />
+    /// The call is safe alongside concurrent borrows and returns, and concurrent calls never take the pool
+    /// past its ceiling. A creation failure is reported rather than swallowed — unlike during construction,
+    /// here the caller asked for the objects explicitly.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// pool.PreWarm(32);   // the next 32 borrows need not create anything
+    /// </code>
+    /// </example>
+    int PreWarm(int count);
 }

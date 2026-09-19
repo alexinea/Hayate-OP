@@ -363,6 +363,17 @@ public sealed class MemoryStreamPool : IHayateObjectPool<PooledMemoryStream>
         return evicted;
     }
 
+    /// <summary>
+    /// Warms the base pool — the one that serves every request within the default capacity.
+    /// </summary>
+    /// <remarks>
+    /// The capacity tiers are not warmed: a tier exists because a caller asked for that specific capacity, and
+    /// a warm-up targets the size the pool is normally used at. The count is a floor on idle streams, and the
+    /// base pool's own maximum still applies.
+    /// </remarks>
+    /// <inheritdoc />
+    public int PreWarm(int count) => _pool.PreWarm(count);
+
     /// <inheritdoc />
     public void Dispose()
     {
