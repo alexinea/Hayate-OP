@@ -42,6 +42,13 @@ public partial class HayatePoolBasic<T>
     private readonly int _leanCapacity;
     private readonly bool _leanRetentionEnabled;
 
+    // T-R: the soft-capacity ceiling expressed as a slot-scan limit; -1 (the default) means no soft
+    // ceiling and the whole buffer is available. When one is set, the fast lane carries one object and
+    // the slot scan is capped at SoftCapacity - 1 slots, so the retained total never exceeds
+    // SoftCapacity. The lean path keeps no idle counter, so expressing the ceiling structurally — as
+    // "do not look past this slot" — is what keeps it off the return hot path.
+    private readonly int _leanReturnSlotLimit = -1;
+
     // Live object count (idle + borrowed). Written only when an object is created or destroyed —
     // never on the steady-state borrow/return path — so it costs the hot path nothing while still
     // giving the pool a hard ceiling on how many objects it will ever create.
@@ -73,6 +80,31 @@ public partial class HayatePoolBasic<T>
 
     /// <summary>The slot array the lean buffer currently stores into (fast lane excluded).</summary>
     private T?[] LeanSlotArray => _enableArrayPoolStorage ? _apSlots : _leanSlots;
+
+    /// <summary>
+    /// How many slots of <see cref="LeanSlotArray"/> the buffer scans: the storage backend's logical
+    /// ceiling, further capped by the soft capacity (T-R) when one is set.
+    /// </summary>
+    /// <remarks>
+    /// Nothing is ever stored past this limit, so the borrow path uses the same limit as the return
+    /// path — a scan of a longer range could only look at slots it knows are empty.
+    /// </remarks>
+    private int LeanSlotScanLimit
+    {
+        get
+        {
+            var slots = LeanSlotArray;
+            var limit = _enableArrayPoolStorage ? Math.Min(slots.Length, _apSlotLimit) : slots.Length;
+            if (_leanReturnSlotLimit >= 0 && limit > _leanReturnSlotLimit) limit = _leanReturnSlotLimit;
+            return limit;
+        }
+    }
+
+    /// <summary>
+    /// The largest number of idle objects the lean buffer retains: its ceiling, capped by the soft
+    /// capacity (T-R) when one is set (the fast lane plus the slots the scan may reach).
+    /// </summary>
+    private int LeanIdleCapacity => _leanReturnSlotLimit >= 0 ? _leanReturnSlotLimit + 1 : _leanCapacity;
 
     /// <summary>
     /// Creates a pooled value without a wrapper and without a registry entry.
@@ -156,7 +188,7 @@ public partial class HayatePoolBasic<T>
         }
 
         var slots = LeanSlotArray;
-        var scanLimit = _enableArrayPoolStorage ? Math.Min(slots.Length, _apSlotLimit) : slots.Length;
+        var scanLimit = LeanSlotScanLimit;
         for (var i = 0; i < scanLimit; i++)
         {
             var slot = slots[i];
@@ -193,7 +225,7 @@ public partial class HayatePoolBasic<T>
         }
 
         var slots = LeanSlotArray;
-        var scanLimit = _enableArrayPoolStorage ? Math.Min(slots.Length, _apSlotLimit) : slots.Length;
+        var scanLimit = LeanSlotScanLimit;
         for (var i = 0; i < scanLimit; i++)
         {
             if (slots[i] is null &&
@@ -202,6 +234,11 @@ public partial class HayatePoolBasic<T>
                 return true;
             }
         }
+
+        // A soft ceiling (T-R) caps what the buffer may retain, so there is nothing to grow towards:
+        // the growth path below exists only to reach the *hard* ceiling from a physically smaller
+        // rented array, and running it would park this object past the soft limit.
+        if (_leanReturnSlotLimit >= 0) return false;
 
         // Full within the logical limit: in ArrayPool mode a physically smaller array can still be
         // grown toward the ceiling; otherwise full is final and the caller drops the object.
@@ -269,7 +306,7 @@ public partial class HayatePoolBasic<T>
     {
         var count = _leanFirstItem is null ? 0 : 1;
         var slots = LeanSlotArray;
-        var scanLimit = _enableArrayPoolStorage ? Math.Min(slots.Length, _apSlotLimit) : slots.Length;
+        var scanLimit = LeanSlotScanLimit;
 
         for (var i = 0; i < scanLimit; i++)
         {
@@ -317,7 +354,7 @@ public partial class HayatePoolBasic<T>
     {
         try
         {
-            var target = Math.Min(_options.MinPoolSize, _leanCapacity);
+            var target = Math.Min(_options.MinPoolSize, LeanIdleCapacity);
             var warmed = 0;
 
             for (var i = 0; i < target; i++)
@@ -358,7 +395,7 @@ public partial class HayatePoolBasic<T>
     {
         if (!_leanRetentionEnabled) return 0;
 
-        var target = Math.Min(count, _leanCapacity);
+        var target = Math.Min(count, LeanIdleCapacity);
         var remaining = target - CountLeanIdle();
         if (remaining <= 0) return 0;
 

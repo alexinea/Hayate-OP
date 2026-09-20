@@ -620,6 +620,35 @@ public class HayatePoolBuilder<T> where T : class, new()
     }
 
     /// <summary>
+    /// Sets the soft capacity: how many idle objects the pool keeps before it stops retaining returns.
+    /// Zero — the default — disables the ceiling.
+    /// </summary>
+    /// <param name="softCapacity">The idle-object ceiling applied on the return path; <c>0</c> disables
+    /// it.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="softCapacity"/> is negative.</exception>
+    /// <remarks>
+    /// A returned object is destroyed instead of stored once the pool already holds this many idle
+    /// objects, so the retained set stays bounded without lowering the number of objects the pool will
+    /// lend out. The value must lie between <see cref="HayatePoolOptions.MinPoolSize"/> and
+    /// <see cref="HayatePoolOptions.MaxPoolSize"/> when it is not zero; a ceiling outside that range is
+    /// rejected at build time because it could never take effect.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithMaxSize(64)
+    ///     .WithSoftCapacity(8);
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithSoftCapacity(int softCapacity)
+    {
+        if (softCapacity < 0) throw new ArgumentOutOfRangeException(nameof(softCapacity), "SoftCapacity cannot be negative");
+        _options.SoftCapacity = softCapacity;
+        return this;
+    }
+
+    /// <summary>
     /// Sets the number of shards.
     /// </summary>
     /// <param name="shardCount">The number of shards (1~32).</param>

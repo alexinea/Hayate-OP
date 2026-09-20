@@ -36,6 +36,44 @@ public class HayatePoolOptions
     /// </remarks>
     public int MaxPoolSize { get; set; } = HayateConstant.DEFAULT_MAX_POOL_SIZE;
 
+    /// <summary>
+    /// Soft capacity: the number of idle objects the pool keeps before it starts destroying
+    /// returned objects instead of retaining them. Zero (the default) disables the ceiling.<br />
+    /// Default value: 0 (disabled — the pool retains up to <see cref="MaxPoolSize"/> idle objects).
+    /// </summary>
+    /// <remarks>
+    /// Purpose: bound the retained set on the <i>return</i> path, so a pool that lent out its whole
+    /// ceiling during a burst drops the objects the burst no longer needs instead of keeping them
+    /// until eviction or scale-down reclaims them.<br />
+    /// Difference from <see cref="MaxPoolSize"/>: that is a hard ceiling on how many objects the pool
+    /// ever holds, and it constrains <c>Acquire</c>; this one constrains <c>Release</c> and can only
+    /// ever shrink the retained set. A pool with a soft capacity below its hard ceiling therefore still
+    /// lends out the full ceiling — it just keeps fewer objects back.<br />
+    /// The ceiling is <i>soft</i>: the check is a read of the idle count followed by the store, so two
+    /// returns racing for the last slot may both be retained. It is a memory-shape control, not a
+    /// mutual-exclusion guarantee.<br />
+    /// Trade-off: objects dropped on return are disposed and must be created again if the next burst
+    /// needs them, so this lowers the hit rate for a spiky workload. Raising the ceiling is the wrong
+    /// fix when the burst is the normal case; it is the right one when the pool's retained memory is
+    /// what has to be bounded.<br />
+    /// Boundary: <c>0</c> (disabled) or a value between <see cref="MinPoolSize"/> and
+    /// <see cref="MaxPoolSize"/>; a ceiling below the floor would make the floor unreachable, and one
+    /// above the hard ceiling could never fire, so both are rejected rather than accepted and ignored.<br />
+    /// The lean fast path honours it by capping the slots it fills on return, and the unbounded model
+    /// does not read it — that model's retained set is bounded by its own
+    /// <c>HayateUnboundedPool&lt;T&gt;.MaxIdle</c>, which already drops a return once the queue is full.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// // Retain at most 8 idle objects out of a 64-object ceiling.
+    /// var pool = new HayatePoolBuilder&lt;MyBuffer&gt;()
+    ///     .WithMaxSize(64)
+    ///     .WithSoftCapacity(8)
+    ///     .Build();
+    /// </code>
+    /// </example>
+    public int SoftCapacity { get; set; }
+
     #region Timeouts
 
     /// <summary>
@@ -1042,6 +1080,7 @@ public class HayatePoolOptions
         // Basic pool size
         options.MinPoolSize = this.MinPoolSize;
         options.MaxPoolSize = this.MaxPoolSize;
+        options.SoftCapacity = this.SoftCapacity;
 
         // Timeout
         options.DefaultAcquireTimeout = this.DefaultAcquireTimeout;
@@ -1343,6 +1382,13 @@ public class HayatePoolOptions
         if (ShardCount < 1 || ShardCount > 32) return false;
         if (CreationRetryCount < 0) return false;
         if (DefaultAcquireTimeout <= TimeSpan.Zero) return false;
+
+        // Soft capacity (T-R): 0 disables the ceiling. A live one has to sit inside the pool's own
+        // bounds — below the floor the pool could not hold the minimum it promises, and above the hard
+        // ceiling the check could never fire — so both are rejected rather than accepted as a knob that
+        // silently does nothing.
+        if (SoftCapacity < 0) return false;
+        if (SoftCapacity > 0 && (SoftCapacity < MinPoolSize || SoftCapacity > MaxPoolSize)) return false;
 
         // Checks when auto-scaling is enabled
         if (EnableAutoScaling)

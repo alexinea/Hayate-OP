@@ -37,6 +37,33 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// <summary>Total number of live objects (idle + borrowed), derived by summing each shard's registry.</summary>
     private int TrackedObjectCount => _shards.Sum(s => s.TrackedCount);
 
+    // T-R: the return-path soft ceiling, snapshotted at construction. 0 (the default) means the pool
+    // retains up to MaxPoolSize idle objects, exactly as it did before the switch existed; the branch
+    // that reads it is then a constant test on a readonly field and folds away.
+    private readonly int _softCapacity;
+
+    /// <summary>
+    /// The number of idle objects the pool currently holds across every shard. Diagnostic and
+    /// soft-capacity use: the per-shard free lists are the only place an idle object lives (a borrowed
+    /// object is physically unlinked by <c>TryTake</c>), so this is the retained set the return path
+    /// compares against <see cref="HayatePoolOptions.SoftCapacity"/>.
+    /// </summary>
+    /// <remarks>
+    /// Written as an indexed loop rather than <c>_shards.Sum(...)</c> so the soft-capacity check costs
+    /// no allocation: the enumerable form would box the array's enumerator on every return.
+    /// </remarks>
+    private int IdleObjectCount()
+    {
+        var total = 0;
+        var shards = _shards;
+        for (var i = 0; i < shards.Length; i++)
+        {
+            total += shards[i].Count;
+        }
+
+        return total;
+    }
+
     /// <summary>
     /// Removes the registry entry from the wrapper's owning shard; if ShardIndex is invalid, falls back to a full-shard scan (theoretically unreachable,
     /// since the entry is written to the target shard and its ShardIndex synced in CreateWrappedObject).
@@ -268,6 +295,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _enableDiagnostics = _options.EnableDiagnostics;
         _enableMetrics = _options.EnableMetrics;
 
+        // T-R: the return-path soft ceiling (0 = disabled). Snapshotted here so the return path reads a
+        // readonly field; IsValid has already rejected a ceiling outside [MinPoolSize, MaxPoolSize].
+        _softCapacity = _options.SoftCapacity;
+
         // Abandoned recovery (K2) — feature-switch snapshot (lean normalization has already forced both
         // toggles off in lean mode, so the engine pool is the only host).
         _removeAbandonedOnBorrow = _options.RemoveAbandonedOnBorrow;
@@ -322,6 +353,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _apSlotLimit = 0;
         _apSlots = Array.Empty<T>();
 #endif
+
+        // T-R: express the soft capacity as a slot-scan limit for the lean buffer (see
+        // HayateObjectPool.Lean.cs). Zero (the default) leaves -1, "no soft ceiling", so the lean
+        // borrow/return paths keep their existing shape.
+        _leanReturnSlotLimit = _leanRetentionEnabled && _options.SoftCapacity > 0
+            ? _options.SoftCapacity - 1
+            : -1;
 
         _waitForWarmup = _options.WaitForWarmup;
         _enableAllocationTracking = _options.EnableAllocationTracking;
@@ -1192,6 +1230,33 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 UpdateLeaseTimeStats(w.LeaseTimeMs);
                 Interlocked.Increment(ref _totalReleased);
                 _metrics.RecordObjectReleased(_name, item, true);
+            }
+
+            #endregion
+
+            #region Soft-capacity drop (T-R, off by default → constant branch, JIT-eliminable)
+
+            // The soft ceiling is enforced on the return path only, and only as a read of the idle count
+            // followed by the store: two returns that both observe room may both be retained, which is
+            // what makes the ceiling soft. A dropped object goes through the same single destroy path the
+            // shard-overflow branch below uses, so the policy's OnDestroy hook fires and the registry
+            // entry is removed. It is a normal steady-state outcome, not an error, so it is traced rather
+            // than warned — a warning here would fire once per return through a burst drain.
+            if (_softCapacity > 0)
+            {
+                var idle = IdleObjectCount();
+                if (idle >= _softCapacity)
+                {
+                    if (_enableDiagnostics)
+                    {
+                        _logger.LogDebug(
+                            "Object dropped on return: soft capacity reached. Type: {Type}, idle: {Idle}, soft capacity: {SoftCapacity}",
+                            typeof(T).Name, idle, _softCapacity);
+                    }
+
+                    Destroy(w);
+                    return;
+                }
             }
 
             #endregion
@@ -2529,6 +2594,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         {
             var previousMaxPoolSize = _options.MaxPoolSize;
             var previousLease = _options.EnableLean;
+            var previousSoftCapacity = _options.SoftCapacity;
 
             configure(_options);
             _options.ApplyFeatureSwitches(); // Force-correct the configuration
@@ -2551,6 +2617,17 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     throw new InvalidOperationException(
                         $"HayatePool [{_name}] uses the lean fast path and cannot switch back to the general-purpose engine at runtime. Rebuild the pool instead.");
                 }
+            }
+
+            // T-R: the soft ceiling is read by the return path from a constructor-time snapshot and, in
+            // lean mode, fixes the buffer's slot-scan limit when the pool is built. A reload could
+            // therefore change the option without changing the pool's behaviour, so it is rejected with
+            // the original value restored rather than accepted and ignored.
+            if (_options.SoftCapacity != previousSoftCapacity)
+            {
+                _options.SoftCapacity = previousSoftCapacity;
+                throw new InvalidOperationException(
+                    $"HayatePool [{_name}] cannot change SoftCapacity at runtime: the ceiling is applied by the return path from a value fixed when the pool was built (in lean mode it also fixes the buffer's slot limit). Rebuild the pool to change it.");
             }
 
             _logger.LogInformation("Pool configuration reloaded. Type: {Type} NewConfig: {@Config}", typeof(T).Name, _options);
