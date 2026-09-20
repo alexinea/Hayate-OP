@@ -10,6 +10,21 @@ Breaking changes are described in full — with migration guidance — in
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-09-20
+
+Pool-model expansion and specialization release, no breaking API change. Highlights: a
+second pool model with lease-is-ownership semantics (`HayateUnboundedPool<T>`, N1), an
+asynchronous preparation / reconnect decorator (`HayatePreparationPool<T>`, N3), the
+ArrayPool direct-storage backend for the lean fast path (O-D), abandoned-object recovery
+(K2), named pools with typed clients and a run-time pool factory (N4), the diagnostics
+master switch (O11), a core `System.Diagnostics.Metrics` meter (N6), eight configuration
+presets (C6), explicit borrow order and a pluggable eviction rule (O8 / O7), process-wide
+shared pools (O-C), on-demand pre-warming (O-F), return-path soft capacity (T-R), the
+bucketed buffer pool package (O-H), the `Deterministic` preset (O-G) and the
+string-building specialization surface (Z1 / Z4a / Z5 / Z6 / Z-C-A). The asynchronous
+preparation borrows now await the inner pool and honour the timeout (A4), and the
+performance gate was promoted to a blocking, allocation-aware compare (Q1).
+
 ### Added
 
 - **Deterministic preset** (O-G): `HayatePoolPreset.Deterministic` — the preset for hosts where nothing
@@ -773,7 +788,8 @@ No breaking change beyond the lease-context rework listed below.
 
 Initial release.
 
-[Unreleased]: https://github.com/alexinea/object-pool/compare/v2.7...HEAD
+[Unreleased]: https://github.com/alexinea/object-pool/compare/v2.8...HEAD
+[2.8.0]: https://github.com/alexinea/object-pool/compare/v2.7...v2.8
 [2.7.0]: https://github.com/alexinea/object-pool/compare/v2.6...v2.7
 [2.6.0]: https://github.com/alexinea/object-pool/compare/v2.5...v2.6
 [2.5.0]: https://github.com/alexinea/object-pool/compare/v2.4...v2.5

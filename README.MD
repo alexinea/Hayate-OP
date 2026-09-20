@@ -23,7 +23,7 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 - **Health Checks**: ASP.NET Core health check integration to monitor pool status in production.
 - **Diagnostics**: `System.Diagnostics` bridge for advanced performance monitoring and telemetry.
 - **Configuration Binding**: Load pool settings from `appsettings.json` (global + per-pool).
-- **Cross-Version Compatibility**: Supports .NET Framework 4.8 (core, ObjectPoolCompat, DependencyInjection and Specialized packages) and .NET 6/7/8/9/10 (all packages).
+- **Cross-Version Compatibility**: Supports .NET Framework 4.8 (core, ObjectPoolCompat, DependencyInjection, Specialized and Buffers packages) and .NET 6/7/8/9/10 (all packages).
 
 Release notes live in [`CHANGELOG.md`](CHANGELOG.md); breaking changes and behavioural notes are
 documented in [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md).

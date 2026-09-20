@@ -4,6 +4,32 @@ Migration guidance for every breaking change, newest first, plus the behavioural
 frequently surprise adopters. For a per-version summary of all changes see
 [`../CHANGELOG.md`](../CHANGELOG.md).
 
+## 2.8 — Pool-model expansion and specialization (no breaking API change)
+
+2.8's additions — the unbounded pool model (`HayateUnboundedPool<T>`), the asynchronous
+preparation / reconnect decorator (`IHayatePreparationStrategy<T>` / `HayatePreparationPool<T>`),
+the ArrayPool direct-storage backend (`WithArrayPoolStorage()`), abandoned-object recovery
+(`RemoveAbandonedOnBorrow` / `RemoveAbandonedOnMaintenance`), named pools and the run-time pool
+factory (`HayateServiceKey` / `IHayatePoolFactory`), the diagnostics master switch
+(`EnableDiagnostics`), the core `System.Diagnostics.Metrics` meter, the configuration presets
+(`HayatePoolPreset`), the borrow-order and eviction-policy switches (`HayateBorrowStrategy` /
+`IHayateEvictionPolicy<T>`), shared pools (`HayatePool.Shared<T>()`), on-demand pre-warming
+(`PreWarm`), return-path soft capacity (`SoftCapacity`), the bucketed buffer pool package
+(`DotNetCore.HayateOP.Extensions.Buffers`), the `Deterministic` preset and the specialized
+string-building surface (Z1 / Z4a / Z5 / Z6 / Z-C-A) — are purely additive: new types, new
+members, new options and new packages only, with no change to any existing member's signature.
+
+One behavioural fix is worth calling out: `HayatePreparationPool<T>`'s asynchronous borrows (A4)
+previously blocked a thread pool thread for the whole inner acquire timeout and silently dropped
+the `timeout` argument. They now await the inner pool's own asynchronous borrow and forward the
+timeout, so an exhausted pool suspends instead of occupying a thread. No signature changed; a
+caller that depended on the buggy behaviour (there is no supported way to do so) would observe
+the documented asynchronous semantics instead.
+
+Two CI-side changes do not affect library consumers: the performance gate is now allocation-aware
+and routes blocking/advisory from the baseline's `calibration` flag (Q1), and each TFM's XML
+documentation asset now carries exactly that TFM's API surface instead of whatever TFM built last.
+
 ## 2.7 — Nullable reference type annotations (non-breaking)
 
 2.7's other additions — scoped borrows (`AcquireScoped` / `AcquireScopeAsync`), the
