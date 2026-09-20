@@ -1,0 +1,204 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>DotNetCore.HayateOP.Extensions.Buffers</name>
+    </assembly>
+    <members>
+        <member name="T:DotNetCore.HayateOP.Buffers.HayateBufferPool`1">
+             <summary>
+             A bucketed array pool: a fixed ladder of size buckets, where each rent request routes — rounded up
+             to the nearest bucket — to the smallest bucket whose arrays can hold it, and a returned array parks
+             in its home bucket until the bucket's capacity is full.
+             </summary>
+             <remarks>
+             Scope note: this is the one piece of surface the core pool deliberately does not carry, because for
+             most .NET workloads <c>System.Buffers.ArrayPool&lt;T&gt;</c> already covers it. This pool exists for
+             callers who want that shape under an explicit, inspectable configuration — the bucket ladder is
+             declared up front, every bucket's retained count is fixed by declaration, and nothing sizes or
+             trims buckets behind the caller's back. It is the aligned counterpart of TinyPools'
+             <c>MemoryPool&lt;T&gt;</c> + <c>SegmentDefinition</c>, under HayateOP naming and validation
+             conventions.<br />
+             Routing is "round up to the nearest declared size": a request is served by the first bucket whose
+             <see cref="P:DotNetCore.HayateOP.Buffers.HayateSegmentDefinition.ArraySize"/> covers it, so the caller receives an array at least
+             as long as requested and never has to grow. A request above the largest declared size is rejected
+             with <see cref="T:System.ArgumentException"/> rather than served by an undeclared bucket — the ladder is
+             exactly what was configured, nothing more.<br />
+             Buckets create arrays on demand and cap only what they <i>retain</i>: any number of buffers may be
+             outstanding at once, and returns past a bucket's <see cref="P:DotNetCore.HayateOP.Buffers.HayateSegmentDefinition.Capacity"/> are
+             dropped for the garbage collector. There is no background worker of any kind — an idle pool holds
+             its declared buckets and runs nothing.<br />
+             The pool is thread-safe: each bucket guards its parking stack with its own lock, so different
+             bucket sizes do not contend.
+             </remarks>
+             <example>
+             <code>
+             using var pool = new HayateBufferPool&lt;byte&gt;(
+                 new HayateSegmentDefinition(256, 4),
+                 new HayateSegmentDefinition(1024, 2),
+                 new HayateSegmentDefinition(4096, 1));
+            
+             using (PooledBuffer&lt;byte&gt; buffer = pool.Rent(300))   // routes to the 1024 bucket
+             {
+                 // buffer.Array.Length == 1024 — round up, never grow
+             }
+             </code>
+             </example>
+             <typeparam name="T">The element type of the pooled arrays.</typeparam>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Buffers.HayateBufferPool`1._buckets">
+            <summary>The buckets in ascending <see cref="P:DotNetCore.HayateOP.Buffers.HayateSegmentDefinition.ArraySize"/> order.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Buffers.HayateBufferPool`1.#ctor(DotNetCore.HayateOP.Buffers.HayateSegmentDefinition,DotNetCore.HayateOP.Buffers.HayateSegmentDefinition[])">
+            <summary>
+            Creates the pool from one required bucket plus any number of additional ones. The buckets are
+            stored in ascending size order whatever order the arguments arrive in; the routing then always
+            picks the smallest bucket that covers a request.
+            </summary>
+            <param name="segment">The first bucket. Required, so a pool with no buckets cannot be built.</param>
+            <param name="otherSegments">Further buckets, in any order.</param>
+            <exception cref="T:System.ArgumentNullException"><paramref name="segment"/> is <see langword="null"/>.</exception>
+            <exception cref="T:System.ArgumentException">Two buckets declare the same
+            <see cref="P:DotNetCore.HayateOP.Buffers.HayateSegmentDefinition.ArraySize"/> — the duplicate could never win a route and would
+            silently split one size's retention across two buckets.</exception>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Buffers.HayateBufferPool`1.Segments">
+            <summary>
+            The buckets the pool was built from, in ascending size order — the declared ladder, exposed so
+            diagnostics and tests can see the configuration without reaching into internals.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Buffers.HayateBufferPool`1.MaxArraySize">
+            <summary>The largest declared bucket size. Requests above it are rejected, not served undeclared.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Buffers.HayateBufferPool`1.Rent(System.Int64)">
+            <summary>
+            Rents an array of at least <paramref name="size"/> elements, routing to the first bucket whose
+            fixed size covers the request.
+            </summary>
+            <param name="size">The minimum number of elements the caller needs.</param>
+            <returns>A handle whose <see cref="P:DotNetCore.HayateOP.Buffers.PooledBuffer`1.Array"/> is exactly the bucket's size — at
+            least <paramref name="size"/>, never grown afterwards. Return it with
+            <see cref="M:DotNetCore.HayateOP.Buffers.PooledBuffer`1.Dispose"/> (or <see cref="M:DotNetCore.HayateOP.Buffers.HayateBufferPool`1.Return(DotNetCore.HayateOP.Buffers.PooledBuffer{`0})"/>).</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="size"/> is not greater than zero.</exception>
+            <exception cref="T:System.ArgumentException"><paramref name="size"/> is greater than
+            <see cref="P:DotNetCore.HayateOP.Buffers.HayateBufferPool`1.MaxArraySize"/> — no declared bucket can serve it.</exception>
+            <exception cref="T:System.ObjectDisposedException">The pool has been disposed.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Buffers.HayateBufferPool`1.Return(DotNetCore.HayateOP.Buffers.PooledBuffer{`0})">
+            <summary>
+            Returns a buffer previously rented from this pool. Synonym of disposing the handle; the two are
+            interchangeable, and whichever comes second is a no-op.
+            </summary>
+            <param name="buffer">The buffer to return. A <see langword="null"/> argument is ignored, so a
+            caller with a nullable buffer in a <c>finally</c> block needs no guard.</param>
+            <exception cref="T:System.ArgumentException"><paramref name="buffer"/> was rented from a different
+            pool — returning it here would park it in a bucket whose size it does not have.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Buffers.HayateBufferPool`1.Clear">
+            <summary>
+            Empties every bucket, dropping all parked arrays. Outstanding buffers keep working: a buffer
+            returned after a clear parks again (or drops, per the bucket's capacity), it is not invalidated.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Buffers.HayateBufferPool`1.Dispose">
+            <summary>
+            Disposes the pool and drops every parked array. Further rents fail with
+            <see cref="T:System.ObjectDisposedException"/>; outstanding buffers still return, but their arrays are
+            dropped rather than parked, because nothing will rent them again.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Buffers.HayateBufferPool`1.Route(System.Int64)">
+            <summary>Finds the first bucket whose size covers <paramref name="size"/>, if any.</summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Buffers.HayateBufferPool`1.Bucket">
+            <summary>
+            One declared size's storage: a locked stack of parked arrays, created on demand when it runs
+            dry, capped at the definition's capacity on the return side.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Buffers.HayateBufferPool`1.Bucket.Rent">
+            <summary>Takes an array from the stack, or creates a fresh one when the bucket is empty.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Buffers.HayateBufferPool`1.Bucket.Return(`0[])">
+            <summary>
+            Parks a returned array, or drops it when the bucket is full (or disposed) — the capacity
+            constraint lives here and nowhere else.
+            </summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Buffers.HayateSegmentDefinition">
+            <summary>
+            Declares one bucket of a <see cref="T:DotNetCore.HayateOP.Buffers.HayateBufferPool`1"/>: every array the bucket parks has
+            exactly <see cref="P:DotNetCore.HayateOP.Buffers.HayateSegmentDefinition.ArraySize"/> elements, and the bucket keeps at most <see cref="P:DotNetCore.HayateOP.Buffers.HayateSegmentDefinition.Capacity"/> of
+            them after they are returned.
+            </summary>
+            <remarks>
+            The definition is a plain declarative record — the pool itself validates, orders and owns the
+            buckets. Arrays are created on demand when a bucket runs dry, so the capacity bounds only the
+            <i>retained</i> set: a burst may have any number of buffers outstanding at once, and the buffers it
+            returns past the bucket's capacity are dropped for the garbage collector instead of parked.
+            </remarks>
+            <example>
+            <code>
+            var pool = new HayateBufferPool&lt;byte&gt;(
+                new HayateSegmentDefinition(700),
+                new HayateSegmentDefinition(1400, 2),
+                new HayateSegmentDefinition(2000, 2));
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Buffers.HayateSegmentDefinition.#ctor(System.Int64,System.Int32)">
+            <summary>
+            Creates the definition of one bucket: fixed-size arrays of <paramref name="arraySize"/> elements,
+            up to <paramref name="capacity"/> of them retained after return.
+            </summary>
+            <param name="arraySize">The exact element count of every array this bucket holds; it is also the
+            largest request size the bucket serves (requests above it route to a bigger bucket).</param>
+            <param name="capacity">How many returned arrays the bucket keeps before it starts dropping them.
+            Defaults to 1 — the conservative choice, because a buffer's retained memory is what a bucketed
+            pool is asked to bound.</param>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="arraySize"/> is not greater than
+            zero, or <paramref name="capacity"/> is not greater than zero.</exception>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Buffers.HayateSegmentDefinition.ArraySize">
+            <summary>The exact element count of every array this bucket holds.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Buffers.HayateSegmentDefinition.Capacity">
+            <summary>How many returned arrays the bucket retains before it drops the excess.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Buffers.HayateSegmentDefinition.ToString">
+            <inheritdoc />
+        </member>
+        <member name="T:DotNetCore.HayateOP.Buffers.PooledBuffer`1">
+            <summary>
+            A buffer rented from a <see cref="T:DotNetCore.HayateOP.Buffers.HayateBufferPool`1"/>: a <typeparamref name="T"/> array whose
+            length is the renting bucket's fixed size, handed back to its bucket by <see cref="M:DotNetCore.HayateOP.Buffers.PooledBuffer`1.Dispose"/>.
+            </summary>
+            <remarks>
+            The handle exists so the <c>using</c> pattern returns the buffer — the pool never takes a bare
+            array back, because it could not tell which bucket a caller-modified array belongs to. A handle is
+            single-use: disposing it twice, or returning it through the pool after disposing, is a no-op, so a
+            <c>using</c> block and a manual <c>Return</c> never fight over the same buffer.<br />
+            The array's previous contents are <b>not</b> cleared on return — the same contract
+            <c>ArrayPool&lt;T&gt;.Shared</c> has. Inspect only the elements you wrote, or clear the buffer
+            yourself if the next reader could otherwise observe stale data.
+            </remarks>
+            <typeparam name="T">The element type of the pooled array.</typeparam>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Buffers.PooledBuffer`1.Array">
+            <summary>The pooled array. Its length never changes while the handle is held.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Buffers.PooledBuffer`1.Length">
+            <summary>The number of elements in <see cref="P:DotNetCore.HayateOP.Buffers.PooledBuffer`1.Array"/> — the renting bucket's fixed size.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Buffers.PooledBuffer`1.Dispose">
+            <summary>
+            Returns the buffer to the bucket it came from. Idempotent: a second call (or a return through
+            the pool afterwards) does nothing and throws nothing.
+            </summary>
+            <remarks>
+            The bucket decides between parking and dropping: inside its capacity the array is parked for
+            the next rent of the same size, past it the array is simply released to the garbage collector.
+            </remarks>
+        </member>
+    </members>
+</doc>
