@@ -8,13 +8,18 @@ using DotNetCore.HayateOP.Scaling;
 namespace DotNetCore.HayateOP;
 
 /// <summary>
-/// Entry points that need no configuration object: one call builds a ready-to-use pool.
+/// Entry points that need no configuration object: one call produces a ready-to-use pool — a fresh one
+/// with <see cref="Simple{T}"/>, or the process-wide shared one with <see cref="Shared{T}()"/>.
 /// </summary>
 /// <remarks>
 /// Everything here is a thin layer over <see cref="HayatePoolBuilder{T}"/> — the resulting pool is an
 /// ordinary <see cref="IHayateObjectPool{T}"/>, with the same lifecycle, diagnostics and run-time
 /// reconfiguration surface. When a preset runs out of room, drop down to the builder: nothing the presets
-/// set is hidden afterwards.
+/// set is hidden afterwards.<br />
+/// The two families differ in who owns the pool: <see cref="Simple{T}"/> hands back a pool the caller
+/// owns and disposes, while <see cref="Shared{T}()"/> hands back the one pool
+/// <see cref="HayateSharedPoolRegistry.Default"/> keeps for that element type, which the caller must
+/// leave alone.
 /// </remarks>
 /// <example>
 /// <code>
@@ -82,4 +87,58 @@ public static class HayatePool
             new DefaultHayateLogger(),
             string.IsNullOrWhiteSpace(poolName) ? typeof(T).Name : poolName!);
     }
+
+    /// <summary>
+    /// Returns the process-wide shared pool for <typeparamref name="T"/>, creating it on first use.
+    /// </summary>
+    /// <typeparam name="T">The pooled object type; objects are created with its public parameterless
+    /// constructor.</typeparam>
+    /// <returns>The shared pool — the same instance on every call, from anywhere in the
+    /// process.</returns>
+    /// <exception cref="InvalidOperationException">The pool could not be built.</exception>
+    /// <remarks>
+    /// Use this when the application needs <i>a</i> pool for a type and does not care who owns it:
+    /// every caller gets the same pool, so one type has one pool rather than one per call site.
+    /// The pool is an ordinary <see cref="IHayateObjectPool{T}"/> built with the default configuration
+    /// (sharding, validation, eviction, auto-scaling and leak detection on) and starts empty, so the
+    /// first borrow pays the creation cost once.<br />
+    /// The shared pool is owned by <see cref="HayateSharedPoolRegistry.Default"/> — do <b>not</b>
+    /// dispose it, and do not wrap it in <c>using</c>; the pool outlives the call. Tear it down through
+    /// the catalog when the process shuts down, or in a test that needs a clean slate. Use the
+    /// overload taking a configuration callback to set the pool's shape, and
+    /// <see cref="HayatePoolBuilder{T}"/> when the pool is not meant to be shared at all.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var pool = HayatePool.Shared&lt;MyBuffer&gt;();
+    /// using var lease = pool.AcquireScoped();
+    /// lease.Value.Write(payload);
+    /// </code>
+    /// </example>
+    public static IHayateObjectPool<T> Shared<T>() where T : class, new()
+        => HayateSharedPoolRegistry.Default.GetOrCreate<T>();
+
+    /// <summary>
+    /// Returns the process-wide shared pool for <typeparamref name="T"/>, creating and configuring it
+    /// on first use.
+    /// </summary>
+    /// <typeparam name="T">The pooled object type.</typeparam>
+    /// <param name="configure">Applied to the pool's options while it is built.</param>
+    /// <returns>The shared pool — the same instance on every call.</returns>
+    /// <exception cref="InvalidOperationException">The pool could not be built.</exception>
+    /// <remarks>
+    /// <paramref name="configure"/> only takes effect on the call that creates the pool; once the pool
+    /// exists, later calls return it and ignore their callback (see
+    /// <see cref="HayateSharedPoolRegistry.GetOrCreate{T}(Action{HayatePoolOptions})"/>). Configure the
+    /// shared pool once, at start-up, or use
+    /// <see cref="HayateSharedPoolRegistry.GetOrCreateNamed{T}(string, Action{HayatePoolOptions})"/> with
+    /// a distinct name for a second, differently configured shared pool of the same type.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var pool = HayatePool.Shared&lt;MyBuffer&gt;(o =&gt; { o.MaxPoolSize = 4096; o.MinPoolSize = 64; });
+    /// </code>
+    /// </example>
+    public static IHayateObjectPool<T> Shared<T>(Action<HayatePoolOptions>? configure) where T : class, new()
+        => HayateSharedPoolRegistry.Default.GetOrCreate<T>(configure);
 }

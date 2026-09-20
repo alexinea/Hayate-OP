@@ -1463,13 +1463,18 @@
         </member>
         <member name="T:DotNetCore.HayateOP.HayatePool">
             <summary>
-            Entry points that need no configuration object: one call builds a ready-to-use pool.
+            Entry points that need no configuration object: one call produces a ready-to-use pool — a fresh one
+            with <see cref="M:DotNetCore.HayateOP.HayatePool.Simple``1(System.Int32,System.Func{``0},System.Action{``0},System.String)"/>, or the process-wide shared one with <see cref="M:DotNetCore.HayateOP.HayatePool.Shared``1"/>.
             </summary>
             <remarks>
             Everything here is a thin layer over <see cref="T:DotNetCore.HayateOP.HayatePoolBuilder`1"/> — the resulting pool is an
             ordinary <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/>, with the same lifecycle, diagnostics and run-time
             reconfiguration surface. When a preset runs out of room, drop down to the builder: nothing the presets
-            set is hidden afterwards.
+            set is hidden afterwards.<br />
+            The two families differ in who owns the pool: <see cref="M:DotNetCore.HayateOP.HayatePool.Simple``1(System.Int32,System.Func{``0},System.Action{``0},System.String)"/> hands back a pool the caller
+            owns and disposes, while <see cref="M:DotNetCore.HayateOP.HayatePool.Shared``1"/> hands back the one pool
+            <see cref="P:DotNetCore.HayateOP.HayateSharedPoolRegistry.Default"/> keeps for that element type, which the caller must
+            leave alone.
             </remarks>
             <example>
             <code>
@@ -1507,6 +1512,58 @@
             <code>
             using var pool = HayatePool.Simple&lt;MyResource&gt;(32, () =&gt; new MyResource());
             using var connections = HayatePool.Simple&lt;Connection&gt;(8, () =&gt; new Connection(cs), c =&gt; c.Open());
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePool.Shared``1">
+            <summary>
+            Returns the process-wide shared pool for <typeparamref name="T"/>, creating it on first use.
+            </summary>
+            <typeparam name="T">The pooled object type; objects are created with its public parameterless
+            constructor.</typeparam>
+            <returns>The shared pool — the same instance on every call, from anywhere in the
+            process.</returns>
+            <exception cref="T:System.InvalidOperationException">The pool could not be built.</exception>
+            <remarks>
+            Use this when the application needs <i>a</i> pool for a type and does not care who owns it:
+            every caller gets the same pool, so one type has one pool rather than one per call site.
+            The pool is an ordinary <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/> built with the default configuration
+            (sharding, validation, eviction, auto-scaling and leak detection on) and starts empty, so the
+            first borrow pays the creation cost once.<br />
+            The shared pool is owned by <see cref="P:DotNetCore.HayateOP.HayateSharedPoolRegistry.Default"/> — do <b>not</b>
+            dispose it, and do not wrap it in <c>using</c>; the pool outlives the call. Tear it down through
+            the catalog when the process shuts down, or in a test that needs a clean slate. Use the
+            overload taking a configuration callback to set the pool's shape, and
+            <see cref="T:DotNetCore.HayateOP.HayatePoolBuilder`1"/> when the pool is not meant to be shared at all.
+            </remarks>
+            <example>
+            <code>
+            var pool = HayatePool.Shared&lt;MyBuffer&gt;();
+            using var lease = pool.AcquireScoped();
+            lease.Value.Write(payload);
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePool.Shared``1(System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <summary>
+            Returns the process-wide shared pool for <typeparamref name="T"/>, creating and configuring it
+            on first use.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="configure">Applied to the pool's options while it is built.</param>
+            <returns>The shared pool — the same instance on every call.</returns>
+            <exception cref="T:System.InvalidOperationException">The pool could not be built.</exception>
+            <remarks>
+            <paramref name="configure"/> only takes effect on the call that creates the pool; once the pool
+            exists, later calls return it and ignore their callback (see
+            <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.GetOrCreate``1(System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/>). Configure the
+            shared pool once, at start-up, or use
+            <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.GetOrCreateNamed``1(System.String,System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/> with
+            a distinct name for a second, differently configured shared pool of the same type.
+            </remarks>
+            <example>
+            <code>
+            var pool = HayatePool.Shared&lt;MyBuffer&gt;(o =&gt; { o.MaxPoolSize = 4096; o.MinPoolSize = 64; });
             </code>
             </example>
         </member>
@@ -4816,6 +4873,240 @@
             Custom delegate: the starting shard is decided by <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.CustomShardAffinity"/>.
             When the delegate returns null or an out-of-range value, the borrow falls back to sequential scanning (it does not throw, preserving borrow-path robustness).
             </summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.HayateSharedPoolRegistry">
+             <summary>
+             A catalog of process-wide shared pools, one per element type by default, so an application can
+             pool a type once and hand the same instance to every caller that needs it.
+             </summary>
+             <remarks>
+             This is the "just give me a pool" entry point: where <see cref="M:DotNetCore.HayateOP.HayatePool.Simple``1(System.Int32,System.Func{``0},System.Action{``0},System.String)"/> builds a
+             new pool every time it is called, <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.GetOrCreate``1"/> returns <i>the</i> pool for the
+             element type, building it on first use and returning the same instance afterwards. Pools are
+             addressed through the same <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/> the rest of the library uses —
+             the catalog is a thin layer over that skeleton, not a second registry — so shared pools show up in
+             the management enumeration alongside named and DI-created pools when the catalog is given the
+             application's registry.
+             <para>
+             A shared pool is not a weaker pool: it is an ordinary <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/> with the
+             full configuration surface, and the <c>configure</c> callback on the create overloads is how its
+             capacity, eviction and timeouts are set. Because creation happens once, only the call that creates
+             the pool can configure it; a later call returns the existing instance and ignores its callback.
+             Use <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.TryGet``1(DotNetCore.HayateOP.IHayateObjectPool{``0}@)"/> first when the configuration matters.
+             </para>
+             <para>
+             <b>Ownership</b>: the catalog owns every pool it creates, so <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.Remove``1(System.String)"/>,
+             <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.Clear"/> and <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.Dispose"/> dispose the pool — unlike
+             <see cref="M:DotNetCore.HayateOP.IHayateObjectPoolRegistry.Remove(System.String)"/>, which only unregisters and leaves the lifetime to
+             the registrar. Pools that were already in an injected registry when the catalog was constructed
+             are never touched by <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.Clear"/> or <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.Dispose"/>: the catalog only releases what
+             it created itself.
+             </para>
+             <para>
+             <b>Lifetime</b>: <see cref="P:DotNetCore.HayateOP.HayateSharedPoolRegistry.Default"/> lives for the process, which is what makes a shared pool
+             shared. That also means a caller must not dispose the pool it got back — the catalog, not the
+             borrower, decides when the pool goes away. Dispose the catalog itself at shutdown, or remove the
+             individual entries, when the pools must be torn down.
+             </para>
+             </remarks>
+             <example>
+             <code>
+             // Anywhere in the application, the same instance comes back:
+             var pool = HayatePool.Shared&lt;MyBuffer&gt;();
+             using var lease = pool.AcquireScoped();
+             lease.Value.Write(payload);
+            
+             // Set the shared pool up once, at start-up, when the shape is known:
+             var configured = HayatePool.Shared&lt;MyBuffer&gt;(o =&gt; o.MaxPoolSize = 4096);
+             </code>
+             </example>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateSharedPoolRegistry.DefaultSharedName">
+            <summary>
+            The logical name a shared pool is registered under when the caller does not supply one, so
+            <c>GetOrCreate&lt;T&gt;()</c> and <c>GetOrCreate&lt;T&gt;("shared")</c> address the same pool.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.#ctor">
+            <summary>
+            Creates a catalog with its own private registry.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.#ctor(DotNetCore.HayateOP.IHayateObjectPoolRegistry)">
+            <summary>
+            Creates a catalog that registers the pools it builds into <paramref name="registry"/>.
+            </summary>
+            <param name="registry">Where the shared pools are registered, so management endpoints, metrics
+            and diagnostics find them next to the application's other pools. The catalog still only ever
+            disposes the pools it created itself.</param>
+            <exception cref="T:System.ArgumentNullException"><paramref name="registry"/> is <c>null</c>.</exception>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateSharedPoolRegistry.Default">
+            <summary>
+            The process-wide catalog behind <see cref="M:DotNetCore.HayateOP.HayatePool.Shared``1"/>.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateSharedPoolRegistry.Registry">
+            <summary>
+            The <see cref="T:DotNetCore.HayateOP.IHayateObjectPoolRegistry"/> holding the shared pools, for enumeration and name
+            based removal. <see cref="M:DotNetCore.HayateOP.IHayateObjectPoolRegistry.GetAll"/> lists the entries with their
+            metadata, exactly as it does for any other registered pool.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayateSharedPoolRegistry.Count">
+            <summary>The number of shared pools currently held by this catalog.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.GetOrCreate``1">
+            <summary>
+            Resolves the shared pool for <typeparamref name="T"/> under
+            <see cref="F:DotNetCore.HayateOP.HayateSharedPoolRegistry.DefaultSharedName"/>, creating it on first use.
+            </summary>
+            <typeparam name="T">The pooled object type; must have a public parameterless constructor,
+            which is how the shared factory creates objects.</typeparam>
+            <returns>The shared pool, the same instance on every call.</returns>
+            <exception cref="T:System.ObjectDisposedException">The catalog has been disposed.</exception>
+            <exception cref="T:System.InvalidOperationException">The pool could not be built — see
+            <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.Build"/>.</exception>
+            <remarks>
+            The pool is built with the library's default configuration (sharding, validation, eviction,
+            auto-scaling and leak detection on) and has created nothing yet, so the first borrow pays the
+            object-creation cost once. Use the overload taking a configuration callback, or
+            <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.GetOrCreateNamed``1(System.String,System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/> for several pools per type,
+            when the default shape is not the right one.
+            </remarks>
+            <example>
+            <code>
+            var pool = HayatePool.Shared&lt;MyBuffer&gt;();
+            using var lease = pool.AcquireScoped();
+            lease.Value.Write(payload);
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.GetOrCreate``1(System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <summary>
+            Resolves the shared pool for <typeparamref name="T"/> under
+            <see cref="F:DotNetCore.HayateOP.HayateSharedPoolRegistry.DefaultSharedName"/>, creating and configuring it on first use.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="configure">Applied to the pool's options while it is built.</param>
+            <returns>The shared pool, the same instance on every call.</returns>
+            <exception cref="T:System.ObjectDisposedException">The catalog has been disposed.</exception>
+            <exception cref="T:System.InvalidOperationException">The pool could not be built.</exception>
+            <remarks>
+            <paramref name="configure"/> only takes effect on the call that creates the pool. If the pool
+            already exists the existing instance is returned and the callback is not run — the shared pool
+            is configured once, by whoever creates it, and the alternatives to that ambiguity are a
+            silently reconfigured pool or a pool whose configuration depends on call order, both worse.
+            Check with <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.TryGet``1(DotNetCore.HayateOP.IHayateObjectPool{``0}@)"/> first when a specific shape is
+            required, or use a distinct <c>name</c> for a separately configured pool.
+            </remarks>
+            <example>
+            <code>
+            var pool = HayatePool.Shared&lt;MyBuffer&gt;(o =&gt; { o.MaxPoolSize = 4096; o.MinPoolSize = 64; });
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.GetOrCreateNamed``1(System.String,System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <summary>
+            Resolves a named shared pool for <typeparamref name="T"/>, creating and configuring it on first
+            use.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="name">The logical pool name, so one element type can have several independently
+            configured shared pools; pass <see cref="F:DotNetCore.HayateOP.HayateSharedPoolRegistry.DefaultSharedName"/> for the default one.</param>
+            <param name="configure">Applied to the pool's options while it is built; ignored when the pool
+            already exists.</param>
+            <returns>The shared pool under <paramref name="name"/>, the same instance on every call.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="name"/> is <c>null</c>.</exception>
+            <exception cref="T:System.ArgumentException"><paramref name="name"/> is empty or whitespace, or contains
+            <see cref="F:DotNetCore.HayateOP.HayateServiceKey.NameSeparator"/>.</exception>
+            <exception cref="T:System.ObjectDisposedException">The catalog has been disposed.</exception>
+            <exception cref="T:System.InvalidOperationException">The pool could not be built.</exception>
+            <remarks>
+            The name is the same logical name used by <see cref="T:DotNetCore.HayateOP.HayateServiceKey"/> and the named DI
+            registrations, so a shared pool and a named DI pool of one type are addressed the same way; the
+            catalog's own pools live under the canonical registry name (for example
+            <c>MyBuffer:shared</c>), which is also the pool name they log and report under.<br />
+            This is a separate method rather than an overload of <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.GetOrCreate``1(System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/>
+            so that a <c>null</c> name cannot silently select the wrong overload: passing <c>null</c> to an
+            overload set containing a delegate-taking member would resolve to that member and quietly build
+            the default pool, here it is a rejected argument.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.TryGet``1(DotNetCore.HayateOP.IHayateObjectPool{``0}@)">
+            <summary>
+            Resolves the default shared pool for <typeparamref name="T"/> without creating it.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="pool">The shared pool when one exists; otherwise <c>null</c>.</param>
+            <returns><c>true</c> when a shared pool of <typeparamref name="T"/> is already held under
+            <see cref="F:DotNetCore.HayateOP.HayateSharedPoolRegistry.DefaultSharedName"/>.</returns>
+            <remarks>Never creates a pool, so it is safe to call from a hot path or from code that must not
+            have side effects.</remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.TryGet``1(System.String,DotNetCore.HayateOP.IHayateObjectPool{``0}@)">
+            <summary>
+            Resolves a named shared pool for <typeparamref name="T"/> without creating it.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="name">The logical pool name.</param>
+            <param name="pool">The shared pool when one exists; otherwise <c>null</c>.</param>
+            <returns><c>true</c> when a shared pool of <typeparamref name="T"/> is held under
+            <paramref name="name"/>.</returns>
+            <remarks>
+            Returns <c>false</c> for an unusable name, a name that is not held, and a pool registered under
+            that name whose element type is not <typeparamref name="T"/> — a pool of the wrong element type
+            is reported as absent rather than handed back and cast at the call site.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.Remove``1(System.String)">
+            <summary>
+            Removes a shared pool from the catalog and disposes it.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="name">The logical pool name; defaults to
+            <see cref="F:DotNetCore.HayateOP.HayateSharedPoolRegistry.DefaultSharedName"/>.</param>
+            <returns><c>true</c> when an entry was removed.</returns>
+            <remarks>
+            Unlike <see cref="M:DotNetCore.HayateOP.IHayateObjectPoolRegistry.Remove(System.String)"/>, this disposes the pool: the catalog owns
+            the pools it creates, and dropping one without disposing it would leave its background timers
+            running with no way to reach them. Disposing a pool that borrowers are still holding is the
+            caller's responsibility to avoid — removal is a shutdown / test-reconfiguration operation, not
+            something to do under load.<br />
+            Only pools this catalog created are disposed. A pool found under the same name that the catalog
+            did not create — a named DI pool sharing the registry — is left alone, and only the catalog's
+            own registration would have been removed anyway; the catalog never claims a pool it did not
+            build.
+            </remarks>
+            <example>
+            <code>
+            HayatePool.Shared&lt;MyBuffer&gt;();          // create
+            HayateSharedPoolRegistry.Default.Remove&lt;MyBuffer&gt;();   // dispose + forget
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.Clear">
+            <summary>
+            Removes and disposes every shared pool this catalog created.
+            </summary>
+            <remarks>
+            Registrations the catalog did not create are left untouched, so an injected application
+            registry keeps its DI-managed pools. After this call the catalog is empty and can be used
+            again. Like <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.Remove``1(System.String)"/>, this is a shutdown / test-reconfiguration
+            operation: it disposes pools that borrowers may still hold.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.Dispose">
+            <summary>
+            Removes and disposes every shared pool this catalog created, and marks the catalog disposed.
+            </summary>
+            <remarks>
+            Safe to call more than once. Afterwards <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.GetOrCreate``1"/> throws
+            <see cref="T:System.ObjectDisposedException"/>, while the read-only surface (<see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.TryGet``1(DotNetCore.HayateOP.IHayateObjectPool{``0}@)"/>,
+            <see cref="P:DotNetCore.HayateOP.HayateSharedPoolRegistry.Count"/>, <see cref="P:DotNetCore.HayateOP.HayateSharedPoolRegistry.Registry"/>) keeps working and reports an empty catalog.
+            Disposing the catalog does not dispose an injected registry, and does not touch pools the
+            catalog did not create.
+            </remarks>
         </member>
         <member name="T:DotNetCore.HayateOP.IHayateShutdownHook">
             <summary>
