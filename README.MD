@@ -6,7 +6,7 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 
 - **High Performance Core**: Optimized for both single-threaded and multi-threaded scenarios.
 - **Sharding Support**: Reduces lock contention through sharded architecture.
-- **Configuration Presets**: `HayatePoolPreset` names eight ready-made configurations — `Default`, `Lean`, `Full`, `HighThroughput`, `LowLatency`, `MemoryConstrained`, `ConnectionPool`, `BatchProcessing` — and they stay composable: a preset owns its field set, and a later `With*` call overrules it.
+- **Configuration Presets**: `HayatePoolPreset` names nine ready-made configurations — `Default`, `Lean`, `Full`, `HighThroughput`, `LowLatency`, `MemoryConstrained`, `ConnectionPool`, `BatchProcessing`, `Deterministic` — and they stay composable: a preset owns its field set, and a later `With*` call overrules it.
 - **Borrow Order**: `Fifo` (default) or `Lifo` hand-out order from the idle list, selected with `HayateBorrowStrategy`.
 - **Soft Capacity**: Bounds the pool's *retained* set on the return path — returns past the ceiling are disposed instead of stored, while the pool still lends out its whole hard ceiling.
 - **Bucketed Buffer Pool**: Optional `HayateBufferPool<T>` — a fixed ladder of size buckets with round-up-to-nearest-size routing, for workloads that rent arrays of a few known sizes.
@@ -64,6 +64,14 @@ documented in [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md).
 > targeting Unity / Xamarin / older .NET hosts that cannot consume `net6.0`+ or `net48` assets. On
 > `netstandard2.0` / `net48`, allocation tracking reports `0` (no `GC.GetAllocatedBytesForCurrentThread`)
 > and `Math.Clamp` falls back to an equivalent `Max/Min` composition.
+> **Unity / IL2CPP guidance**: the core package is a single `netstandard2.0` assembly with no external
+> dependencies, which is the shape Unity's IL2CPP AOT pipeline consumes directly — the core borrow /
+> return path uses no reflection, no `Expression` compilation and no dynamic code generation. For AOT
+> hosts the `Deterministic` preset is the recommended configuration: it runs the lean fast path with
+> every background activity closed (no timer, no process-exit subscription, no pre-warm task), so the
+> pool does nothing an explicit call did not ask for. Empirical IL2CPP AOT / trimming validation of a
+> real Unity project is tracked as backlog for the 2.8 window's follow-ups; until that lands, treat the
+> compatibility claim as structural (assembly shape + coding style) rather than certified.
 > The ASP.NET Core–based packages (`Endpoints`, `HealthCheck`) and the `OpenTelemetry` / `Configuration` /
 > `Diagnostics` extensions do not ship `net48` or `netstandard2.0` assets.
 
@@ -244,6 +252,7 @@ new HayatePoolOptions().UsePreset(HayatePoolPreset.MemoryConstrained);
 | `MemoryConstrained` | A footprint that has to stay small | One shard, a zero idle floor, quick reclamation (1 minute idle, 10-second scan), diagnostics off | The zero floor arrives with `CreateOnDemand`: with a block policy the second borrower would wait out the whole acquire timeout |
 | `ConnectionPool` | Expensive, finite external handles | Bounded capacity, `ValidateOnBorrow` plus an idle validation sweep, recycling at 30 minutes, abandoned-handle reclaim at 60 seconds, circuit breaker, metrics | Validation only does something for a pooled type that implements `IHayateValidatable`; for any other type it reports healthy, so the preset is safe to apply regardless of the pooled type |
 | `BatchProcessing` | Bursty bulk work that then drains | A one-second scaling reaction, scale-up at 60% in steps of ten, capacity released after 2 idle minutes, a 5-minute leak threshold | The leak warning is moved out of the way of a healthy run rather than switched off — a batch worker may legitimately hold its object for minutes |
+| `Deterministic` | AOT / IL2CPP hosts and other deterministic environments, where nothing may run without the caller asking for it | The lean fast path, plus the two switches Lean leaves open that could still move work off the calling thread: pre-warming stays synchronous (`WaitForWarmup` off) and no process-exit subscription (`EnableAutoDisposeWithSystem` off) | The built pool touches nothing except on an explicit `Acquire` / `Release` — no timer, no event subscription, no background task. Every owned switch is overrulable: re-enabling eviction after the preset reintroduces a timer by choice |
 
 An unrecognised preset value throws rather than being ignored, and `WithPreset(HayatePoolOptions)` applies a
 preset of your own through the same path, so a configuration your team keeps in its own code composes

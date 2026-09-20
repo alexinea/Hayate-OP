@@ -12,6 +12,24 @@ Breaking changes are described in full — with migration guidance — in
 
 ### Added
 
+- **Deterministic preset** (O-G): `HayatePoolPreset.Deterministic` — the preset for hosts where nothing
+  may run without the caller asking for it (AOT / IL2CPP runtimes and other deterministic
+  environments). It is the lean fast path — no maintenance timer, no per-object bookkeeping, which
+  Lean already guarantees structurally by disabling every concern the shared timer serves — plus the
+  two switches Lean leaves open that could still move work off the calling thread, both closed:
+  pre-warming stays synchronous with the constructor (`WaitForWarmup` off, so no background pre-warm
+  task) and the pool never subscribes to process-exit events (`EnableAutoDisposeWithSystem` off, so
+  `Dispose` happens only when the caller calls it). The built pool touches nothing except on an
+  explicit `Acquire` / `Release`. The preset owns exactly its field set, so it composes like the other
+  presets: sizing, timeouts and the reject policy are left alone, and every owned switch is
+  overrulable by a later feature call — re-enabling eviction after the preset reintroduces a timer by
+  choice rather than by surprise. The preset also pins the core package's AOT story: a single
+  `netstandard2.0` assembly with no dependencies, a borrow/return path free of reflection and code
+  generation — see the Unity / IL2CPP guidance in the README (empirical IL2CPP validation on a real
+  Unity project remains backlog). Note that `Deterministic` and `Lean` therefore differ in two
+  options, not in storage or speed; the preset exists to name the whole guarantee so a host audit can
+  check one word.
+
 - **Bucketed buffer pool** (O-H): the new optional package
   [`DotNetCore.HayateOP.Extensions.Buffers`](https://www.nuget.org/packages/DotNetCore.HayateOP.Extensions.Buffers)
   ships `HayateBufferPool<T>` — a bucketed array pool with round-up-to-nearest-size routing, the
