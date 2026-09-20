@@ -4062,6 +4062,24 @@
             may legitimately hold its object for minutes.
             </remarks>
         </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolPreset.Deterministic">
+            <summary>
+            Built for hosts where nothing may run without the caller asking for it — AOT / IL2CPP runtimes
+            and other deterministic environments: the lean fast path (no background pass, no per-object
+            bookkeeping) plus the two switches Lean leaves open that could still move work off the calling
+            thread, both closed.
+            </summary>
+            <remarks>
+            Same field set as <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.UseLeanProfile"/>, plus <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.WaitForWarmup"/>
+            set to <c>false</c> — pre-warming stays synchronous with the constructor instead of moving to a
+            background task — and <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableAutoDisposeWithSystem"/> set to
+            <c>false</c>, so the pool never subscribes to process-exit events and <c>Dispose</c> happens
+            only when the caller calls it. The result is a pool that allocates and touches nothing except on
+            an explicit <c>Acquire</c> / <c>Release</c>: no timer, no event subscription, no background task.
+            Sizing, timeouts and the reject policy are left alone, and every owned switch is overrulable by a
+            later feature call — re-enabling eviction after the preset reintroduces a timer by choice.
+            </remarks>
+        </member>
         <member name="T:DotNetCore.HayateOP.HayatePoolPresets">
              <summary>
              The named configuration catalogue behind <see cref="T:DotNetCore.HayateOP.HayatePoolPreset"/>.
@@ -4114,6 +4132,15 @@
             <summary>
             The shipped defaults. Restored from a pristine instance rather than from a written-out list, so
             the preset cannot fall behind a default that changes elsewhere.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolPresets.ApplyDeterministic(DotNetCore.HayateOP.HayatePoolOptions)">
+            <summary>
+            The deterministic host preset: the lean fast path, with the two switches Lean leaves open that
+            could still move work off the calling thread both closed. The shared maintenance timer is
+            structurally absent — Lean already disables all four concerns it serves (eviction, scaling, idle
+            validation, abandoned recovery) — so what remains to close is the background pre-warm task and
+            the process-shutdown subscription.
             </summary>
         </member>
         <member name="T:DotNetCore.HayateOP.HayatePoolRegistryExtensions">

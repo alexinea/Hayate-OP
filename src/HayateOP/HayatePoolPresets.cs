@@ -91,6 +91,10 @@ public static class HayatePoolPresets
                 ApplyBatchProcessing(options);
                 return;
 
+            case HayatePoolPreset.Deterministic:
+                ApplyDeterministic(options);
+                return;
+
             default:
                 throw new ArgumentOutOfRangeException(
                     nameof(preset),
@@ -302,5 +306,27 @@ public static class HayatePoolPresets
         options.EnableDiagnostics = true;
         options.EnableMetrics = false;
         options.EnableAllocationTracking = false;
+    }
+
+    /// <summary>
+    /// The deterministic host preset: the lean fast path, with the two switches Lean leaves open that
+    /// could still move work off the calling thread both closed. The shared maintenance timer is
+    /// structurally absent — Lean already disables all four concerns it serves (eviction, scaling, idle
+    /// validation, abandoned recovery) — so what remains to close is the background pre-warm task and
+    /// the process-shutdown subscription.
+    /// </summary>
+    private static void ApplyDeterministic(HayatePoolOptions options)
+    {
+        options.UseLeanProfile();
+
+        // Pre-warming the floor moves to a background task when WaitForWarmup is set; a deterministic
+        // pool warms synchronously in the constructor — or not at all with a zero floor — and does
+        // nothing the caller did not start.
+        options.WaitForWarmup = false;
+
+        // Auto-dispose-with-system subscribes the pool to process-exit events, which both registers a
+        // system callback and means Dispose can run later from an unrelated thread. A deterministic
+        // pool's lifetime is entirely the caller's.
+        options.EnableAutoDisposeWithSystem = false;
     }
 }

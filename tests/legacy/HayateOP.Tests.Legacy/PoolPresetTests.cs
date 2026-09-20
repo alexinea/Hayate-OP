@@ -210,6 +210,18 @@ public class PoolPresetTests
                     "EnableDiagnostics", "EnableMetrics", "EnableAllocationTracking"
                 };
 
+            case HayatePoolPreset.Deterministic:
+                return new[]
+                {
+                    "EnableLean", "EnableSharding", "EnableAutoScaling",
+                    "EnableValidation", "ValidateOnBorrow", "ValidateOnReturn", "ValidateWhileIdle",
+                    "EnableEviction", "EnableGenerationOptimization", "EnableLeakDetection",
+                    "RemoveAbandonedOnBorrow", "RemoveAbandonedOnMaintenance",
+                    "EnableDiagnostics", "EnableMetrics", "EnableAllocationTracking",
+                    "WarnAtRatio", "CriticalAtRatio", "ShardAffinityMode",
+                    "WaitForWarmup", "EnableAutoDisposeWithSystem"
+                };
+
             default:
                 throw new ArgumentOutOfRangeException(nameof(preset), preset, "No ownership contract declared for this preset");
         }
@@ -366,6 +378,12 @@ public class PoolPresetTests
                     EnableMetrics = false,
                     EnableAllocationTracking = false
                 };
+
+            case HayatePoolPreset.Deterministic:
+                var deterministic = new HayatePoolOptions().UseLeanProfile();
+                deterministic.WaitForWarmup = false;
+                deterministic.EnableAutoDisposeWithSystem = false;
+                return deterministic;
 
             default:
                 throw new ArgumentOutOfRangeException(nameof(preset), preset, "No hand-written form declared for this preset");

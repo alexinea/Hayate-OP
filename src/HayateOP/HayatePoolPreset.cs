@@ -114,5 +114,23 @@ public enum HayatePoolPreset
     /// warning is moved out of the way of a healthy run rather than switched off, because a batch worker
     /// may legitimately hold its object for minutes.
     /// </remarks>
-    BatchProcessing = 7
+    BatchProcessing = 7,
+
+    /// <summary>
+    /// Built for hosts where nothing may run without the caller asking for it — AOT / IL2CPP runtimes
+    /// and other deterministic environments: the lean fast path (no background pass, no per-object
+    /// bookkeeping) plus the two switches Lean leaves open that could still move work off the calling
+    /// thread, both closed.
+    /// </summary>
+    /// <remarks>
+    /// Same field set as <see cref="HayatePoolOptions.UseLeanProfile"/>, plus <see cref="HayatePoolOptions.WaitForWarmup"/>
+    /// set to <c>false</c> — pre-warming stays synchronous with the constructor instead of moving to a
+    /// background task — and <see cref="HayatePoolOptions.EnableAutoDisposeWithSystem"/> set to
+    /// <c>false</c>, so the pool never subscribes to process-exit events and <c>Dispose</c> happens
+    /// only when the caller calls it. The result is a pool that allocates and touches nothing except on
+    /// an explicit <c>Acquire</c> / <c>Release</c>: no timer, no event subscription, no background task.
+    /// Sizing, timeouts and the reject policy are left alone, and every owned switch is overrulable by a
+    /// later feature call — re-enabling eviction after the preset reintroduces a timer by choice.
+    /// </remarks>
+    Deterministic = 8
 }
