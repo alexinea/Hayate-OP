@@ -343,6 +343,9 @@ src/HayateOP.Extensions.Endpoints/DotNetCore.HayateOP.Extensions.Endpoints.xml
 research/
 reports/
 
+# 日志目录（禁止提交）
+logs/
+
 # 工作目录 / 本地发布产物（禁止提交）
 .zcode/
 .workbuddy/
