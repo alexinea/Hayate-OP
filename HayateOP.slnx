@@ -13,6 +13,7 @@
     <Project Path="src/HayateOP.Extensions.OpenTelemetry/HayateOP.Extensions.OpenTelemetry.csproj" />
     <Project Path="src/HayateOP.Extensions.ObjectPoolCompat/HayateOP.Extensions.ObjectPoolCompat.csproj" />
     <Project Path="src/HayateOP.Extensions.Specialized/HayateOP.Extensions.Specialized.csproj" />
+    <Project Path="src/HayateOP.Extensions.Buffers/HayateOP.Extensions.Buffers.csproj" />
     <Project Path="src/HayateOP/HayateOP.csproj" />
   </Folder>
   <Folder Name="/tests/">

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <Configurations>Debug;Release</Configurations>
+        <Platforms>AnyCPU</Platforms>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <AssemblyName>DotNetCore.HayateOP.Extensions.Buffers</AssemblyName>
+        <PackageId>DotNetCore.HayateOP.Extensions.Buffers</PackageId>
+        <Description>DotNetCore Hayate Object Pool Bucketed Buffer Pool Extensions</Description>
+    </PropertyGroup>
+
+	<PropertyGroup>
+		<RootNamespace />
+	</PropertyGroup>
+
+    <Import Project="..\..\common.props" />
+
+    <!-- net48 兼容（对齐 Specialized 包先例）：本包只用数组与 Monitor 锁，无任何 NuGet 依赖 -->
+    <PropertyGroup>
+        <TargetFrameworks>net48;$(TargetFrameworks)</TargetFrameworks>
+    </PropertyGroup>
+
+</Project>

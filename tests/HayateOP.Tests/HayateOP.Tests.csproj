@@ -35,6 +35,7 @@
     <ItemGroup>
       <ProjectReference Include="..\..\src\HayateOP\HayateOP.csproj" />
       <ProjectReference Include="..\..\src\HayateOP.Extensions.Specialized\HayateOP.Extensions.Specialized.csproj" />
+      <ProjectReference Include="..\..\src\HayateOP.Extensions.Buffers\HayateOP.Extensions.Buffers.csproj" />
     </ItemGroup>
 
     <ItemGroup>
