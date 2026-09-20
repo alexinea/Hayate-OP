@@ -8,6 +8,7 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 - **Sharding Support**: Reduces lock contention through sharded architecture.
 - **Configuration Presets**: `HayatePoolPreset` names eight ready-made configurations — `Default`, `Lean`, `Full`, `HighThroughput`, `LowLatency`, `MemoryConstrained`, `ConnectionPool`, `BatchProcessing` — and they stay composable: a preset owns its field set, and a later `With*` call overrules it.
 - **Borrow Order**: `Fifo` (default) or `Lifo` hand-out order from the idle list, selected with `HayateBorrowStrategy`.
+- **Soft Capacity**: Bounds the pool's *retained* set on the return path — returns past the ceiling are disposed instead of stored, while the pool still lends out its whole hard ceiling.
 - **Auto-Scaling**: Dynamically adjusts pool size based on usage patterns (aggressive scale-up / conservative scale-down steps).
 - **Object Validation**: Validates objects on borrow, return, and while idle.
 - **Eviction Policy**: Automatically removes expired or idle objects on a background run, under a rule you can replace (`IHayateEvictionPolicy<T>`).
@@ -1080,6 +1081,44 @@ a lean pool fails the build rather than being silently turned into the default:
 // Throws InvalidOperationException: the lean fast path cannot honour a borrow order.
 new HayatePoolBuilder<Connection>().WithLean().WithBorrowStrategy(HayateBorrowStrategy.Lifo).Build();
 ```
+
+### Soft capacity (bound the retained set)
+
+`MaxPoolSize` caps how many objects the pool will ever lend out, but nothing below it caps how many the
+pool *keeps*: after a burst drains the ceiling, every object comes back and stays until eviction or
+scale-down reclaims it. `WithSoftCapacity(n)` bounds that retained set — once the pool already holds
+`n` idle objects, a returned object is disposed instead of stored:
+
+```csharp
+var pool = new HayatePoolBuilder<MyBuffer>()
+    .WithMaxSize(64)          // still lends out 64 objects during a burst
+    .WithSoftCapacity(8)      // ... but keeps at most 8 of them after it ends
+    .Build();
+```
+
+The ceiling is enforced on the return path only, and only as a read of the idle count followed by the
+store: two returns racing for the last slot may both be retained, which is what makes the ceiling
+*soft*. It is a memory-shape control, not a mutual-exclusion guarantee. A pool with a soft capacity
+below its hard ceiling still serves the full ceiling — it just keeps fewer objects back. Objects
+dropped on return go through the regular destroy path (the policy's `OnDestroy` hook fires) and must be
+created again if the next burst needs them, so the switch trades hit rate for bounded retained memory;
+that is the right trade when the pool's idle memory is what has to be bounded, and the wrong one when
+the burst is the normal case.
+
+Rules and boundaries:
+
+- `0` (the default) disables the ceiling and keeps the previous behaviour of retaining up to
+  `MaxPoolSize` idle objects.
+- A live ceiling must sit between `MinPoolSize` and `MaxPoolSize` — below the floor the pool could not
+  hold the minimum it promises, above the hard ceiling the check could never fire — and `IsValid`
+  rejects both rather than accepting a knob that silently does nothing.
+- `ReloadConfig` rejects a change to `SoftCapacity` the same way: the return path reads a
+  construction-time snapshot (and in lean mode the ceiling also fixes the fast path's slot-scan limit),
+  so a runtime change could not take effect. Rebuild the pool to change it.
+- The lean fast path honours the ceiling structurally — the single fast lane plus `SoftCapacity - 1`
+  slots — so it costs the return hot path nothing beyond the existing slot scan. The unbounded pool
+  model does not read the switch: its retained set is already bounded by its own `MaxIdle`, which
+  drops a return once the queue is full.
 
 ### Reload configuration at runtime
 

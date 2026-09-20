@@ -93,6 +93,7 @@ it stores the pooled value directly instead of a wrapper.
 | `EnableAllocationTracking` | Two allocation queries plus a counter pair | Requires `EnableDiagnostics` |
 | `WarnAtRatio` / `CriticalAtRatio` | Same shard-walking utilisation probe as on the borrow path | — |
 | `EnableAutoScaling` | A watermark check after a rejected return | Only when `MinPoolSize > 0` and the pool fell below it |
+| `SoftCapacity` | One idle-count read plus one compare per return, then `Destroy` instead of the store when the ceiling is reached | `0` (default) folds the branch away; the unbounded model does not read it (its `MaxIdle` already bounds the queue) |
 
 ### Background workers
 

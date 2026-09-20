@@ -12,6 +12,29 @@ Breaking changes are described in full — with migration guidance — in
 
 ### Added
 
+- **Soft capacity** (T-R): `HayatePoolOptions.SoftCapacity` (builder: `WithSoftCapacity(n)`) bounds the
+  pool's *retained* set on the return path — once the pool already holds `SoftCapacity` idle objects, a
+  returned object is disposed instead of stored, so a pool that lent out its whole hard ceiling during a
+  burst drops the objects the burst no longer needs instead of keeping them until eviction or scale-down
+  reclaims them. The default `0` keeps the previous behaviour of retaining up to `MaxPoolSize` idle
+  objects, and the switch is additive: `MaxPoolSize` still caps what the pool ever lends out, so a pool
+  with a soft capacity below its hard ceiling still serves the full ceiling — it only keeps fewer
+  objects back. The check is a read of the idle count followed by the store, so two returns racing for
+  the last slot may both be retained — it is a memory-shape control, not a mutual-exclusion guarantee —
+  and the value must sit between `MinPoolSize` and `MaxPoolSize` (or be zero), because a ceiling below
+  the floor would make the minimum unreachable and one above the hard ceiling could never fire; both
+  are rejected by `IsValid` rather than accepted as a knob that silently does nothing. `ReloadConfig`
+  rejects a change the same way, because the return path reads a construction-time snapshot (in lean
+  mode the ceiling also fixes the fast path's slot-scan limit) and a runtime change could not take
+  effect. The lean fast path honours the ceiling structurally — the fast lane plus
+  `SoftCapacity - 1` slots — so it costs the return hot path nothing beyond the existing slot scan, and
+  the unbounded pool model does not read it: that model's retained set is already bounded by its own
+  `MaxIdle`, which drops a return once the queue is full. Dropped objects go through the regular
+  destroy path (the policy's `OnDestroy` fires, the registry entry is removed) and the outcome is
+  traced at debug level, not warned — a warning would fire once per return through a burst drain. See
+  the "Soft capacity" section of the README and the return-path table in
+  [`docs/hot-path-costs.md`](docs/hot-path-costs.md).
+
 - **Shared pools** (O-C): `HayatePool.Shared<T>()` returns the process-wide pool for an element type —
   the first caller builds it, every caller after that gets the same instance — so a type has one pool
   instead of one per call site. It is the "just give me a pool" entry point beside
