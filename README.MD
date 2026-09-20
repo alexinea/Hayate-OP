@@ -133,6 +133,83 @@ using var connections = HayatePool.Simple<MyConnection>(8, () => new MyConnectio
 When you need anything tuned — a minimum idle count, an interval, a single feature switch — reach for
 `HayatePoolBuilder<T>` instead; nothing set by the shortcut is hidden afterwards.
 
+### Shared pools
+
+`HayatePool.Shared<T>()` returns *the* pool for an element type: the first caller builds it, every caller
+after that gets the same instance. Reach for it when the application needs a pool for a type and does not
+care who created it — one type, one pool, rather than a pool per call site.
+
+```csharp
+using DotNetCore.HayateOP;
+
+// Anywhere in the application, the same instance comes back.
+var pool = HayatePool.Shared<MyBuffer>();
+using var lease = pool.AcquireScoped();
+lease.Value.Write(payload);
+```
+
+The pool is an ordinary `IHayateObjectPool<T>`, so it is configured like one — but it is configured once,
+by the call that creates it:
+
+```csharp
+// At start-up, when the shape is known.
+var pool = HayatePool.Shared<MyBuffer>(o =>
+{
+    o.MaxPoolSize = 4096;
+    o.MinPoolSize = 64;
+});
+
+// A later call with a different callback returns the pool above and ignores that callback, so check
+// first when the shape matters:
+if (!HayateSharedPoolRegistry.Default.TryGet<MyBuffer>(out _))
+    throw new InvalidOperationException("MyBuffer's shared pool was never configured.");
+```
+
+The catalog behind it, `HayateSharedPoolRegistry`, has a process-wide `Default` instance and can be
+instantiated as many times as you like, each with a registry of its own:
+
+| Call | What it does |
+| :--- | :--- |
+| `HayatePool.Shared<T>()` | The process-wide pool for `T`, created on first use |
+| `HayatePool.Shared<T>(configure)` | The same pool, configured while it is created |
+| `GetOrCreate<T>()` / `GetOrCreate<T>(configure)` | The same two calls on a catalog you own |
+| `GetOrCreateNamed<T>(name, configure)` | A named shared pool, for several per element type |
+| `TryGet<T>(out pool)` / `TryGet<T>(name, out pool)` | Resolve without creating anything |
+| `Remove<T>(name)` | Unregister the pool **and dispose it** |
+| `Clear()` / `Dispose()` | Release every pool the catalog created |
+| `Registry` / `Count` | The underlying `IHayateObjectPoolRegistry`, and the number of pools held |
+
+The catalog is a thin layer over `IHayateObjectPoolRegistry` rather than a second registry, which makes
+shared pools first-class on the management surface: `Registry.GetAll()` lists them with their metadata,
+and a catalog built on the application's registry — the same one the DI packages register — puts them in
+front of the management endpoints, metrics and diagnostics alongside the DI-created pools.
+
+```csharp
+using DotNetCore.HayateOP;
+using Microsoft.Extensions.DependencyInjection;
+
+var services = new ServiceCollection();
+services.AddHayatePoolSupport().RegisterHayatePool<MyBuffer>(o => o.MaxPoolSize = 100);
+
+var provider = services.BuildServiceProvider();
+var registry = provider.GetRequiredService<IHayateObjectPoolRegistry>();
+
+var catalog = new HayateSharedPoolRegistry(registry);
+catalog.GetOrCreate<MyBuffer>(o => o.MaxPoolSize = 512);
+
+// The registry now enumerates the DI pool and the shared pool together.
+foreach (var meta in registry.GetAll())
+    Console.WriteLine($"{meta.PoolName}: {meta.ElementType}");
+```
+
+Ownership runs one way. The catalog owns the pools it creates, so `Remove`, `Clear` and `Dispose` dispose
+them — the opposite of `IHayateObjectPoolRegistry.Remove`, which only unregisters — while a pool the
+catalog did not create is left untouched, which is what lets it share a registry with DI. Two rules follow
+for callers: **do not dispose a shared pool you were handed** (the catalog, not the borrower, decides when
+it goes away, so `using var pool = HayatePool.Shared<T>()` would tear down a pool other callers are still
+borrowing from), and treat `Remove` and `Clear` as shutdown and test-reconfiguration operations rather
+than something to call under load.
+
 ### Configuration presets
 
 `HayatePoolPreset` names the configurations the pool is most often asked to take, so a common shape costs

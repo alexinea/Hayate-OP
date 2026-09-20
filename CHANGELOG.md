@@ -12,6 +12,38 @@ Breaking changes are described in full — with migration guidance — in
 
 ### Added
 
+- **Shared pools** (O-C): `HayatePool.Shared<T>()` returns the process-wide pool for an element type —
+  the first caller builds it, every caller after that gets the same instance — so a type has one pool
+  instead of one per call site. It is the "just give me a pool" entry point beside
+  `HayatePool.Simple<T>`, which builds a fresh pool on every call; the difference is ownership, not
+  capability. A shared pool is an ordinary `IHayateObjectPool<T>` with the full configuration surface,
+  created with the default settings and starting empty, so the first borrow pays the object-creation
+  cost exactly once. Because creation happens once, only the call that creates the pool can configure
+  it: the `configure` overload applies the callback while the pool is built, and a later call returns
+  the existing instance and ignores its callback, rather than reconfiguring a pool that other callers
+  are already using or making the shape depend on call order. `TryGet` is there for the caller that
+  needs to know which of the two it is looking at, and `GetOrCreateNamed<T>(name, …)` — deliberately a
+  separate method rather than an overload, so that a `null` name cannot bind to the delegate-taking
+  member and quietly build the default pool — gives one element type several independently configured
+  shared pools under the same logical names `HayateServiceKey` and the named DI registrations use.
+  The catalog, `HayateSharedPoolRegistry`, is a thin layer over the existing
+  `IHayateObjectPoolRegistry` rather than a second registry: it registers under the canonical name
+  (`MyBuffer:shared`, which is also the pool name it logs and reports under), so `GetAll()` enumerates
+  shared pools with their metadata and a catalog handed the application's registry makes them visible
+  to the management endpoints, metrics and diagnostics beside the DI-created ones, and a pool that
+  registry already holds is honoured instead of being shadowed. It is a normal class with a
+  `Default` singleton on top, so a test or a subsystem can have a catalog of its own.
+  Ownership is explicit and one-directional: the catalog owns the pools it creates, so `Remove<T>(…)`,
+  `Clear()` and `Dispose()` dispose them — the opposite of `IHayateObjectPoolRegistry.Remove`, which
+  only unregisters and leaves the lifetime to the registrar — while a pool the catalog did not create
+  is never touched, which is what lets it share a registry with DI-managed pools. After `Dispose` the
+  catalog reports empty and rejects further creation but keeps answering lookups, and creating is
+  serialized, so simultaneous first calls for one key yield one pool rather than a race where the loser
+  leaks a background-timer pool nobody can reach. A borrower must not dispose the pool it was handed:
+  the catalog, not the caller, decides when a shared pool goes away. No existing signature, option or
+  default changed; `Shared<T>()` is an addition to the one-call entry-point class, and nothing
+  pre-existing routes through the catalog. See the "Shared pools" section of the README.
+
 - **On-demand pre-warming** (O-F): `IHayateObjectPool<T>.PreWarm(int count)` tops the pool up to a
   requested number of idle objects and returns how many it created, so a process can pay the creation
   cost up front instead of letting the first borrowers pay it. The count is a floor on *idle* objects,
