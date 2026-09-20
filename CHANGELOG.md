@@ -12,6 +12,25 @@ Breaking changes are described in full — with migration guidance — in
 
 ### Added
 
+- **Bucketed buffer pool** (O-H): the new optional package
+  [`DotNetCore.HayateOP.Extensions.Buffers`](https://www.nuget.org/packages/DotNetCore.HayateOP.Extensions.Buffers)
+  ships `HayateBufferPool<T>` — a bucketed array pool with round-up-to-nearest-size routing, the
+  aligned counterpart of TinyPools' `MemoryPool<T>` + `SegmentDefinition` under HayateOP naming and
+  validation conventions. The bucket ladder is declared up front
+  (`new HayateBufferPool<byte>(new HayateSegmentDefinition(256, 4), …)`), a rent request routes to the
+  smallest bucket whose size covers it and is handed back as a `PooledBuffer<T>` whose `Dispose` (or
+  `Return`) parks the array in its home bucket, and a request above the largest declared size is
+  rejected with `ArgumentException` rather than served by an undeclared bucket — the ladder is exactly
+  what was configured. Each bucket creates arrays on demand and caps only what it *retains*: any
+  number of buffers may be outstanding at once, and a return past the bucket's declared capacity is
+  dropped for the garbage collector, so the pool bounds retained memory without limiting concurrency.
+  Buckets guard their stacks with one lock each, so different sizes do not contend, and the pool runs
+  no background workers. Returned arrays are not cleared — the same contract
+  `ArrayPool<T>.Shared` has. This is deliberately an independent package rather than core surface:
+  `System.Buffers.ArrayPool<T>` covers most workloads, and the value here is the explicit, inspectable
+  configuration; it targets `net48` and `net6.0`–`net10.0` and has no dependencies. See the "Bucketed
+  buffer pool" section of the README.
+
 - **Soft capacity** (T-R): `HayatePoolOptions.SoftCapacity` (builder: `WithSoftCapacity(n)`) bounds the
   pool's *retained* set on the return path — once the pool already holds `SoftCapacity` idle objects, a
   returned object is disposed instead of stored, so a pool that lent out its whole hard ceiling during a

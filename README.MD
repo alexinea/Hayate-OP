@@ -9,6 +9,7 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 - **Configuration Presets**: `HayatePoolPreset` names eight ready-made configurations — `Default`, `Lean`, `Full`, `HighThroughput`, `LowLatency`, `MemoryConstrained`, `ConnectionPool`, `BatchProcessing` — and they stay composable: a preset owns its field set, and a later `With*` call overrules it.
 - **Borrow Order**: `Fifo` (default) or `Lifo` hand-out order from the idle list, selected with `HayateBorrowStrategy`.
 - **Soft Capacity**: Bounds the pool's *retained* set on the return path — returns past the ceiling are disposed instead of stored, while the pool still lends out its whole hard ceiling.
+- **Bucketed Buffer Pool**: Optional `HayateBufferPool<T>` — a fixed ladder of size buckets with round-up-to-nearest-size routing, for workloads that rent arrays of a few known sizes.
 - **Auto-Scaling**: Dynamically adjusts pool size based on usage patterns (aggressive scale-up / conservative scale-down steps).
 - **Object Validation**: Validates objects on borrow, return, and while idle.
 - **Eviction Policy**: Automatically removes expired or idle objects on a background run, under a rule you can replace (`IHayateEvictionPolicy<T>`).
@@ -40,6 +41,7 @@ documented in [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md).
 | `DotNetCore.HayateOP.Extensions.Endpoints`           | Built-in management endpoints for monitoring and configuration.                                      |
 | `DotNetCore.HayateOP.Extensions.Diagnostics`         | Integration with System.Diagnostics for advanced performance monitoring and telemetry.               |
 | `DotNetCore.HayateOP.Extensions.Specialized`         | Ready-to-use specialized pools for `MemoryStream` and `StringBuilder`, with `using`-based returns.    |
+| `DotNetCore.HayateOP.Extensions.Buffers`             | Bucketed array pool (`HayateBufferPool<T>`) with round-up-to-nearest-size routing over declared buckets. |
 
 #### Supported Target Frameworks
 
@@ -49,6 +51,7 @@ documented in [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md).
 | `DotNetCore.HayateOP.Extensions.ObjectPoolCompat` | .NET Framework 4.8; .NET 6/7/8/9/10 |
 | `DotNetCore.HayateOP.Extensions.DependencyInjection` | .NET Framework 4.8; .NET 6/7/8/9/10 |
 | `DotNetCore.HayateOP.Extensions.Specialized` | .NET Framework 4.8; .NET 6/7/8/9/10 |
+| `DotNetCore.HayateOP.Extensions.Buffers` | .NET Framework 4.8; .NET 6/7/8/9/10 |
 | All other `DotNetCore.HayateOP.Extensions.*` packages | .NET 6/7/8/9/10 |
 
 > **.NET Framework 4.8 support (added in 2.4)** targets `net48` for classic ASP.NET 4.x / WPF / WinForms
@@ -548,6 +551,38 @@ allocations, at the price of serialising all users, so hold it briefly:
 ```csharp
 var message = SharedStringBuilder.Build(b => b.Append("hello, ").Append(name));
 ```
+
+### Bucketed buffer pool (declared size buckets)
+
+The optional [`DotNetCore.HayateOP.Extensions.Buffers`](https://www.nuget.org/packages/DotNetCore.HayateOP.Extensions.Buffers)
+package carries `HayateBufferPool<T>` — the one piece of surface the core pool deliberately does not
+carry, because `System.Buffers.ArrayPool<T>` covers it for most workloads. Use it when you want that
+shape under an explicit, inspectable configuration: the bucket ladder is declared up front, every
+bucket's retained count is fixed by declaration, and nothing sizes or trims buckets behind your back.
+
+```csharp
+using DotNetCore.HayateOP.Buffers;
+
+using var pool = new HayateBufferPool<byte>(
+    new HayateSegmentDefinition(256, 4),      // arrays of exactly 256 elements, retain up to 4
+    new HayateSegmentDefinition(1024, 2),
+    new HayateSegmentDefinition(4096, 1));
+
+using (PooledBuffer<byte> buffer = pool.Rent(300))   // routes to the 1024 bucket
+{
+    // buffer.Array.Length == 1024 — round up to the nearest declared size, never grow
+}
+```
+
+Routing is "round up to the nearest declared size": a request is served by the smallest bucket whose
+size covers it, and the returned array is exactly that bucket's size — at least what was asked, never
+grown afterwards. A request above the largest declared size is rejected with `ArgumentException`
+rather than served by an undeclared bucket; the ladder is exactly what was configured. Each bucket
+creates arrays on demand and caps only what it *retains*: any number of buffers may be outstanding at
+once, and a return past the bucket's capacity is dropped for the garbage collector. The pool is
+thread-safe (one lock per bucket, so different sizes do not contend), runs no background workers, and
+`Dispose` drops every parked array. The package ships `net48` and `net6.0`–`net10.0` assets and has no
+dependencies.
 
 ### With Dependency Injection
 
