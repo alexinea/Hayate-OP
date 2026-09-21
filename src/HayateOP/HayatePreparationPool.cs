@@ -48,7 +48,11 @@ namespace DotNetCore.HayateOP;
 /// </code>
 /// </example>
 /// <typeparam name="T">The pooled object type.</typeparam>
-public sealed class HayatePreparationPool<T> : IHayateObjectPool<T> where T : class
+public sealed class HayatePreparationPool<T> : IHayateObjectPool<T>
+#if NET6_0_OR_GREATER
+    , IHayateAsyncObjectPool<T>
+#endif
+    where T : class
 {
     private readonly IHayateObjectPool<T> _inner;
     private readonly IHayatePreparationStrategy<T> _strategy;
@@ -221,6 +225,24 @@ public sealed class HayatePreparationPool<T> : IHayateObjectPool<T> where T : cl
     /// </summary>
     /// <inheritdoc />
     public void Dispose() => _inner.Dispose();
+
+#if NET6_0_OR_GREATER
+    /// <summary>
+    /// Forwards the asynchronous disposal (A2, docs/async-policy.md §5) to the inner pool when it
+    /// implements the asynchronous contract, and falls back to the synchronous teardown otherwise —
+    /// the decorator adds nothing of its own to drain.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (_inner is IHayateAsyncObjectPool<T> asyncInner)
+        {
+            await asyncInner.DisposeAsync().ConfigureAwait(false);
+            return;
+        }
+
+        _inner.Dispose();
+    }
+#endif
 
     private void Discard(T item)
     {

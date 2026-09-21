@@ -7,13 +7,17 @@ releases would append members to `IHayateAsyncObjectPolicy<T>` after implementer
 against it, which is a second breaking change for exactly the people the interface is meant to
 help.
 
-**Implementation status: A1 (asynchronous creation) implemented, A2 and B5 pending.** The engine
-dispatches `CreateAsync` on every creation path — general and lean, synchronous and asynchronous
-entry points — so a synchronous caller waits on the asynchronous hook instead of calling the
-synchronous one (rule 1 below). `OnReleaseAsync`, `OnPassivateAsync` and `OnDestroyAsync` are part
-of the interface an implementer must supply, but the engine does not call them yet; A2 and B5 wire
-them. Where this page and the code disagree, this page is the design and the code is the bug —
-until a decision here is deliberately revised, in which case this page is updated first.
+**Implementation status: A1 (asynchronous creation) and A2 (asynchronous disposal) implemented,
+B5 (asynchronous return) pending.** The engine dispatches `CreateAsync` on every creation path —
+general and lean, synchronous and asynchronous entry points — so a synchronous caller waits on the
+asynchronous hook instead of calling the synchronous one (rule 1 below). `DisposeAsync` now drains
+every built-in pool — the sharded engine (general and lean), the preparation decorator and the
+unbounded pool — preferring `IAsyncDisposable` over `IDisposable` on each object and awaiting
+`OnDestroyAsync` where the policy provides one, with the synchronous `Dispose()` keeping its
+current semantics. `OnReleaseAsync` and `OnPassivateAsync` are part of the interface an implementer
+must supply, but the engine does not call them yet; B5 wires them. Where this page and the code
+disagree, this page is the design and the code is the bug — until a decision here is deliberately
+revised, in which case this page is updated first.
 
 ## 1. Why the synchronous contract is not enough
 
@@ -122,10 +126,14 @@ That cost is paid down by converging the shape in the facade (`HayatePool`) and 
 
 `DisposeAsync` drains: it disposes the objects the pool owns, using `IAsyncDisposable` where the
 object implements it and `IDisposable` otherwise, and it awaits the asynchronous destroy hook when
-the policy provides one. The five destroy sites gain the `IAsyncDisposable` test —
-`HayateObjectPool.cs` (three), `HayateObjectPool.Shard.cs` and `HayateObjectPool.Lean.cs` — and the
-synchronous `Dispose()` keeps its current semantics: graceful shutdown does not change meaning for
-anyone who does not opt in.
+the policy provides one. The six destroy sites gain the `IAsyncDisposable` test —
+`HayateObjectPool.cs` (four: the duplicate-creation path of the synchronous wrapper, its
+asynchronous twin from A1, and the two `Destroy` overloads), `HayateObjectPool.Shard.cs` and
+`HayateObjectPool.Lean.cs` — and the synchronous `Dispose()` keeps its current semantics: graceful
+shutdown does not change meaning for anyone who does not opt in. The general-mode drain runs the
+destroy hook only for a policy that opted into the asynchronous contract (its synchronous twin
+never ran one), while the lean drain keeps running a hook for every policy, exactly as its
+synchronous twin always did.
 
 ## 6. The return path and leases (B5)
 

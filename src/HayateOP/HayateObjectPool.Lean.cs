@@ -391,8 +391,7 @@ public partial class HayatePoolBasic<T>
 
         try
         {
-            _policy.OnDestroy(item);
-            if (item is IDisposable d) d.Dispose();
+            DestroyObject(item);
         }
         catch (Exception ex)
         {
@@ -403,6 +402,41 @@ public partial class HayatePoolBasic<T>
             if (Volatile.Read(ref _leanLive) > 0) Interlocked.Decrement(ref _leanLive);
         }
     }
+
+#if NET6_0_OR_GREATER
+    /// <summary>
+    /// The awaited twin of <see cref="DestroyLean"/>, used by <see cref="ClearLeanAsync"/>: the
+    /// destroy hook runs for every policy exactly as the lean clear always has — the asynchronous
+    /// form when the policy provides one, the synchronous form otherwise (docs/async-policy.md §5)
+    /// — and the object's disposal prefers <c>IAsyncDisposable</c>, because the caller explicitly
+    /// chose the asynchronous drain.
+    /// </summary>
+    private async ValueTask DestroyLeanAsync(T item)
+    {
+        if (item is null) return;
+
+        try
+        {
+            if (_asyncPolicy is not null)
+            {
+                await _asyncPolicy.OnDestroyAsync(item).ConfigureAwait(false);
+            }
+            else
+            {
+                _policy.OnDestroy(item);
+            }
+            await DisposeObjectAsync(item).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during object destruction. Type: {Type}", typeof(T).Name);
+        }
+        finally
+        {
+            if (Volatile.Read(ref _leanLive) > 0) Interlocked.Decrement(ref _leanLive);
+        }
+    }
+#endif
 
     #endregion
 
@@ -511,6 +545,40 @@ public partial class HayatePoolBasic<T>
 
         _logger.LogInformation("Clearing object pool. Type: {Type} (lean mode) destroyed: {Count}", typeof(T).Name, destroyed);
     }
+
+#if NET6_0_OR_GREATER
+    /// <summary>
+    /// The awaited twin of <see cref="ClearLean"/>, used as the lean drain of
+    /// <c>DisposeAsync</c>: the same slot sweep and the same live-count bookkeeping, statement for
+    /// statement, with each destroy awaited through <see cref="DestroyLeanAsync"/> instead of run
+    /// synchronously.
+    /// </summary>
+    private async ValueTask ClearLeanAsync()
+    {
+        var destroyed = 0;
+
+        var first = Interlocked.Exchange(ref _leanFirstItem, null);
+        if (first is not null)
+        {
+            await DestroyLeanAsync(first).ConfigureAwait(false);
+            destroyed++;
+        }
+
+        var slots = LeanSlotArray;
+        var scanLimit = _enableArrayPoolStorage ? Math.Min(slots.Length, _apSlotLimit) : slots.Length;
+        for (var i = 0; i < scanLimit; i++)
+        {
+            var slot = Interlocked.Exchange(ref slots[i], null);
+            if (slot is not null)
+            {
+                await DestroyLeanAsync(slot).ConfigureAwait(false);
+                destroyed++;
+            }
+        }
+
+        _logger.LogInformation("Clearing object pool. Type: {Type} (lean mode) destroyed: {Count}", typeof(T).Name, destroyed);
+    }
+#endif
 
     #endregion
 

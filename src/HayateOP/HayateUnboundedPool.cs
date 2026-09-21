@@ -46,7 +46,11 @@ namespace DotNetCore.HayateOP;
 /// </code>
 /// </example>
 /// <typeparam name="T">The pooled object type.</typeparam>
-public class HayateUnboundedPool<T> : IHayateObjectPool<T> where T : class, new()
+public class HayateUnboundedPool<T> : IHayateObjectPool<T>
+#if NET6_0_OR_GREATER
+    , IHayateAsyncObjectPool<T>
+#endif
+    where T : class, new()
 {
     /// <summary>
     /// The default <see cref="MaxIdle"/>: 32 retained objects.
@@ -403,6 +407,19 @@ public class HayateUnboundedPool<T> : IHayateObjectPool<T> where T : class, new(
     {
         Clear();
     }
+
+#if NET6_0_OR_GREATER
+    /// <summary>
+    /// The asynchronous disposal (A2, docs/async-policy.md §5) is the same clear: dropping the
+    /// references is the whole destroy in this model, so the drain has nothing to await and the
+    /// returned task is already complete.
+    /// </summary>
+    public ValueTask DisposeAsync()
+    {
+        Clear();
+        return default;
+    }
+#endif
 
     private void Destroy(T item)
     {

@@ -12,6 +12,9 @@ using DotNetCore.HayateOP.Scaling;
 namespace DotNetCore.HayateOP;
 
 public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
+#if NET6_0_OR_GREATER
+    , IHayateAsyncObjectPool<T>
+#endif
     where T : class
 {
     private readonly string _name;
@@ -25,6 +28,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     // interface is not part of the build.
     private readonly IHayateAsyncObjectPolicy<T>? _asyncPolicy;
 #endif
+
+    // A2 (docs/async-policy.md §5): the destroy paths prefer the object's IAsyncDisposable
+    // teardown when the policy implements the asynchronous contract. Assigned true only on
+    // net6.0 and later — netstandard2.0 / net48 have no IAsyncDisposable, so the flag stays
+    // false there and every test on it is a constant the JIT folds away.
+    private readonly bool _prefersAsyncDisposal = false;
     private readonly HayatePoolOptions _options;
     private readonly IHayateScalingStrategy _scalingStrategy;
 
@@ -273,6 +282,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
 #if NET6_0_OR_GREATER
         _asyncPolicy = policy as IHayateAsyncObjectPolicy<T>;
+        _prefersAsyncDisposal = _asyncPolicy is not null;
 #endif
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _scalingStrategy = scalingStrategy ?? throw new ArgumentNullException(nameof(scalingStrategy));
@@ -333,7 +343,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         for (var i = 0; i < shardCount; i++)
         {
             int shardMax = perShardMax + (i < remainderMax ? 1 : 0);
-            _shards[i] = new Shard(_options, i, shardMax, _logger);
+            _shards[i] = new Shard(_options, i, shardMax, _logger, _prefersAsyncDisposal);
         }
 
         // Lean-mode storage. Allocated only when the mode is on; the general-purpose path keeps
@@ -1731,8 +1741,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 // The same key already exists (a pathological case where the policy creates the same instance twice): destroy the new instance and retry,
                 // never add it to the pool — otherwise Release's reverse lookup would hit the old entry and the old/new wrappers would corrupt each other.
                 _logger.LogWarning("Duplicate pooled object instance detected. Retrying. Type: {Type}", typeof(T).Name);
-                _policy.OnDestroy(o);
-                if (o is IDisposable d) d.Dispose();
+                DestroyObject(o);
             }
             catch (Exception ex)
             {
@@ -1934,8 +1943,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                 // The same key already exists (a pathological case where the policy creates the same instance twice): destroy the new instance and retry.
                 _logger.LogWarning("Duplicate pooled object instance detected. Retrying. Type: {Type}", typeof(T).Name);
-                _policy.OnDestroy(o);
-                if (o is IDisposable d) d.Dispose();
+                await DestroyObjectAsync(o).ConfigureAwait(false);
             }
             // A cancelled token is not a creation failure: it propagates to the caller instead of
             // consuming retries and logging an error.
@@ -2017,6 +2025,73 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         }
     }
 
+    /// <summary>
+    /// The destroy-hook dispatch, mirroring <see cref="CreateObject"/> on the way out: a policy that
+    /// implements <c>IHayateAsyncObjectPolicy&lt;T&gt;</c> is destroyed through its asynchronous hook even
+    /// from a synchronous destroy site — the synchronous site waits on it instead of calling the
+    /// synchronous <see cref="IHayateObjectPolicy{T}.OnDestroy"/> (rule 1 of docs/async-policy.md) —
+    /// and such a pool also tears its objects down through <c>IAsyncDisposable</c> in preference to
+    /// <c>IDisposable</c>. Every other policy runs the two statements the site used to carry inline,
+    /// unchanged (rule 2).
+    /// </summary>
+    /// <remarks>
+    /// The hook is not swallowed here: each caller keeps the try/catch that already surrounded its
+    /// inline statements, so failure handling is exactly what it was. The asynchronous interface is
+    /// named as plain code, not a <c>cref</c>: this member compiles on every target, and the type does
+    /// not exist on netstandard2.0 / net48.
+    /// </remarks>
+    private void DestroyObject(T o)
+    {
+#if NET6_0_OR_GREATER
+        if (_asyncPolicy is not null)
+        {
+            _asyncPolicy.OnDestroyAsync(o).GetAwaiter().GetResult();
+            if (o is IAsyncDisposable ad)
+            {
+                ad.DisposeAsync().GetAwaiter().GetResult();
+                return;
+            }
+        }
+        else
+#endif
+        {
+            _policy.OnDestroy(o);
+        }
+
+        if (o is IDisposable d) d.Dispose();
+    }
+
+#if NET6_0_OR_GREATER
+    /// <summary>
+    /// The awaited twin of <see cref="DestroyObject"/>, reached only under an asynchronous policy
+    /// (every caller dispatches on <see cref="_asyncPolicy"/>), so the destroy hook is the
+    /// asynchronous one and the object's disposal prefers <c>IAsyncDisposable</c>
+    /// (docs/async-policy.md §5).
+    /// </summary>
+    private async ValueTask DestroyObjectAsync(T o)
+    {
+        await _asyncPolicy!.OnDestroyAsync(o).ConfigureAwait(false);
+        await DisposeObjectAsync(o).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Pure object disposal for the asynchronous surface: <c>IAsyncDisposable</c> where the object
+    /// implements it, <c>IDisposable</c> otherwise (docs/async-policy.md §5). Used by the awaited
+    /// destroy twin above and by the <c>DisposeAsync</c> drain, which an explicitly asynchronous
+    /// caller opted into even when the policy did not.
+    /// </summary>
+    private async ValueTask DisposeObjectAsync(T o)
+    {
+        if (o is IAsyncDisposable ad)
+        {
+            await ad.DisposeAsync().ConfigureAwait(false);
+            return;
+        }
+
+        if (o is IDisposable d) d.Dispose();
+    }
+#endif
+
     private void Destroy(HayateObject<T> w)
     {
         if (w == null) return;
@@ -2035,8 +2110,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         try
         {
-            _policy.OnDestroy(w.Value);
-            if (w.Value is IDisposable d) d.Dispose();
+            DestroyObject(w.Value);
             UntrackObject(w);
             w.Location = HayateObjectLocation.Destroyed;
             // On destruction, clear the lease context reference so the stack frames can be GC'd with the context (on the AsyncLocal flow side
@@ -2073,8 +2147,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         try
         {
-            _policy.OnDestroy(o);
-            if (o is IDisposable d) d.Dispose();
+            DestroyObject(o);
             UntrackKey(o);
             if (_enableDiagnostics) _logger.LogDebug("Object destroyed. Type: {Type}", typeof(T).Name);
         }
@@ -2106,7 +2179,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// Computes the starting shard index for this borrow.
     /// None always returns 0 (the caller short-circuits with <c>_affinityMode != None</c> up front, guaranteeing zero overhead on the default path);
     /// Thread maps stably by managed thread ID via a golden-ratio hash (the same thread always prefers the same shard, with no coupling to the shard count via a common divisor);
-    /// Custom uses the user delegate; null/out-of-range/exception all fall back to 0 (borrow-path robustness first — the borrow is never interrupted by a missing policy).
+    /// Custom uses the user delegate; an out-of-range value or a missing delegate falls back to 0 silently, while an exception is caught, logged and also falls back to 0 (borrow-path robustness first — the borrow is never interrupted by a missing policy).
     /// </summary>
     private int SelectStartShardIndex()
     {
@@ -2852,6 +2925,96 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         _logger.LogInformation("Object pool disposed. Type: {Type}", typeof(T).Name);
     }
+
+#if NET6_0_OR_GREATER
+    /// <summary>
+    /// Drains the pool the way pooled I/O objects are meant to be torn down (A2, α form —
+    /// docs/async-policy.md §5): every object the pool owns is disposed preferring
+    /// <c>IAsyncDisposable</c> over <c>IDisposable</c>, and the policy's asynchronous destroy hook
+    /// is awaited when it provides one. The synchronous <see cref="Dispose"/> keeps its current
+    /// semantics for every pool — graceful shutdown does not change meaning for callers that do not
+    /// take this member.
+    /// </summary>
+    /// <remarks>
+    /// The teardown around the drain mirrors <see cref="Dispose"/> statement for statement; only the
+    /// drain itself is asynchronous. Rolling restarts and graceful shutdown are the target scenario:
+    /// the await suspends the caller instead of occupying a thread while connections close.
+    /// </remarks>
+    public async ValueTask DisposeAsync()
+    {
+        await ClearAsync().ConfigureAwait(false);
+
+        // Detach the shutdown subscription first (same order and reasoning as Dispose).
+        _shutdownRegistration?.Dispose();
+
+        // Release the shared background timer and drop the reference so a disposed pool retains no timer handle.
+        _backgroundTimer?.Dispose();
+        _backgroundTimer = null;
+
+        // The probe timer only exists while the breaker is open; dispose it here so a disposed pool
+        // retains no handle either (same precondition as the timers: no in-flight probe at Dispose time).
+        StopBreakerProbeTimer();
+
+        // Release the return-signal gate (same precondition as the timers: no in-flight Acquire waiters at Dispose time)
+        _blockGate.Dispose();
+
+        // O-D: hand the rented slot array back to the shared pool. The drain already emptied every
+        // slot, so the array is clean to reuse.
+        if (_enableArrayPoolStorage && _apSlots.Length > 0)
+        {
+            ArrayPool<T>.Shared.Return((T[])(object)_apSlots);
+            _apSlots = Array.Empty<T>();
+        }
+
+        _logger.LogInformation("Object pool disposed. Type: {Type}", typeof(T).Name);
+    }
+
+    /// <summary>
+    /// The drain of <see cref="DisposeAsync"/> — the awaited twin of <see cref="Clear"/>. The hook
+    /// policy per mode mirrors the synchronous clear: the general shards dispose their objects
+    /// without a destroy hook (what <c>Shard.Clear</c> has always done), while the lean buffer runs
+    /// the destroy hook for every policy (what <c>ClearLean</c> has always done) — except that a
+    /// policy providing the asynchronous destroy hook gets it awaited instead
+    /// (docs/async-policy.md §5). Object disposal prefers <c>IAsyncDisposable</c> on both modes:
+    /// the caller explicitly chose the asynchronous drain.
+    /// </summary>
+    private async ValueTask ClearAsync()
+    {
+        if (_enableLean)
+        {
+            await ClearLeanAsync().ConfigureAwait(false);
+            return;
+        }
+
+        foreach (var shard in _shards)
+        {
+            var drained = shard.DrainForClear();
+            var clearedCount = 0;
+            foreach (var w in drained)
+            {
+                try
+                {
+                    if (_asyncPolicy is not null)
+                    {
+                        await _asyncPolicy.OnDestroyAsync(w.Value).ConfigureAwait(false);
+                    }
+                    await DisposeObjectAsync(w.Value).ConfigureAwait(false);
+                    clearedCount++;
+                }
+                catch (Exception ex)
+                {
+                    // Per-object robustness, mirroring the shard's SafeDispose: one object's failed
+                    // teardown must not abandon the drain of the rest.
+                    _logger.LogError(ex, "Failed to dispose object when [async pool dispose]");
+                }
+            }
+            // The registry is cleared with the shard (including entries of borrowed objects, consistent with the original pool-level map.Clear semantics).
+            shard.ClearTracked();
+            _logger.LogInformation("[Shard {Index}] Shard cleared asynchronously, {Count} objects destroyed", shard.Index, clearedCount);
+        }
+        _logger.LogInformation("Clearing object pool. Type: {Type} (asynchronously)", typeof(T).Name);
+    }
+#endif
 
     #endregion
 }

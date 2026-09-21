@@ -30,6 +30,29 @@ Breaking changes are described in full — with migration guidance — in
   appending members to the interface across two releases would break implementers twice); the
   remaining hooks `OnReleaseAsync` / `OnPassivateAsync` / `OnDestroyAsync` are declared and must be
   implemented now, but are wired by A2 / B5.
+- **Asynchronous disposal contract** (A2, `net6.0`+): `IHayateAsyncObjectPool<T>`, an empty marker
+  beside `IHayateObjectPool<T>` that adds `IAsyncDisposable`, so a pool can be drained the way
+  pooled I/O objects are meant to be torn down — the rolling-restart / graceful-shutdown flow. The
+  correct teardown for `NetworkStream`, `SslStream` and `DbConnection` is `DisposeAsync()`; the
+  synchronous `Dispose()` either blocks on the network stack or leaves a half-closed connection
+  behind. The interface is added beside the existing one instead of onto it (the α form of
+  [`docs/async-policy.md`](docs/async-policy.md) §5): putting `IAsyncDisposable` straight on
+  `IHayateObjectPool<T>` would force every third-party implementer to add a `DisposeAsync` member —
+  a source-level break that belongs in a major release. Callers reach it with one type test:
+  `if (pool is IHayateAsyncObjectPool<T> asyncPool) await asyncPool.DisposeAsync();`. The drain is
+  implemented by every built-in pool — the sharded engine (general and lean), the preparation
+  decorator (forwarding to the inner drain, with the synchronous fallback for a third-party inner)
+  and the unbounded pool (reference-drop, so an already-completed task) — disposing each object
+  through `IAsyncDisposable` where it implements it and `IDisposable` otherwise, and awaiting
+  `OnDestroyAsync` where the policy provides one; the six destroy sites gain the `IAsyncDisposable`
+  test. The synchronous `Dispose()` keeps its current semantics for every pool, and the drain's hook
+  rules follow the mode it mirrors: the general-mode drain runs a destroy hook only for a policy
+  that opted into the asynchronous contract (its synchronous twin never ran one), while the lean
+  drain keeps running one for every policy, exactly as its synchronous twin always did.
+  `netstandard2.0` / `net48` produce neither the type nor its members: those consumers keep the
+  synchronous pool and the zero-dependency core. Second item of the three-item batch in
+  `docs/async-policy.md` (A1 → A2 → B5); with A2 in, only `OnReleaseAsync` / `OnPassivateAsync`
+  remain unwired, which is B5's work.
 
 ### Fixed
 

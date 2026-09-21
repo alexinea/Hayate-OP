@@ -1121,12 +1121,45 @@
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.CreateBorrowedOnDemandAsync(System.Int64,System.Threading.CancellationToken)">
             <summary>Asynchronous twin of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.CreateBorrowedOnDemand(System.Int64)"/>: only the creation is awaited, the hand-out bookkeeping is the shared helper.</summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.DestroyObject(`0)">
+            <summary>
+            The destroy-hook dispatch, mirroring <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.CreateObject"/> on the way out: a policy that
+            implements <c>IHayateAsyncObjectPolicy&lt;T&gt;</c> is destroyed through its asynchronous hook even
+            from a synchronous destroy site — the synchronous site waits on it instead of calling the
+            synchronous <see cref="M:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1.OnDestroy(`0)"/> (rule 1 of docs/async-policy.md) —
+            and such a pool also tears its objects down through <c>IAsyncDisposable</c> in preference to
+            <c>IDisposable</c>. Every other policy runs the two statements the site used to carry inline,
+            unchanged (rule 2).
+            </summary>
+            <remarks>
+            The hook is not swallowed here: each caller keeps the try/catch that already surrounded its
+            inline statements, so failure handling is exactly what it was. The asynchronous interface is
+            named as plain code, not a <c>cref</c>: this member compiles on every target, and the type does
+            not exist on netstandard2.0 / net48.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.DestroyObjectAsync(`0)">
+            <summary>
+            The awaited twin of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.DestroyObject(`0)"/>, reached only under an asynchronous policy
+            (every caller dispatches on <see cref="F:DotNetCore.HayateOP.HayatePoolBasic`1._asyncPolicy"/>), so the destroy hook is the
+            asynchronous one and the object's disposal prefers <c>IAsyncDisposable</c>
+            (docs/async-policy.md §5).
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.DisposeObjectAsync(`0)">
+            <summary>
+            Pure object disposal for the asynchronous surface: <c>IAsyncDisposable</c> where the object
+            implements it, <c>IDisposable</c> otherwise (docs/async-policy.md §5). Used by the awaited
+            destroy twin above and by the <c>DisposeAsync</c> drain, which an explicitly asynchronous
+            caller opted into even when the policy did not.
+            </summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.SelectStartShardIndex">
             <summary>
             Computes the starting shard index for this borrow.
             None always returns 0 (the caller short-circuits with <c>_affinityMode != None</c> up front, guaranteeing zero overhead on the default path);
             Thread maps stably by managed thread ID via a golden-ratio hash (the same thread always prefers the same shard, with no coupling to the shard count via a common divisor);
-            Custom uses the user delegate; null/out-of-range/exception all fall back to 0 (borrow-path robustness first — the borrow is never interrupted by a missing policy).
+            Custom uses the user delegate; an out-of-range value or a missing delegate falls back to 0 silently, while an exception is caught, logged and also falls back to 0 (borrow-path robustness first — the borrow is never interrupted by a missing policy).
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.CaptureLeaseContext(DotNetCore.HayateOP.HayateObject{`0})">
@@ -1216,6 +1249,32 @@
             <example><code>
             pool.ReloadConfig(o =&gt; o.MaxPoolSize = 64);
             </code></example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.DisposeAsync">
+            <summary>
+            Drains the pool the way pooled I/O objects are meant to be torn down (A2, α form —
+            docs/async-policy.md §5): every object the pool owns is disposed preferring
+            <c>IAsyncDisposable</c> over <c>IDisposable</c>, and the policy's asynchronous destroy hook
+            is awaited when it provides one. The synchronous <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Dispose"/> keeps its current
+            semantics for every pool — graceful shutdown does not change meaning for callers that do not
+            take this member.
+            </summary>
+            <remarks>
+            The teardown around the drain mirrors <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Dispose"/> statement for statement; only the
+            drain itself is asynchronous. Rolling restarts and graceful shutdown are the target scenario:
+            the await suspends the caller instead of occupying a thread while connections close.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.ClearAsync">
+            <summary>
+            The drain of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.DisposeAsync"/> — the awaited twin of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Clear"/>. The hook
+            policy per mode mirrors the synchronous clear: the general shards dispose their objects
+            without a destroy hook (what <c>Shard.Clear</c> has always done), while the lean buffer runs
+            the destroy hook for every policy (what <c>ClearLean</c> has always done) — except that a
+            policy providing the asynchronous destroy hook gets it awaited instead
+            (docs/async-policy.md §5). Object disposal prefers <c>IAsyncDisposable</c> on both modes:
+            the caller explicitly chose the asynchronous drain.
+            </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.LeanSlotArray">
             <summary>The slot array the lean buffer currently stores into (fast lane excluded).</summary>
@@ -1325,6 +1384,15 @@
             counter guard below keeps from corrupting the live count.
             </summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.DestroyLeanAsync(`0)">
+            <summary>
+            The awaited twin of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.DestroyLean(`0)"/>, used by <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.ClearLeanAsync"/>: the
+            destroy hook runs for every policy exactly as the lean clear always has — the asynchronous
+            form when the policy provides one, the synchronous form otherwise (docs/async-policy.md §5)
+            — and the object's disposal prefers <c>IAsyncDisposable</c>, because the caller explicitly
+            chose the asynchronous drain.
+            </summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.PreWarmLean">
             <summary>
             Pre-creates <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MinPoolSize"/> objects into the lean buffer.
@@ -1347,6 +1415,14 @@
             <summary>
             Destroys every idle object retained by the lean buffer. Borrowed objects are untouched, so
             their reservations stay accounted for and they re-enter the buffer normally on return.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.ClearLeanAsync">
+            <summary>
+            The awaited twin of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.ClearLean"/>, used as the lean drain of
+            <c>DisposeAsync</c>: the same slot sweep and the same live-count bookkeeping, statement for
+            statement, with each destroy awaited through <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.DestroyLeanAsync(`0)"/> instead of run
+            synchronously.
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.AcquireLean(System.TimeSpan)">
@@ -1502,6 +1578,15 @@
             not the order the list is kept in, so a sampler that wants the coldest objects keeps
             getting them under either strategy.
             </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.DrainForClear">
+            <summary>
+            The lock-protected half of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.Clear"/>: unlinks every idle wrapper, marks it
+            destroyed, and empties the borrowed links. Shared with the pool's asynchronous drain
+            (<c>HayatePoolBasic&lt;T&gt;.ClearAsync</c>), which disposes the drained objects outside this
+            lock through the awaited destroy path. No user code runs inside the critical section —
+            the same hard constraint Clear has always kept.
+            </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.SafeDispose(DotNetCore.HayateOP.HayateObject{`0},System.String)">
             <summary>
@@ -2137,8 +2222,10 @@
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithCustomShardAffinity(System.Func{System.Int32})">
             <summary>
             Sets the custom starting-shard delegate and switches into Custom mode. The return value should
-            fall in [0, ShardCount); on null / out-of-range / exception it falls back to a sequential scan
-            for that borrow (without throwing).
+            fall in [0, ShardCount); a value outside that range falls back to a sequential scan for that
+            borrow, silently (no log). If the delegate throws, the borrow falls back as well, but the
+            exception is logged. The delegate cannot return null -- to express "no affinity for this
+            borrow", return an out-of-range value such as -1.
             </summary>
             <param name="shardSelector">The delegate that returns the preferred starting shard index.</param>
             <returns>The same builder instance for chaining.</returns>
@@ -4861,6 +4948,13 @@
             </summary>
             <inheritdoc />
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.DisposeAsync">
+            <summary>
+            Forwards the asynchronous disposal (A2, docs/async-policy.md §5) to the inner pool when it
+            implements the asynchronous contract, and falls back to the synchronous teardown otherwise —
+            the decorator adds nothing of its own to drain.
+            </summary>
+        </member>
         <member name="T:DotNetCore.HayateOP.HayatePoolPreparationException">
             <summary>
             Thrown by <see cref="M:DotNetCore.HayateOP.HayatePreparationPool`1.AcquireAsync(System.Threading.CancellationToken)"/> when the preparation strategy
@@ -5577,6 +5671,51 @@
             Destroys every parked object; the pool cannot be reused afterwards.
             </summary>
             <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateUnboundedPool`1.DisposeAsync">
+            <summary>
+            The asynchronous disposal (A2, docs/async-policy.md §5) is the same clear: dropping the
+            references is the whole destroy in this model, so the drain has nothing to await and the
+            returned task is already complete.
+            </summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.IHayateAsyncObjectPool`1">
+            <summary>
+            The asynchronous disposal surface of a pool (A2, α form): everything
+            <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/> already is, plus an asynchronous shutdown that drains the
+            pool the way pooled I/O objects are meant to be torn down.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <remarks>
+            <para>
+            The interface is deliberately empty: it adds <see cref="T:System.IAsyncDisposable"/> to the existing
+            pool contract without touching that contract, so an implementation of
+            <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/> keeps compiling unchanged. The alternative — putting
+            <c>IAsyncDisposable</c> straight onto <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/> (the β form) — would
+            force every third-party implementer to add a <c>DisposeAsync</c> member, a source-level break
+            that belongs in a major release.
+            </para>
+            <para>
+            <see cref="M:System.IAsyncDisposable.DisposeAsync"/> drains: it disposes the objects the pool owns, preferring
+            <see cref="T:System.IAsyncDisposable"/> over <see cref="T:System.IDisposable"/> on each object, and it awaits the
+            asynchronous destroy hook when the policy implements
+            <see cref="T:DotNetCore.HayateOP.Policies.IHayateAsyncObjectPolicy`1"/>. The synchronous <see cref="M:System.IDisposable.Dispose"/> keeps
+            its current semantics — graceful shutdown does not change meaning for anyone who does not opt
+            in. Callers reach the asynchronous form through one type test:
+            </para>
+            <example>
+            <code>
+            if (pool is IHayateAsyncObjectPool&lt;T&gt; asyncPool) await asyncPool.DisposeAsync();
+            else pool.Dispose();
+            </code>
+            </example>
+            <para>
+            The type is available on <c>net6.0</c> and later only — <see cref="T:System.IAsyncDisposable"/> is not a
+            BCL type on <c>netstandard2.0</c> / <c>net48</c>, and those targets keep the synchronous pool
+            (no pseudo-asynchronous fallback). The dispatch rules that govern this surface are specified in
+            <c>docs/async-policy.md</c>; that page is the design and this type is expected to match it.
+            </para>
+            </remarks>
         </member>
         <member name="T:DotNetCore.HayateOP.IHayateEvictionPolicy`1">
              <summary>

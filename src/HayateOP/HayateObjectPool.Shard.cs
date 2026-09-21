@@ -73,6 +73,11 @@ public partial class HayatePoolBasic<T>
 
         private int _maxSize;
 
+        // A2 (docs/async-policy.md §5): the destroy sites prefer IAsyncDisposable for a pool whose
+        // policy implements the asynchronous contract. Constant false for every other pool, so the
+        // SafeDispose branch that reads it is dead code the JIT removes.
+        private readonly bool _prefersAsyncDisposal;
+
         // Why the shard does not maintain a BorrowedCount:
         // TryTake first physically unlinks the object from this shard's list, then sets Borrowed, so the borrowed object is never in the list;
         // therefore the "in-list IsBorrowed count" is structurally always 0. And on return, if Release rejects it (OnRelease=false) the object is destroyed directly without going through this shard's Add, so increments and decrements cannot be paired one-to-one.
@@ -151,11 +156,15 @@ public partial class HayatePoolBasic<T>
             finally { if (taken) _spareLock.Exit(); }
         }
 
-        public Shard(HayatePoolOptions options, int index, int maxSize, IHayateLogger logger)
+        public Shard(HayatePoolOptions options, int index, int maxSize, IHayateLogger logger, bool prefersAsyncDisposal = false)
         {
             Index = index;
             _maxSize = maxSize;
             _logger = logger;
+            // A2 (docs/async-policy.md §5): snapshotted from the pool, which derives it from the
+            // policy's asynchronous contract. False everywhere except net6.0+ with an asynchronous
+            // policy, so the SafeDispose branch below folds away for every other pool.
+            _prefersAsyncDisposal = prefersAsyncDisposal;
             // The borrowed list exists only to serve abandoned recovery; with both toggles off the
             // shard never maintains it (options are normalized by IsValid before the shards are built).
             _trackBorrowed = options.RemoveAbandonedOnBorrow || options.RemoveAbandonedOnMaintenance;
@@ -499,6 +508,26 @@ public partial class HayatePoolBasic<T>
 
         public void Clear()
         {
+            var drained = DrainForClear();
+
+            var clearedCount = 0;
+            foreach (var w in drained)
+            {
+                if (SafeDispose(w, "shard clear")) clearedCount++;
+            }
+
+            _logger.LogInformation("[Shard {Index}] Shard cleared, {Count} objects destroyed", Index, clearedCount);
+        }
+
+        /// <summary>
+        /// The lock-protected half of <see cref="Clear"/>: unlinks every idle wrapper, marks it
+        /// destroyed, and empties the borrowed links. Shared with the pool's asynchronous drain
+        /// (<c>HayatePoolBasic&lt;T&gt;.ClearAsync</c>), which disposes the drained objects outside this
+        /// lock through the awaited destroy path. No user code runs inside the critical section —
+        /// the same hard constraint Clear has always kept.
+        /// </summary>
+        internal HayateObject<T>[] DrainForClear()
+        {
             HayateObject<T>[] drained;
 
             var taken = false;
@@ -532,13 +561,7 @@ public partial class HayatePoolBasic<T>
             }
             finally { if (taken) _lock.Exit(); }
 
-            var clearedCount = 0;
-            foreach (var w in drained)
-            {
-                if (SafeDispose(w, "shard clear")) clearedCount++;
-            }
-
-            _logger.LogInformation("[Shard {Index}] Shard cleared, {Count} objects destroyed", Index, clearedCount);
+            return drained;
         }
 
         /// <summary>
@@ -549,6 +572,17 @@ public partial class HayatePoolBasic<T>
         {
             try
             {
+#if NET6_0_OR_GREATER
+                // A2 (docs/async-policy.md §5): a pool whose policy implements the asynchronous
+                // contract tears its objects down through IAsyncDisposable even on this synchronous
+                // drain — the synchronous caller waits — while every other pool keeps the exact
+                // statement it always ran.
+                if (_prefersAsyncDisposal && w.Value is IAsyncDisposable ad)
+                {
+                    ad.DisposeAsync().GetAwaiter().GetResult();
+                    return true;
+                }
+#endif
                 if (w.Value is IDisposable d) d.Dispose();
                 return true;
             }
