@@ -93,6 +93,40 @@ Breaking changes are described in full — with migration guidance — in
   one, neither call site needs a cast. Registering the policy directly
   (`services.AddSingleton<IHayateObjectPolicy<T>>(sp => ...)`) remains an equivalent route that needs no
   HayateOP call at all.
+- **Borrow-side lifetime rotation** (A3a, opt-in, default off): `EnableLifetimeRotationOnBorrow` /
+  `WithEnableLifetimeRotationOnBorrow()` retires a pooled object that has outlived `MaxLifeTime` on the
+  borrow path and hands out a replacement instead. This is the case HikariCP's `maxLifetime`,
+  SQLAlchemy's `pool_recycle` and `SocketsHttpHandler.PooledConnectionLifetime` exist for, and the one
+  today's pool cannot express: both paths that evaluate `MaxLifeTime` — the background eviction run and
+  `Evict(Expired)` — only ever look at idle objects, so a connection borrowed and then held by the
+  application for an hour never ages, and a server-side `max_connection_lifetime` or a middleware idle
+  timeout closes it without the pool ever learning. With the switch on, `MaxLifeTime` is a ceiling on
+  what the borrow path may hand out, and its documented meaning widens to match — the maximum lifetime
+  of a pooled object from creation, idle or borrowed. Off — the default — it keeps exactly the pre-2.9
+  meaning, a limit on idle objects only, so no existing pool changes behaviour.
+  The check is not a new cost. The borrow path already computes the object's age when
+  `EnableGenerationOptimization` is on, which is the default, and rotation reuses that computation;
+  against a release without the switch it removes two `Stopwatch.GetTimestamp()` reads and one
+  floating-point conversion from every borrow — one of those reads was a dead write, nothing observes
+  `LastBorrowedAt` between the two writes, and the remaining age test now compares precomputed ticks
+  with integers instead of converting to milliseconds — so the generational promotion itself gets
+  faster and the added work is one integer comparison. The replacement is created through the same
+  capacity-reservation path a create-on-miss uses, so a lifetime event never degrades into a rejection
+  even under `HayatePoolRejectPolicy.Abort`; at most one rotation happens per borrow and the replacement
+  is never re-checked, so a `MaxLifeTime` shorter than the time it takes to create an object cannot
+  spin. When the per-borrow budget is spent, the aged object is handed out anyway and the event is
+  logged — availability outranks lifetime. The asynchronous borrow path applies the same rule.
+  `ReloadConfig` does not apply the switch, which is a construction-time decision like the other feature
+  switches, but it does refresh the derived tick bounds, because `MaxLifeTime` and
+  `GenerationThresholdMs` can themselves be reloaded and a stale bound would let the borrow path and the
+  eviction paths disagree about the same object. Rotation is counted in
+  `HayatePoolStats.LifetimeRotatedCount` and `HayatePoolSnapshot.LifetimeRotatedCount`.
+  Lean cannot honour the switch: that path stores pooled values directly in a bounded array and keeps no
+  per-object timestamps, so it has no age to compare. Every other feature lean cannot honour is quietly
+  switched off, because the mode wins; this one fails validation instead —
+  `IsValid()` returns `false` and `Build()` throws `InvalidOperationException`, in either builder order —
+  because silently disabling it is precisely the failure the switch exists to remove, an owner who
+  believes objects are rotated on hand-out while they are not.
 
 ### Fixed
 

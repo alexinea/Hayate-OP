@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Buffers;
 #endif
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using DotNetCore.HayateOP.Common;
 using DotNetCore.HayateOP.Logging;
 using DotNetCore.HayateOP.Metrics;
@@ -177,6 +178,19 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private readonly bool _enableEviction;
     private readonly bool _enableAutoScaling;
 
+    // A3a (off by default): rotate an object that has outlived MaxLifeTime on the borrow path, instead
+    // of handing it out. Captured at construction like every other feature switch.
+    private readonly bool _enableLifetimeRotationOnBorrow;
+
+    // Precomputed tick bounds for the two age comparisons on the borrow path (generational promotion and
+    // the lifetime rotation). Keeping them as ticks removes the per-borrow double multiply/divide the
+    // generational check used to do, and lets both consumers share a single age subtraction. They are
+    // fields rather than constants because ReloadConfig can change MaxLifeTime / GenerationThresholdMs
+    // at runtime, and a stale bound would make the borrow path disagree with the eviction paths about
+    // whether the same object is expired.
+    private long _generationThresholdTicks;
+    private long _maxLifeTicks;
+
     // Leak forensics capture mode (decoupled from leak detection). Off by default — the borrow hot path does not capture stacks.
     private readonly HayateLeakTraceCaptureMode _leakTraceCaptureMode;
     private readonly int _leakTraceSampleRate;
@@ -205,10 +219,20 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private readonly bool _enableAbandonedRecovery;
     // Cumulative count of borrowed objects reclaimed as abandoned (the CHOPIN DestroyedByAbandonedCount analog).
     private long _abandonedRemovedCount;
+    // A3a: cumulative count of objects destroyed on the borrow path for having outlived MaxLifeTime
+    // (0 unless EnableLifetimeRotationOnBorrow is on).
+    private long _lifetimeRotatedCount;
     // How many oldest outstanding borrows one borrow-path pass examines (the maintenance pass scans
     // everything). A small bounded budget keeps the opt-in borrow path's latency predictable while the
     // FIFO borrowed list guarantees the oldest — hence most likely abandoned — borrows are seen first.
     private const int BorrowAbandonedScanBudget = 8;
+
+    // A3a-Q2: how many expired objects one borrow may retire before it stops rotating and hands out what
+    // it found. The bound keeps a MaxLifeTime shorter than an object's creation time from turning a
+    // single borrow into an endless create/destroy cycle — availability wins over lifetime, so the aged
+    // object is handed out rather than the caller being made to wait for a replacement that expires
+    // just as fast.
+    private const int LifetimeRotationsPerBorrow = 1;
 
     // Shard-affinity mode (constructor-time snapshot). None is the default and has zero overhead (start index is always 0);
     // Thread maps the start shard stably by thread ID; Custom uses the user delegate (falling back to sequential scan on exception/out-of-range/null).
@@ -312,8 +336,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _enableGenerationOptimization = _options.EnableGenerationOptimization;
         _enableLeakDetection = _options.EnableLeakDetection;
         _enableEviction = _options.EnableEviction;
+        _enableLifetimeRotationOnBorrow = _options.EnableLifetimeRotationOnBorrow;
         _enableDiagnostics = _options.EnableDiagnostics;
         _enableMetrics = _options.EnableMetrics;
+
+        // Derived tick bounds for the borrow path (see the field declarations). Recomputed here and by
+        // ReloadConfig, never on the hot path.
+        RefreshDerivedTimeThresholds();
 
         // T-R: the return-path soft ceiling (0 = disabled). Snapshotted here so the return path reads a
         // readonly field; IsValid has already rejected a ceiling outside [MinPoolSize, MaxPoolSize].
@@ -744,6 +773,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         var sw = ValueStopwatch.StartNew();
 
+        // A3a: the rotation budget belongs to this borrow call, not to one pass of the retry loop below,
+        // so it is declared out here (see LifetimeRotationsPerBorrow).
+        var remainingLifetimeRotations = LifetimeRotationsPerBorrow;
+
         // The affinity start shard is evaluated only once per Acquire (None is always 0, zero extra overhead).
         var affinityStart = _affinityMode == HayateShardAffinityMode.None ? 0 : SelectStartShardIndex();
 
@@ -760,6 +793,54 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     // On a successful borrow, consume one wake-up signal (if any) to keep the signal count aligned with the pool's idle objects;
                     // preventing waiters from being spuriously woken one by one by stale signals into a busy spin. Wait(0) returns false immediately when no signal.
                     _blockGate.Wait(0);
+
+                    #region Borrow-path clock and object age (A3a: one read, two consumers)
+
+                    // One clock read serves the whole borrow. It used to be taken up to three times on this
+                    // path — a conditional LastBorrowedAt write, an unconditional one, and the generational
+                    // age — and only the unconditional one was load-bearing (nothing observable read the
+                    // field between the two writes, and the policy hook receives the pooled value, not the
+                    // wrapper). Age is the only input the two remaining consumers need, and it is derived
+                    // from timestamps already on hand, so sharing one computation costs nothing.
+                    var now = Stopwatch.GetTimestamp();
+
+                    // Computed once and used twice: the lifetime rotation below and the generational
+                    // promotion further down. With both switches off the block is a perfectly predicted
+                    // branch, and the age is never derived.
+                    var ageTicks = 0L;
+                    if (_enableGenerationOptimization || _enableLifetimeRotationOnBorrow)
+                    {
+                        ageTicks = now - w.CreatedAt;
+
+                        // Lifetime rotation (A3a, off by default): MaxLifeTime also caps what may be handed
+                        // out, not merely what may stay idle. Evaluated before the policy's acquire hook,
+                        // because an object that is about to be discarded must not be activated.
+                        if (_enableLifetimeRotationOnBorrow && ageTicks > _maxLifeTicks)
+                        {
+                            if (remainingLifetimeRotations > 0)
+                            {
+                                remainingLifetimeRotations--;
+                                RetireExpiredOnBorrow(w);
+
+                                // Replace it through the create-on-miss path — the same MaxPoolSize
+                                // reservation the reject policies use — so a lifetime event never turns into
+                                // a rejection. A null result means a concurrent borrow claimed the freed
+                                // slot first, and the ordinary wait/reject handling below applies.
+                                var rotated = TryCreateOnDemand((long)sw.Elapsed.TotalMilliseconds);
+                                if (rotated is not null) return rotated;
+                                continue;
+                            }
+
+                            // Budget spent (A3a-Q2): hand the aged object out rather than fail a borrow that
+                            // has something to give.
+                            if (_enableDiagnostics)
+                            {
+                                _logger.LogDebug("Borrow handing out an object past MaxLifeTime: the per-borrow rotation budget is spent. Type: {Type}", typeof(T).Name);
+                            }
+                        }
+                    }
+
+                    #endregion
 
                     #region Generational validation logic
 
@@ -813,12 +894,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     // The borrowed state is no longer set separately — Shard.TryTake already moves Location
                     // to Borrowed on claim, and IsBorrowed is its computed property (single source of truth).
 
-                    //if (_options.EnableEviction || _options.EnableLeakDetection || _options.EnableGenerationOptimization)
-                    if (_enableEviction || _enableLeakDetection || _enableGenerationOptimization)
-                    {
-                        w.LastBorrowedAt = Stopwatch.GetTimestamp();
-                    }
-
+                    // A conditional LastBorrowedAt write used to sit here, guarded by
+                    // (eviction || leakDetection || generationOptimization). It was dead: that guard is a
+                    // subset of the unconditional write below, nothing observable read the field in
+                    // between, and the policy hook above is handed the pooled value rather than the
+                    // wrapper. Removing it is what pays for the shared age computation.
                     //if (_options.EnableLeakDetection)
                     if (_enableLeakDetection)
                     {
@@ -841,9 +921,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                     // The borrow timestamp is recorded unconditionally. The old conditional gating (eviction/leakDetection/generation)
                     // left LastBorrowedAt at 0 when everything was off, structurally breaking the leak recheck (LeakSuspectedCount);
-                    // a single QPC (Stopwatch.GetTimestamp) has no allocation and no time-zone conversion,
-                    // and its cost is far below the DateTime.UtcNow removed by the scale-timestamp change, so it is acceptable.
-                    w.LastBorrowedAt = Stopwatch.GetTimestamp();
+                    // it now reuses the read taken at the top of this block rather than taking a second one.
+                    w.LastBorrowedAt = now;
 
                     // Cumulative borrow count. At the moment of borrow the wrapper is exclusively owned by this thread (TryTake already unlinked and claimed it,
                     // and eviction/validation cannot claim a Borrowed object), so a plain increment suffices — no Interlocked needed.
@@ -851,10 +930,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     w.LastGetThreadId = Environment.CurrentManagedThreadId;
                     w.LeaseCount++;
 
-                    // Generational promotion, only when generational optimization is enabled
+                    // Generational promotion, only when generational optimization is enabled. Compares the age
+                    // computed at the top of this block against a precomputed tick bound, which removes the
+                    // per-borrow double multiply/divide this used to perform.
                     //if (_options.EnableGenerationOptimization &&
-                    if (_enableGenerationOptimization &&
-                        (Stopwatch.GetTimestamp() - w.CreatedAt) * 1000.0 / Stopwatch.Frequency > _options.GenerationThresholdMs)
+                    if (_enableGenerationOptimization && ageTicks > _generationThresholdTicks)
                     {
                         w.Generation = 1;
                     }
@@ -1014,6 +1094,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         // The affinity start shard is evaluated only once per AcquireAsync (None is always 0, zero extra overhead).
         var affinityStart = _affinityMode == HayateShardAffinityMode.None ? 0 : SelectStartShardIndex();
 
+        // A3a: the rotation budget belongs to this borrow call, not to one pass of the retry loop below.
+        var remainingLifetimeRotations = LifetimeRotationsPerBorrow;
+
         while (!cancellationToken.IsCancellationRequested)
         {
             // Ring scan starting from the affinity shard (equivalent to a sequential foreach scan when start = 0).
@@ -1029,6 +1112,46 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     // preventing stale signals from accumulating and causing asynchronous waiters to spin spuriously.
                     _blockGate.Wait(0);
 
+                    // A3a: the asynchronous borrow honours the same lifetime ceiling as the synchronous one.
+                    // The age is derived from the timestamp this path records unconditionally anyway, so the
+                    // check adds no clock read; leaving it out would let an object held across await
+                    // boundaries outlive MaxLifeTime while the synchronous path rotated it, which is the
+                    // kind of silent asymmetry the rotation exists to remove.
+                    var now = Stopwatch.GetTimestamp();
+                    if (_enableLifetimeRotationOnBorrow && now - w.CreatedAt > _maxLifeTicks)
+                    {
+                        if (remainingLifetimeRotations > 0)
+                        {
+                            remainingLifetimeRotations--;
+                            RetireExpiredOnBorrow(w);
+
+                            // Replacement through the create-on-miss path, dispatched exactly as the
+                            // cold-boot branch below dispatches it: an asynchronous policy is awaited,
+                            // every other policy runs the synchronous creation.
+#if NET6_0_OR_GREATER
+                            if (_asyncPolicy is not null)
+                            {
+                                var rotatedAsync = await TryCreateOnDemandAsync(0, cancellationToken).ConfigureAwait(false);
+                                if (rotatedAsync is not null) return rotatedAsync;
+                            }
+                            else
+#endif
+                            {
+                                var rotated = TryCreateOnDemand(0);
+                                if (rotated is not null) return rotated;
+                            }
+
+                            continue;
+                        }
+
+                        // Budget spent (A3a-Q2): hand the aged object out rather than fail a borrow that has
+                        // something to give.
+                        if (_enableDiagnostics)
+                        {
+                            _logger.LogDebug("Borrow handing out an object past MaxLifeTime: the per-borrow rotation budget is spent. Type: {Type}", typeof(T).Name);
+                        }
+                    }
+
                     if (_options.ValidateOnBorrow && !_policy.Validate(w.Value))
                     {
                         Destroy(w);
@@ -1043,7 +1166,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     w.ShardIndex = shard.Index;
 
                     // The borrow timestamp is recorded unconditionally (consistent with the synchronous path, keeping leak recheck usable)
-                    w.LastBorrowedAt = Stopwatch.GetTimestamp();
+                    w.LastBorrowedAt = now;
 
                     // Cumulative borrow count (TryTake already unlinked and claimed, so the wrapper is exclusively owned by this thread now)
                     // Which thread took this object (wrapper metadata, see HayateObject<T>.LastGetThreadId).
@@ -1426,8 +1549,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 }
                 else // Expired
                 {
-                    // Same criterion as background expired eviction
-                    match = (now - w.CreatedAt) / (double)Stopwatch.Frequency > _options.MaxLifeTime.TotalSeconds;
+                    // Shared with the borrow-side rotation so the two cannot disagree about whether the same
+                    // object is expired. The background run judges through IHayateEvictionPolicy<T>, whose
+                    // candidate carries the age as a TimeSpan — equivalent to this within a single tick, and
+                    // public, so it keeps its own comparison.
+                    match = IsExpired(now, w);
                 }
 
                 if (!match) continue;
@@ -2341,6 +2467,59 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     #endregion
 
+    #region Lifetime rotation (A3a)
+
+    /// <summary>
+    /// Recomputes the tick bounds the borrow path compares against. Called at construction and by
+    /// <see cref="ReloadConfig"/>, which may change <see cref="HayatePoolOptions.MaxLifeTime"/> or
+    /// <see cref="HayatePoolOptions.GenerationThresholdMs"/> — without the refresh the borrow path would
+    /// keep judging against the values the pool was built with while the eviction paths, which read the
+    /// options live, judged against the new ones.
+    /// </summary>
+    private void RefreshDerivedTimeThresholds()
+    {
+        var frequency = Stopwatch.Frequency;
+        _generationThresholdTicks = (long)(_options.GenerationThresholdMs * 0.001 * frequency);
+        _maxLifeTicks = (long)(_options.MaxLifeTime.TotalSeconds * frequency);
+    }
+
+    /// <summary>
+    /// Whether the pooled object has outlived <see cref="HayatePoolOptions.MaxLifeTime"/>, judged from
+    /// the tick count the caller already holds.
+    /// </summary>
+    /// <remarks>
+    /// Single point of truth for the pool's own lifetime judgement, so the borrow-side rotation and the
+    /// manual <c>Evict</c> cannot disagree at the boundary. The background eviction run judges through
+    /// <see cref="IHayateEvictionPolicy{T}"/> instead — that extension point carries the object's age as
+    /// a <see cref="TimeSpan"/> and is public, so it keeps its own (equivalent within a single tick)
+    /// comparison rather than being re-based on ticks.
+    /// </remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool IsExpired(long now, HayateObject<T> w) => now - w.CreatedAt > _maxLifeTicks;
+
+    /// <summary>
+    /// Retires an object the borrow path found expired, so that hitting the lifetime ceiling never
+    /// surfaces as a rejection.
+    /// </summary>
+    /// <remarks>
+    /// Only the retirement lives here; the caller creates the replacement through the create-on-miss path
+    /// (and therefore the same <c>MaxPoolSize</c> reservation) its generation already uses — destroying
+    /// first frees the slot that makes that possible. At most one rotation is performed per borrow and the
+    /// replacement is never re-checked, so a <see cref="HayatePoolOptions.MaxLifeTime"/> shorter than the
+    /// time it takes to create an object cannot spin.
+    /// </remarks>
+    private void RetireExpiredOnBorrow(HayateObject<T> w)
+    {
+        Destroy(w);
+        Interlocked.Increment(ref _lifetimeRotatedCount);
+        if (_enableDiagnostics)
+        {
+            _logger.LogDebug("Object rotated on borrow: outlived MaxLifeTime. Type: {Type}", typeof(T).Name);
+        }
+    }
+
+    #endregion
+
     #region Background Tasks
 
     private void EvictionCallback(object? state)
@@ -2702,6 +2881,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             LeakDetectedCount = Interlocked.Read(ref _leakDetectedCount),
             LeakSuspectedCount = Interlocked.Read(ref _leakSuspectedCount),
             AbandonedRemovedCount = Interlocked.Read(ref _abandonedRemovedCount),
+            LifetimeRotatedCount = Interlocked.Read(ref _lifetimeRotatedCount),
             AllocationTrackingEnabled = _enableAllocationTracking,
             AcquireAllocatedBytes = Interlocked.Read(ref _acquireAllocatedBytes),
             ReleaseAllocatedBytes = Interlocked.Read(ref _releaseAllocatedBytes),
@@ -2805,6 +2985,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             LeakCount = Interlocked.Read(ref _leakDetectedCount),
             LeakSuspectedCount = Interlocked.Read(ref _leakSuspectedCount),
             AbandonedRemovedCount = Interlocked.Read(ref _abandonedRemovedCount),
+            LifetimeRotatedCount = Interlocked.Read(ref _lifetimeRotatedCount),
             AllocationTrackingEnabled = _enableAllocationTracking,
             AcquireAllocatedBytes = Interlocked.Read(ref _acquireAllocatedBytes),
             ReleaseAllocatedBytes = Interlocked.Read(ref _releaseAllocatedBytes),
@@ -2833,6 +3014,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
             configure(_options);
             _options.ApplyFeatureSwitches(); // Force-correct the configuration
+
+            // The borrow path compares against precomputed tick bounds rather than converting the options
+            // on every borrow, so a reload that changes MaxLifeTime or GenerationThresholdMs has to
+            // recompute them — otherwise the borrow path would keep judging against the values the pool was
+            // built with while the eviction paths, which read the options live, judged against the new ones.
+            RefreshDerivedTimeThresholds();
 
             // Lean mode owns a retention buffer and a dispatch decision that are both fixed at
             // construction time. Resizing or leaving the mode would silently desynchronize the pool

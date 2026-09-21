@@ -407,16 +407,51 @@ public class HayatePoolOptions
     public bool EnableEviction { get; set; } = true;
 
     /// <summary>
-    /// Maximum object lifetime.<br />
+    /// Maximum object lifetime, measured from the moment the pooled object was created.<br />
     /// Default value: <c>TimeSpan.FromMinutes(10)</c>.
     /// </summary>
     /// <remarks>
     /// Purpose: cap object lifetime to reduce stale-state risk.<br />
     /// Special case: external-connection objects can use a shorter value.<br />
     /// Boundary: should be greater than <see cref="TimeSpan.Zero"/>.<br />
-    /// Recommended range: 5~60 minutes.
+    /// Recommended range: 5~60 minutes.<br />
+    /// <br />
+    /// Scope: the lifetime is evaluated against <b>idle</b> objects by the eviction run and by the
+    /// manual <c>Evict</c> call. Evaluating it against an object that is currently borrowed is the
+    /// opt-in <see cref="EnableLifetimeRotationOnBorrow"/>; while that switch is off — the default —
+    /// an object held by the application for longer than this value is never treated as expired,
+    /// which is the pre-2.9 behaviour. With it on, this value also becomes a ceiling on what the
+    /// borrow path may hand out.
     /// </remarks>
     public TimeSpan MaxLifeTime { get; set; } = TimeSpan.FromMinutes(HayateConstant.DEFAULT_MAX_LIFE_TIME_MINUTES);
+
+    /// <summary>
+    /// Rotates an object that has outlived <see cref="MaxLifeTime"/> on the borrow path instead of
+    /// handing it out.<br />
+    /// Default value: <c>false</c>.
+    /// </summary>
+    /// <remarks>
+    /// Purpose: make <see cref="MaxLifeTime"/> a ceiling on what may be handed out, not merely a limit
+    /// on idle objects. Without it an object borrowed and held by the application for longer than
+    /// <see cref="MaxLifeTime"/> is never recycled, so a server-side connection lifetime or an
+    /// intermediary's idle timeout can invalidate the object without the pool knowing — the scenario
+    /// HikariCP's <c>maxLifetime</c> and SQLAlchemy's <c>pool_recycle</c> exist for.<br />
+    /// Behaviour when enabled: a borrow that finds an expired object destroys it and creates a
+    /// replacement through the same capacity-reservation path the create-on-miss policy uses, so a
+    /// lifetime event never turns into a rejection. At most one rotation happens per borrow and the
+    /// replacement is never re-checked, so a <see cref="MaxLifeTime"/> shorter than the time it takes
+    /// to create an object cannot spin.<br />
+    /// Cost: when the generational optimization already computes the object's age on the borrow path
+    /// this reuses that computation and adds one integer comparison (while removing two clock reads);
+    /// with the generational optimization off it adds one integer subtraction and one comparison, using
+    /// the timestamp the borrow path records unconditionally anyway.<br />
+    /// Construction-time switch: like the other feature switches it is captured when the pool is built
+    /// and is not applied by <c>ReloadConfig</c>.<br />
+    /// Boundary: cannot be combined with <see cref="EnableLean"/> — the lean fast path keeps no
+    /// per-object timestamps and therefore cannot evaluate an object's age, so the combination fails
+    /// validation rather than being silently ignored.
+    /// </remarks>
+    public bool EnableLifetimeRotationOnBorrow { get; set; }
 
     /// <summary>
     /// Maximum object idle time.<br />
@@ -1125,6 +1160,7 @@ public class HayatePoolOptions
         // Eviction
         options.EnableEviction = this.EnableEviction;
         options.MaxLifeTime = this.MaxLifeTime;
+        options.EnableLifetimeRotationOnBorrow = this.EnableLifetimeRotationOnBorrow;
         options.MaxIdleTime = this.MaxIdleTime;
         options.SoftMinEvictableIdleTime = this.SoftMinEvictableIdleTime;
         options.EvictionIntervalMs = this.EvictionIntervalMs;
@@ -1407,6 +1443,15 @@ public class HayatePoolOptions
             if (MaxIdleTime <= TimeSpan.Zero) return false;
             if (SoftMinEvictableIdleTime <= TimeSpan.Zero) return false;
         }
+
+        // A3a: the lean fast path stores pooled values directly in a bounded array, keeps no per-object
+        // timestamps and therefore cannot evaluate an object's age — the borrow-side lifetime rotation
+        // can never run there. Every other feature switch lean cannot honour is normalized away by
+        // ApplyFeatureSwitches ("the mode wins"), but this one is rejected instead: silently switching it
+        // off would leave an owner who believes objects are being rotated on hand-out while they are
+        // not, which is the exact failure this switch exists to remove. Rejecting is also
+        // order-independent, whereas normalizing it away would make builder call order significant.
+        if (EnableLean && EnableLifetimeRotationOnBorrow) return false;
 
         if (EnableSharding)
         {

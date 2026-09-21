@@ -1241,6 +1241,41 @@
             when disabled (WarnAtRatio = 0 and CriticalAtRatio = 0) the caller's read-only flag short-circuits it at zero cost.
             </summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.RefreshDerivedTimeThresholds">
+            <summary>
+            Recomputes the tick bounds the borrow path compares against. Called at construction and by
+            <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.ReloadConfig(System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/>, which may change <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/> or
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.GenerationThresholdMs"/> — without the refresh the borrow path would
+            keep judging against the values the pool was built with while the eviction paths, which read the
+            options live, judged against the new ones.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.IsExpired(System.Int64,DotNetCore.HayateOP.HayateObject{`0})">
+            <summary>
+            Whether the pooled object has outlived <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/>, judged from
+            the tick count the caller already holds.
+            </summary>
+            <remarks>
+            Single point of truth for the pool's own lifetime judgement, so the borrow-side rotation and the
+            manual <c>Evict</c> cannot disagree at the boundary. The background eviction run judges through
+            <see cref="T:DotNetCore.HayateOP.IHayateEvictionPolicy`1"/> instead — that extension point carries the object's age as
+            a <see cref="T:System.TimeSpan"/> and is public, so it keeps its own (equivalent within a single tick)
+            comparison rather than being re-based on ticks.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.RetireExpiredOnBorrow(DotNetCore.HayateOP.HayateObject{`0})">
+            <summary>
+            Retires an object the borrow path found expired, so that hitting the lifetime ceiling never
+            surfaces as a rejection.
+            </summary>
+            <remarks>
+            Only the retirement lives here; the caller creates the replacement through the create-on-miss path
+            (and therefore the same <c>MaxPoolSize</c> reservation) its generation already uses — destroying
+            first frees the slot that makes that possible. At most one rotation is performed per borrow and the
+            replacement is never re-checked, so a <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/> shorter than the
+            time it takes to create an object cannot spin.
+            </remarks>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.LogEviction(System.Int32,DotNetCore.HayateOP.HayateEvictionCandidate{`0}@)">
             <summary>
             Logs one eviction. A pool running the built-in rule keeps the historical line, whose three flags
@@ -2522,6 +2557,28 @@
             </code>
             </example>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithEnableLifetimeRotationOnBorrow(System.Boolean)">
+            <summary>
+            Enables or disables rotating an object that has outlived
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/> on the borrow path.
+            </summary>
+            <param name="enable">Whether to rotate expired objects when they are borrowed; defaults to
+            <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <remarks>
+            Off by default. With it on, <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/> also caps what the borrow
+            path may hand out, instead of limiting idle objects only. Cannot be combined with
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLean"/> (the lean fast path keeps no timestamps) — that
+            combination fails validation when the pool is built.
+            </remarks>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyConnection&gt;()
+                .WithMaxLifeTime(TimeSpan.FromMinutes(5))
+                .WithEnableLifetimeRotationOnBorrow();
+            </code>
+            </example>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithMaxIdleTime(System.TimeSpan)">
             <summary>
             Sets the maximum object idle time.
@@ -3547,14 +3604,49 @@
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime">
             <summary>
-            Maximum object lifetime.<br />
+            Maximum object lifetime, measured from the moment the pooled object was created.<br />
             Default value: <c>TimeSpan.FromMinutes(10)</c>.
             </summary>
             <remarks>
             Purpose: cap object lifetime to reduce stale-state risk.<br />
             Special case: external-connection objects can use a shorter value.<br />
             Boundary: should be greater than <see cref="F:System.TimeSpan.Zero"/>.<br />
-            Recommended range: 5~60 minutes.
+            Recommended range: 5~60 minutes.<br />
+            <br />
+            Scope: the lifetime is evaluated against <b>idle</b> objects by the eviction run and by the
+            manual <c>Evict</c> call. Evaluating it against an object that is currently borrowed is the
+            opt-in <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLifetimeRotationOnBorrow"/>; while that switch is off — the default —
+            an object held by the application for longer than this value is never treated as expired,
+            which is the pre-2.9 behaviour. With it on, this value also becomes a ceiling on what the
+            borrow path may hand out.
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLifetimeRotationOnBorrow">
+            <summary>
+            Rotates an object that has outlived <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/> on the borrow path instead of
+            handing it out.<br />
+            Default value: <c>false</c>.
+            </summary>
+            <remarks>
+            Purpose: make <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/> a ceiling on what may be handed out, not merely a limit
+            on idle objects. Without it an object borrowed and held by the application for longer than
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/> is never recycled, so a server-side connection lifetime or an
+            intermediary's idle timeout can invalidate the object without the pool knowing — the scenario
+            HikariCP's <c>maxLifetime</c> and SQLAlchemy's <c>pool_recycle</c> exist for.<br />
+            Behaviour when enabled: a borrow that finds an expired object destroys it and creates a
+            replacement through the same capacity-reservation path the create-on-miss policy uses, so a
+            lifetime event never turns into a rejection. At most one rotation happens per borrow and the
+            replacement is never re-checked, so a <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/> shorter than the time it takes
+            to create an object cannot spin.<br />
+            Cost: when the generational optimization already computes the object's age on the borrow path
+            this reuses that computation and adds one integer comparison (while removing two clock reads);
+            with the generational optimization off it adds one integer subtraction and one comparison, using
+            the timestamp the borrow path records unconditionally anyway.<br />
+            Construction-time switch: like the other feature switches it is captured when the pool is built
+            and is not applied by <c>ReloadConfig</c>.<br />
+            Boundary: cannot be combined with <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLean"/> — the lean fast path keeps no
+            per-object timestamps and therefore cannot evaluate an object's age, so the combination fails
+            validation rather than being silently ignored.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.MaxIdleTime">
@@ -4706,6 +4798,13 @@
             0 in the default forensics-only configuration).
             </summary>
         </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.LifetimeRotatedCount">
+            <summary>
+            Cumulative number of objects destroyed on the borrow path for having outlived
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/> (A3a, opt-in; 0 when
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLifetimeRotationOnBorrow"/> is off, which is the default).
+            </summary>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.LeakTraces">
             <summary>The captured leak traces (stack frames or placeholders), if leak tracing is enabled.</summary>
         </member>
@@ -4799,6 +4898,14 @@
             (<see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedOnBorrow"/> /
             <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RemoveAbandonedOnMaintenance"/>) destroyed. Always 0 when recovery
             is off — the default remains forensics-only. The CHOPIN <c>DestroyedByAbandonedCount</c> analog.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.LifetimeRotatedCount">
+            <summary>
+            Cumulative number of objects destroyed on the borrow path for having outlived
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/> (A3a). Always 0 unless
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLifetimeRotationOnBorrow"/> is on — the default keeps
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/> a limit on idle objects only.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.AllocationTrackingEnabled">

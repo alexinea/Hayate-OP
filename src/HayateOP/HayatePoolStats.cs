@@ -75,6 +75,14 @@ public class HayatePoolStats
     public long AbandonedRemovedCount { get; set; }
 
     /// <summary>
+    /// Cumulative number of objects destroyed on the borrow path for having outlived
+    /// <see cref="HayatePoolOptions.MaxLifeTime"/> (A3a). Always 0 unless
+    /// <see cref="HayatePoolOptions.EnableLifetimeRotationOnBorrow"/> is on — the default keeps
+    /// <see cref="HayatePoolOptions.MaxLifeTime"/> a limit on idle objects only.
+    /// </summary>
+    public long LifetimeRotatedCount { get; set; }
+
+    /// <summary>
     /// Whether allocation tracking is enabled.
     /// </summary>
     public bool AllocationTrackingEnabled { get; set; }
@@ -176,6 +184,7 @@ public class HayatePoolStats
   LeakDetectedCount: {LeakDetectedCount}
   LeakSuspectedCount: {LeakSuspectedCount}
   AbandonedRemovedCount: {AbandonedRemovedCount}
+  LifetimeRotatedCount: {LifetimeRotatedCount}
   AllocationTrackingEnabled: {AllocationTrackingEnabled}
   AverageAcquireAllocatedBytes: {AverageAcquireAllocatedBytes:F1}
   AverageReleaseAllocatedBytes: {AverageReleaseAllocatedBytes:F1}

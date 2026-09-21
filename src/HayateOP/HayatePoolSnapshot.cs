@@ -26,6 +26,12 @@ public class HayatePoolSnapshot
     /// 0 in the default forensics-only configuration).
     /// </summary>
     public long AbandonedRemovedCount { get; set; }
+    /// <summary>
+    /// Cumulative number of objects destroyed on the borrow path for having outlived
+    /// <see cref="HayatePoolOptions.MaxLifeTime"/> (A3a, opt-in; 0 when
+    /// <see cref="HayatePoolOptions.EnableLifetimeRotationOnBorrow"/> is off, which is the default).
+    /// </summary>
+    public long LifetimeRotatedCount { get; set; }
     /// <summary>The captured leak traces (stack frames or placeholders), if leak tracing is enabled.</summary>
     public IReadOnlyList<string> LeakTraces { get; set; } = [];
     /// <summary>

@@ -1075,6 +1075,32 @@ public class HayatePoolBuilder<T> where T : class
     }
 
     /// <summary>
+    /// Enables or disables rotating an object that has outlived
+    /// <see cref="HayatePoolOptions.MaxLifeTime"/> on the borrow path.
+    /// </summary>
+    /// <param name="enable">Whether to rotate expired objects when they are borrowed; defaults to
+    /// <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <remarks>
+    /// Off by default. With it on, <see cref="HayatePoolOptions.MaxLifeTime"/> also caps what the borrow
+    /// path may hand out, instead of limiting idle objects only. Cannot be combined with
+    /// <see cref="HayatePoolOptions.EnableLean"/> (the lean fast path keeps no timestamps) — that
+    /// combination fails validation when the pool is built.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyConnection&gt;()
+    ///     .WithMaxLifeTime(TimeSpan.FromMinutes(5))
+    ///     .WithEnableLifetimeRotationOnBorrow();
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithEnableLifetimeRotationOnBorrow(bool enable = true)
+    {
+        _options.EnableLifetimeRotationOnBorrow = enable;
+        return this;
+    }
+
+    /// <summary>
     /// Sets the maximum object idle time.
     /// </summary>
     /// <param name="idleTime">The maximum time an object may stay idle before eviction.</param>

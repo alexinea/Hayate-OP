@@ -1096,6 +1096,50 @@ object lent out between the test and the removal is skipped. Each shard contribu
 on a pool that never runs an eviction scan (`EnableEviction = false`, or the lean profile, which
 disables idle eviction by construction) fails the build rather than silently never running.
 
+### Object lifetime and borrow-side rotation
+
+`MaxLifeTime` is the maximum lifetime of a pooled object from the moment it is created — idle or
+borrowed. Which half of that meaning the pool enforces is a choice:
+
+```csharp
+var pool = new HayatePoolBuilder<Connection>()
+    .WithMaxLifeTime(TimeSpan.FromMinutes(30))
+    .WithEnableLifetimeRotationOnBorrow()   // opt-in; off by default
+    .Build();
+```
+
+**Off** — the default, and the behaviour of every release before 2.9 — only **idle** objects are ever
+retired for age, by the background eviction run or by `Evict(Expired)`. A connection you borrow and then
+hold for an hour never ages, so a server-side `max_connection_lifetime` or a middleware idle timeout can
+close it without the pool ever learning. That is the case HikariCP's `maxLifetime` and SQLAlchemy's
+`pool_recycle` exist for.
+
+**On**, `MaxLifeTime` also becomes a ceiling on what the borrow path may hand out: a borrow that finds an
+object past it destroys that object and hands out a replacement instead. The replacement is created
+through the same capacity-reservation path a create-on-miss uses, so a lifetime event never degrades into
+a rejection, and at most one rotation happens per borrow — the replacement is never re-checked, so a
+`MaxLifeTime` shorter than the time it takes to create an object cannot spin. When the per-borrow budget
+is spent, the aged object is handed out anyway and the event is logged: availability outranks lifetime.
+`AcquireAsync` applies the same rule, and `HayatePoolStats.LifetimeRotatedCount` /
+`HayatePoolSnapshot.LifetimeRotatedCount` count the rotations.
+
+The check is close to free. The borrow path already computes the object's age when
+`EnableGenerationOptimization` is on, which is the default, and rotation reuses that computation; against
+a pool without the switch it removes two clock reads and one floating-point conversion per borrow, so the
+generational promotion itself gets faster and the added work is one integer comparison.
+
+The lean fast path cannot honour the switch — it stores the pooled value directly in a bounded array and
+keeps no per-object timestamps, so it has no age to compare. Every other feature lean cannot honour is
+quietly switched off, because the mode wins; this one fails the build instead:
+
+```csharp
+// Throws InvalidOperationException: the lean fast path cannot evaluate an object's age.
+new HayatePoolBuilder<Connection>().WithLean().WithEnableLifetimeRotationOnBorrow().Build();
+```
+
+Silently ignoring the switch is exactly the failure it exists to remove — an owner who believes objects
+are rotated on hand-out while they are not.
+
 ### Borrow order (FIFO / LIFO)
 
 A borrow is served from one end of the shard's idle list, and which end is a choice:
