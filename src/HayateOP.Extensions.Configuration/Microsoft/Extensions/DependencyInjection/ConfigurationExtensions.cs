@@ -137,6 +137,8 @@ public static class ConfigurationExtensions
 
         // The pool logs under its own MEL category. The builder resolves the same category through the
         // factory at Build time; this instance is the one the hot-reload callback below keeps writing to.
+        // L3: as on the DI path, a null ILoggerFactory falls back to the built-in logger inside the
+        // factory rather than to a silent one.
         var hayateLoggerFactory = new HayateMicrosoftLoggerFactory(loggerFactory);
         var logger = hayateLoggerFactory.CreateLogger(poolName);
 

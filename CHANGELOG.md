@@ -181,6 +181,16 @@ Breaking changes are described in full — with migration guidance — in
   object it was handed is `Unhealthy`. A host that alerted on "the pool is degraded" is unaffected; one that
   read "not unhealthy" as "the dependency is fine" now gets the honest answer, which is the point.
 
+- **A container with no logging provider no longer silences the pool** (L3; behaviour change, not
+  breaking): the container and configuration paths asked for `ILoggerFactory` and, when there was none,
+  wrapped the null in the Microsoft.Extensions.Logging adapter — which discards everything. A host that
+  never called `AddLogging` has not asked for logging to be *off*; it has asked for no logging provider,
+  and answering that with silence makes a pool with something to say indistinguishable from a quiet one.
+  The fallback is now the built-in logger, which is what a bare `HayatePoolBuilder<T>` resolves, so the
+  two paths agree — and on a DEBUG build the pool's warnings reach the console again, which is where they
+  went before the container ever wrapped them. A host that *did* register an `ILoggerFactory` is
+  unaffected: the fallback lives in `HayateMicrosoftLoggerFactory` and only fires when it was handed null.
+
 - **Per-pool Microsoft.Extensions.Logging categories** (L2; behaviour change, not breaking): every pool
   registered through the container or through configuration now logs under its own MEL category — the
   pool name — instead of sharing one. Both paths used to hand each pool a logger built from
@@ -206,6 +216,18 @@ Breaking changes are described in full — with migration guidance — in
   `ILogger`; `HayateMicrosoftLoggerAdapter<T>` keeps its constructor and members and now derives from it.
 
 ### Fixed
+
+- **A Serilog-only operator in a pool log template** (L4): the "configuration reloaded" message addressed
+  its payload as `{@Config}`. `@` is Serilog's destructuring operator — in a Serilog template it means
+  "capture this object's members instead of calling ToString() on it" — and this message never reaches a
+  Serilog template parser. It goes through Microsoft.Extensions.Logging, which copies the hole verbatim
+  into a structured property literally named `@Config`. So the operator did nothing and the name was
+  wrong: a sink filtering on `Config` found nothing, and what arrived was a scalar called `@Config`
+  rather than the options object it is. The template now reads `{Config}`. Measured, because reasoning
+  alone gets this backwards: the *rendered text* is byte-identical between the two spellings — MEL
+  substitutes positionally and calls `ToString()` either way — so this changes the structured payload
+  only, never what a human reads. A host that keyed a Serilog/Seq/OTel sink off `@Config` has to rename
+  it to `Config`; nothing else moves.
 
 - **The create-on-demand concurrency cases no longer measure the thread pool** (test-only; no runtime
   change): `CreateOnDemand_BelowCapacityMisses_ShouldEachCreateWithoutWaiting` timed the whole

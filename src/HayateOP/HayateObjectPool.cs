@@ -3052,7 +3052,14 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     $"HayatePool [{_name}] cannot change SoftCapacity at runtime: the ceiling is applied by the return path from a value fixed when the pool was built (in lean mode it also fixes the buffer's slot limit). Rebuild the pool to change it.");
             }
 
-            _logger.LogInformation("Pool configuration reloaded. Type: {Type} NewConfig: {@Config}", typeof(T).Name, _options);
+            // `{Config}`, not `{@Config}`: the `@` destructuring operator belongs to Serilog's template
+            // parser, and this message never reaches one — it goes through Microsoft.Extensions.Logging,
+            // which copies the hole verbatim into a structured property literally named "@Config". A sink
+            // filtering on `Config` then finds nothing, and Serilog's own destructuring never runs, so the
+            // options arrive as a scalar instead of the object they are. (Measured: the rendered text is
+            // identical either way — MEL substitutes positionally and calls ToString() — so this changes
+            // the structured payload only, not what a human reads.)
+            _logger.LogInformation("Pool configuration reloaded. Type: {Type} NewConfig: {Config}", typeof(T).Name, _options);
         }
     }
 

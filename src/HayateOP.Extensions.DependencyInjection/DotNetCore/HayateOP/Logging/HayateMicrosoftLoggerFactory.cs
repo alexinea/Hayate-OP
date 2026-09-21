@@ -21,8 +21,13 @@ namespace DotNetCore.HayateOP.Logging;
 /// and is now the element type name, which is what
 /// <see cref="IHayateLoggerFactory.CreateLogger"/> has always documented. A host that configures a log
 /// level by the namespace-qualified name has to update that configuration; no code changes are needed.
-/// A <c>null</c> factory is accepted and yields no-op loggers, so a host with no logging provider
-/// behaves exactly as before. Pass this factory to
+/// A <c>null</c> factory is accepted: the loggers then come from
+/// <see cref="DefaultHayateLoggerFactory"/>, not from a silent sink. A host that never registered an
+/// <c>ILoggerFactory</c> has not asked for logging to be off — it has asked for no logging provider, and
+/// answering that with silence makes a noisy pool indistinguishable from a quiet one. The built-in
+/// logger is also what a bare <c>HayatePoolBuilder&lt;T&gt;</c> resolves, so the container path and the
+/// builder path behave the same way on a host without Microsoft.Extensions.Logging.
+/// Pass this factory to
 /// <c>HayatePoolBuilder&lt;T&gt;.WithLoggerFactory</c>; an explicit <c>WithLogger</c> still wins over it.
 /// </remarks>
 /// <example>
@@ -42,7 +47,7 @@ public class HayateMicrosoftLoggerFactory : IHayateLoggerFactory
     /// </summary>
     /// <param name="loggerFactory">
     /// The MEL logger factory to create per-category loggers from, or <c>null</c> when the host has no
-    /// logging provider — every logger created is then a no-op.
+    /// logging provider — every logger created is then the built-in one.
     /// </param>
     public HayateMicrosoftLoggerFactory(ILoggerFactory? loggerFactory)
     {
@@ -53,7 +58,15 @@ public class HayateMicrosoftLoggerFactory : IHayateLoggerFactory
     /// Creates the logger for one pool, under the MEL category <paramref name="categoryName"/>.
     /// </summary>
     /// <param name="categoryName">The pool name to log under.</param>
-    /// <returns>A logger writing to that category; a no-op logger when no MEL factory was supplied.</returns>
+    /// <returns>A logger writing to that category; the built-in logger when no MEL factory was supplied.
+    /// </returns>
     public IHayateLogger CreateLogger(string categoryName)
-        => new HayateMicrosoftLoggerAdapter(_loggerFactory?.CreateLogger(categoryName));
+    {
+        if (_loggerFactory is null)
+        {
+            return DefaultHayateLoggerFactory.Instance.CreateLogger(categoryName);
+        }
+
+        return new HayateMicrosoftLoggerAdapter(_loggerFactory.CreateLogger(categoryName));
+    }
 }

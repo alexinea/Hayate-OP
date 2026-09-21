@@ -275,7 +275,10 @@ public static class ServiceCollectionExtensions
         var policy = sp.GetRequiredService<IHayateObjectPolicy<T>>();
         var scalingStrategy = sp.GetRequiredService<IHayateScalingStrategy>();
         var metrics = sp.GetRequiredService<IHayateMetrics>();
-        var loggerFactory = sp.GetService<ILoggerFactory>();
+        // L3: a container with no ILoggerFactory is not "logging off" — it is a container the host never
+        // added logging to. The factory falls back to the built-in logger for that case (see
+        // HayateMicrosoftLoggerFactory), which is what a bare HayatePoolBuilder resolves.
+        var hayateLoggerFactory = new HayateMicrosoftLoggerFactory(sp.GetService<ILoggerFactory>());
 
         // Only attach the DI-registered custom metrics when the diagnostic surface is open — both the
         // master switch (O11) and the metrics sub-switch; otherwise keep the v2.1 semantics (the custom
@@ -287,7 +290,7 @@ public static class ServiceCollectionExtensions
             .WithPoolName(poolName)
             .WithPolicy(policy)
             .WithScalingStrategy(scalingStrategy)
-            .WithLoggerFactory(new HayateMicrosoftLoggerFactory(loggerFactory));
+            .WithLoggerFactory(hayateLoggerFactory);
 
         if (options.EnableDiagnostics && options.EnableMetrics)
         {
