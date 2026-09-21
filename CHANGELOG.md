@@ -349,43 +349,6 @@ performance gate was promoted to a blocking, allocation-aware compare (Q1).
   bounded engine. See the "Unbounded pool" section of the README for the model choice between the
   two.
 
-### Changed
-
-- **Asynchronous preparation borrows are actually asynchronous** (A4, behavioral fix of N3): the
-  borrows of `HayatePreparationPool<T>` did not await anything — `AcquireAsync` ran the inner pool's
-  *synchronous* `Acquire()` inside the asynchronous method, so a borrow that had to wait occupied a
-  thread for the whole of the inner acquire timeout (5 s by default) and the `timeout` argument of
-  `AcquireAsync(TimeSpan, …)` — and of the synchronous `Acquire(TimeSpan)` — was silently dropped.
-  The chain now awaits the inner pool's own asynchronous borrow and forwards the timeout to it, so an
-  exhausted pool suspends the borrowing context instead of a thread, and a borrow converges on the
-  timeout it was given (surfacing the inner pool's `TimeoutException`). No public signature changed:
-  the synchronous `Acquire`/`Acquire(TimeSpan)` still block their caller by design — they now block on
-  a borrow that honours the timeout. The lean, bounded, keyed and unbounded inner pools all gain the
-  behavior, since the fix lives in the wrapper.
-- **Performance gate promotion machinery** (Q1): `scripts/bench-compare.py` now implements the
-  allocation gate that the threshold table always documented — allocation growth `>= allocFailBytes`
-  fails and `>= allocWarnBytes` warns (previously both keys were parsed but never referenced) — and
-  supports per-target `warnMeanPercentOverride` / `failMeanPercentOverride`. The PG4 convergence
-  outcome applies them to the sub-100 ns lean rows (warn 30 / fail 60), which isolated local reruns
-  measured across a ~1.9× range; the >=200 ns rows keep the global 15/30. `--emit-baseline-file`
-  writes a complete, committable baseline (schema, thresholds, capture metadata, percentiles,
-  `calibration: false`), and the workflow's `update_baseline` input produces it as the `ci-baseline`
-  artifact. `perf-regression.yml` no longer carries a static `continue-on-error`: it reads the
-  baseline's `calibration` flag and routes to a blocking or an advisory compare step accordingly, so
-  committing the CI-native baseline hardens the gate in the same commit — the runbook lives in
-  `docs/benchmarks/baseline/README.md`. Until that capture lands, the committed baseline stays in
-  calibration mode and the gate stays advisory **by design, not by omission**.
-- **Multi-TFM XML documentation fix** (root-cause fix folded into Q1): the canonical
-  `$(AssemblyName).xml` is now produced by the highest target framework only; lower-TFM builds write
-  their documentation into `obj/$(TargetFramework)/`, where it is packed as that TFM's own asset.
-  Every `lib/<tfm>/*.xml` in the package now documents exactly that TFM's API surface (previously
-  every TFM's asset carried whatever TFM built last — a net48 asset could ship documentation for
-  net6+-only members it does not have, and a stray low-TFM build could strip higher-TFM members from
-  the canonical file, which 2.6/2.7 worked around by hand-restoring the XML). The canonical file
-  survives forced single-TFM rebuilds untouched, verified.
-
-### Added
-
 - **Zero-allocation value builder** (Z1, from the sbpool performance assessment): `HayateValueStringBuilder`
   is a `ref struct` over a rented `ArrayPool<char>` buffer — doubling growth hands the old buffer
   straight back, `ToString()` materializes the content and returns the buffer in the same call
@@ -465,6 +428,41 @@ performance gate was promoted to a blocking, allocation-aware compare (Q1).
   brings it to 614,843 B (the final string alone), halving both allocation and time — while
   `SpecializedStringBuilderFormatBenchmarks` separates the helpers' own writes (no `object[]`, no
   boxing) from the engine's fixed borrow-cycle bookkeeping floor.
+
+### Changed
+
+- **Asynchronous preparation borrows are actually asynchronous** (A4, behavioral fix of N3): the
+  borrows of `HayatePreparationPool<T>` did not await anything — `AcquireAsync` ran the inner pool's
+  *synchronous* `Acquire()` inside the asynchronous method, so a borrow that had to wait occupied a
+  thread for the whole of the inner acquire timeout (5 s by default) and the `timeout` argument of
+  `AcquireAsync(TimeSpan, …)` — and of the synchronous `Acquire(TimeSpan)` — was silently dropped.
+  The chain now awaits the inner pool's own asynchronous borrow and forwards the timeout to it, so an
+  exhausted pool suspends the borrowing context instead of a thread, and a borrow converges on the
+  timeout it was given (surfacing the inner pool's `TimeoutException`). No public signature changed:
+  the synchronous `Acquire`/`Acquire(TimeSpan)` still block their caller by design — they now block on
+  a borrow that honours the timeout. The lean, bounded, keyed and unbounded inner pools all gain the
+  behavior, since the fix lives in the wrapper.
+- **Performance gate promotion machinery** (Q1): `scripts/bench-compare.py` now implements the
+  allocation gate that the threshold table always documented — allocation growth `>= allocFailBytes`
+  fails and `>= allocWarnBytes` warns (previously both keys were parsed but never referenced) — and
+  supports per-target `warnMeanPercentOverride` / `failMeanPercentOverride`. The PG4 convergence
+  outcome applies them to the sub-100 ns lean rows (warn 30 / fail 60), which isolated local reruns
+  measured across a ~1.9× range; the >=200 ns rows keep the global 15/30. `--emit-baseline-file`
+  writes a complete, committable baseline (schema, thresholds, capture metadata, percentiles,
+  `calibration: false`), and the workflow's `update_baseline` input produces it as the `ci-baseline`
+  artifact. `perf-regression.yml` no longer carries a static `continue-on-error`: it reads the
+  baseline's `calibration` flag and routes to a blocking or an advisory compare step accordingly, so
+  committing the CI-native baseline hardens the gate in the same commit — the runbook lives in
+  `docs/benchmarks/baseline/README.md`. Until that capture lands, the committed baseline stays in
+  calibration mode and the gate stays advisory **by design, not by omission**.
+- **Multi-TFM XML documentation fix** (root-cause fix folded into Q1): the canonical
+  `$(AssemblyName).xml` is now produced by the highest target framework only; lower-TFM builds write
+  their documentation into `obj/$(TargetFramework)/`, where it is packed as that TFM's own asset.
+  Every `lib/<tfm>/*.xml` in the package now documents exactly that TFM's API surface (previously
+  every TFM's asset carried whatever TFM built last — a net48 asset could ship documentation for
+  net6+-only members it does not have, and a stray low-TFM build could strip higher-TFM members from
+  the canonical file, which 2.6/2.7 worked around by hand-restoring the XML). The canonical file
+  survives forced single-TFM rebuilds untouched, verified.
 
 ### Fixed
 
