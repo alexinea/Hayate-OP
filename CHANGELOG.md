@@ -128,6 +128,32 @@ Breaking changes are described in full — with migration guidance — in
   because silently disabling it is precisely the failure the switch exists to remove, an owner who
   believes objects are rotated on hand-out while they are not.
 
+### Changed
+
+- **Per-pool Microsoft.Extensions.Logging categories** (L2; behaviour change, not breaking): every pool
+  registered through the container or through configuration now logs under its own MEL category — the
+  pool name — instead of sharing one. Both paths used to hand each pool a logger built from
+  `CreateLogger<T>()`, which is a single category for the unnamed pool and every named pool of the same
+  element type, so `AddNamedPool<MyConnection>("primary")` and `AddNamedPool<MyConnection>("replica")`
+  were indistinguishable downstream: a per-pool log level, a filter or a sink could not be expressed
+  against them at all. The categories are now `MyConnection` for the unnamed pool and
+  `MyConnection:primary` / `MyConnection:replica` for the named ones — the same names those pools already
+  report in their own log lines, statistics and snapshots. Serilog, NLog and log4net all reach HayateOP
+  through the MEL bridge, so routing MEL by category routes all three at once.
+  One consequence to be aware of: the unnamed pool's category narrows from Microsoft.Extensions.Logging's
+  own choice for `CreateLogger<T>()` — the namespace-qualified display name of the element type, such as
+  `MyApp.MyConnection` — to the short type name `MyConnection`. That is what
+  `IHayateLoggerFactory.CreateLogger` has always documented (the pool name, "or the element type name if
+  unspecified"), and it is what makes the unnamed pool's category equal to its pool name, but a host that
+  sets a log level or a filter against the namespace-qualified name has to update that configuration.
+  Nothing in code has to change — this is configuration, not API.
+  The switch is implemented as `HayateMicrosoftLoggerFactory`, a non-generic `IHayateLoggerFactory` that
+  calls `CreateLogger(categoryName)`; the two places that used to pass a logger to `WithLogger` directly
+  now pass it to `WithLoggerFactory`, so the builder's existing resolution rule still applies — an
+  explicit `WithLogger` still wins over the factory, and a host with no `ILoggerFactory` registered gets
+  no-op loggers exactly as before. `HayateMicrosoftLoggerAdapter` gains a non-generic form wrapping any
+  `ILogger`; `HayateMicrosoftLoggerAdapter<T>` keeps its constructor and members and now derives from it.
+
 ### Fixed
 
 - **The create-on-demand concurrency cases no longer measure the thread pool** (test-only; no runtime

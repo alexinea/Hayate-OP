@@ -172,6 +172,94 @@
             <typeparam name="T">The pooled object type.</typeparam>
             <returns>The registered names; empty when <typeparamref name="T"/> has no named pool.</returns>
         </member>
+        <member name="T:DotNetCore.HayateOP.Logging.HayateMicrosoftLoggerAdapter">
+            <summary>
+            Routes HayateOP's log surface onto a Microsoft.Extensions.Logging <see cref="T:Microsoft.Extensions.Logging.ILogger"/>.
+            </summary>
+            <remarks>
+            The non-generic form is the one to use when the logger was created by category name
+            (<c>ILoggerFactory.CreateLogger(string)</c>) — which is what <see cref="T:DotNetCore.HayateOP.Logging.HayateMicrosoftLoggerFactory"/>
+            does, so that every pool logs under its own category. The generic form routes onto
+            <c>CreateLogger&lt;T&gt;()</c> and is the one to use with an injected <see cref="T:Microsoft.Extensions.Logging.ILogger`1"/>.
+            A <c>null</c> logger is accepted and turns every call into a no-op, which is what a host with no
+            logging provider configured gets.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.HayateMicrosoftLoggerAdapter.#ctor(Microsoft.Extensions.Logging.ILogger)">
+            <summary>
+            Wraps a logger obtained from Microsoft.Extensions.Logging.
+            </summary>
+            <param name="logger">The MEL logger, or <c>null</c> to discard everything written to it.</param>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Logging.HayateMicrosoftLoggerAdapter`1">
+            <summary>
+            Routes HayateOP's log surface onto the Microsoft.Extensions.Logging category of <typeparamref name="T"/>.
+            </summary>
+            <typeparam name="T">The type whose MEL category the logger writes under.</typeparam>
+            <remarks>
+            The category is the one <c>ILoggerFactory.CreateLogger&lt;T&gt;()</c> produces — the full display
+            name of <typeparamref name="T"/> (namespace included), which is Microsoft.Extensions.Logging's own
+            choice, not this library's. To write under a chosen category — the pool name, say — use the
+            non-generic <see cref="T:DotNetCore.HayateOP.Logging.HayateMicrosoftLoggerAdapter"/> with
+            <c>loggerFactory.CreateLogger(categoryName)</c>, or <see cref="T:DotNetCore.HayateOP.Logging.HayateMicrosoftLoggerFactory"/>,
+            which does exactly that.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.HayateMicrosoftLoggerAdapter`1.#ctor(Microsoft.Extensions.Logging.ILogger{`0})">
+            <summary>
+            Wraps the logger for the category of <typeparamref name="T"/>.
+            </summary>
+            <param name="logger">The MEL logger, or <c>null</c> to discard everything written to it.</param>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Logging.HayateMicrosoftLoggerFactory">
+            <summary>
+            A logger factory that gives every pool its own Microsoft.Extensions.Logging category.
+            </summary>
+            <remarks>
+            Purpose: the container and configuration paths can register several pools of the same element type —
+            the unnamed pool plus any number of named ones — and before 2.9 they handed every one of them a
+            logger built from <c>CreateLogger&lt;T&gt;()</c>, which is a single category for all of them. Two
+            named pools of <c>MyConnection</c> were therefore indistinguishable downstream: a per-pool log level,
+            a filter or a sink had to be expressed against one shared category string.
+            With this factory the category is the pool name — <c>MyConnection</c> for the unnamed pool and
+            <c>MyConnection:primary</c> / <c>MyConnection:replica</c> for named ones — which is the same name
+            the pool already reports in its own log lines, statistics and snapshots. Serilog, NLog and log4net
+            all reach HayateOP through the Microsoft.Extensions.Logging bridge, so routing MEL by category
+            routes every one of them.
+            Category of the unnamed pool: it used to be Microsoft.Extensions.Logging's own choice for
+            <c>CreateLogger&lt;T&gt;()</c> — the namespace-qualified display name of the element type —
+            and is now the element type name, which is what
+            <see cref="M:DotNetCore.HayateOP.Logging.IHayateLoggerFactory.CreateLogger(System.String)"/> has always documented. A host that configures a log
+            level by the namespace-qualified name has to update that configuration; no code changes are needed.
+            A <c>null</c> factory is accepted and yields no-op loggers, so a host with no logging provider
+            behaves exactly as before. Pass this factory to
+            <c>HayatePoolBuilder&lt;T&gt;.WithLoggerFactory</c>; an explicit <c>WithLogger</c> still wins over it.
+            </remarks>
+            <example>
+            <code>
+            var pool = new HayatePoolBuilder&lt;MyConnection&gt;()
+                .WithPoolName("primary")
+                .WithLoggerFactory(new HayateMicrosoftLoggerFactory(loggerFactory))
+                .Build();
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.HayateMicrosoftLoggerFactory.#ctor(Microsoft.Extensions.Logging.ILoggerFactory)">
+            <summary>
+            Creates a factory over a Microsoft.Extensions.Logging logger factory.
+            </summary>
+            <param name="loggerFactory">
+            The MEL logger factory to create per-category loggers from, or <c>null</c> when the host has no
+            logging provider — every logger created is then a no-op.
+            </param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.HayateMicrosoftLoggerFactory.CreateLogger(System.String)">
+            <summary>
+            Creates the logger for one pool, under the MEL category <paramref name="categoryName"/>.
+            </summary>
+            <param name="categoryName">The pool name to log under.</param>
+            <returns>A logger writing to that category; a no-op logger when no MEL factory was supplied.</returns>
+        </member>
         <member name="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.AddHayatePoolSupport(Microsoft.Extensions.DependencyInjection.IServiceCollection)">
             <summary>
             Adds the core HayateOP services (scaling strategy, an empty metrics sink and the run-time pool

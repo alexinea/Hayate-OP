@@ -276,7 +276,6 @@ public static class ServiceCollectionExtensions
         var scalingStrategy = sp.GetRequiredService<IHayateScalingStrategy>();
         var metrics = sp.GetRequiredService<IHayateMetrics>();
         var loggerFactory = sp.GetService<ILoggerFactory>();
-        var logger = new HayateMicrosoftLoggerAdapter<T>(loggerFactory?.CreateLogger<T>());
 
         // Only attach the DI-registered custom metrics when the diagnostic surface is open — both the
         // master switch (O11) and the metrics sub-switch; otherwise keep the v2.1 semantics (the custom
@@ -288,7 +287,7 @@ public static class ServiceCollectionExtensions
             .WithPoolName(poolName)
             .WithPolicy(policy)
             .WithScalingStrategy(scalingStrategy)
-            .WithLogger(logger);
+            .WithLoggerFactory(new HayateMicrosoftLoggerFactory(loggerFactory));
 
         if (options.EnableDiagnostics && options.EnableMetrics)
         {

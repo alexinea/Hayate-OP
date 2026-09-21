@@ -134,7 +134,11 @@ public static class ConfigurationExtensions
         var scalingStrategy = sp.GetRequiredService<IHayateScalingStrategy>();
         var metrics = sp.GetRequiredService<IHayateMetrics>();
         var loggerFactory = sp.GetService<ILoggerFactory>();
-        var logger = new HayateMicrosoftLoggerAdapter<T>(loggerFactory?.CreateLogger<T>());
+
+        // The pool logs under its own MEL category. The builder resolves the same category through the
+        // factory at Build time; this instance is the one the hot-reload callback below keeps writing to.
+        var hayateLoggerFactory = new HayateMicrosoftLoggerFactory(loggerFactory);
+        var logger = hayateLoggerFactory.CreateLogger(poolName);
 
         // Merge the global and pool-specific configuration.
         var mergedOptions = MergeOptions(optionsMonitor.CurrentValue, poolConfigSection);
@@ -151,7 +155,7 @@ public static class ConfigurationExtensions
             .WithPoolName(poolName)
             .WithPolicy(policy)
             .WithScalingStrategy(scalingStrategy)
-            .WithLogger(logger);
+            .WithLoggerFactory(hayateLoggerFactory);
 
         if (mergedOptions.EnableMetrics)
         {
