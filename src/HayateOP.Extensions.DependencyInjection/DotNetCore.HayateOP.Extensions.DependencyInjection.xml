@@ -194,12 +194,65 @@
             <param name="configure">Optional callback to configure the pool options.</param>
             <typeparam name="T">The pooled object type.</typeparam>
             <returns>The Hayate service collection for chaining.</returns>
+            <remarks>
+            The object policy is the library default (<see cref="M:DotNetCore.HayateOP.Policies.HayateObjectPolicies.Default``1"/>), which
+            creates objects with their public parameterless constructor; a type that does not have one needs
+            <see cref="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.RegisterHayatePool``1(DotNetCore.HayateOP.IHayateServiceCollection,System.Func{System.IServiceProvider,DotNetCore.HayateOP.Policies.IHayateObjectPolicy{``0}},System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/>
+            or a policy registered directly in the container, which this overload honours rather than
+            replaces.
+            </remarks>
             <example>
             <code>
             services.AddHayatePoolSupport();
             services.RegisterHayatePool&lt;MyConnection&gt;(opt =&gt; opt.MaxPoolSize = 64);
             </code>
             </example>
+        </member>
+        <member name="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.RegisterHayatePool``1(DotNetCore.HayateOP.IHayateServiceCollection,System.Func{System.IServiceProvider,DotNetCore.HayateOP.Policies.IHayateObjectPolicy{``0}},System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <summary>
+            Registers a HayateOP pool of type <typeparamref name="T"/> whose objects are created by the
+            policy that <paramref name="policyFactory"/> builds.
+            </summary>
+            <param name="services">The Hayate service collection.</param>
+            <param name="policyFactory">Builds the object policy with the container's services in hand — how
+            a policy that needs a connection string reads it from configuration.</param>
+            <param name="configure">Optional callback to configure the pool options.</param>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <returns>The Hayate service collection for chaining.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="policyFactory"/> is <see langword="null"/>.</exception>
+            <remarks>
+            This is the container path for a pooled type that has no public parameterless constructor —
+            <c>new NpgsqlConnection(cs)</c>, <c>new SmtpClient(host)</c> — and for any policy that has to be
+            told something the container knows. The factory runs once, when the pool is first resolved; the
+            policy it returns is registered as a singleton, so it is shared by every pool of
+            <typeparamref name="T"/>.<br />
+            It wins over a policy registered earlier in the container, the way repeated registrations
+            normally keep the last one. Registering the policy directly
+            (<c>services.AddSingleton&lt;IHayateObjectPolicy&lt;T&gt;&gt;(sp =&gt; ...)</c>) works too and
+            needs no HayateOP call — both routes end in the same place.
+            </remarks>
+            <example>
+            <code>
+            services.AddHayatePoolSupport();
+            services.RegisterHayatePool&lt;MyConnection&gt;(
+                sp =&gt; new ConnectionPolicy(sp.GetRequiredService&lt;IConfiguration&gt;().GetConnectionString("db")!),
+                opt =&gt; opt.MaxPoolSize = 64);
+            </code>
+            </example>
+        </member>
+        <member name="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.RegisterHayatePoolCore``1(DotNetCore.HayateOP.IHayateServiceCollection,System.Func{System.IServiceProvider,DotNetCore.HayateOP.Policies.IHayateObjectPolicy{``0}},System.Action{DotNetCore.HayateOP.HayatePoolOptions},System.Boolean)">
+            <summary>
+            The body both <c>RegisterHayatePool</c> overloads share: one options registration, one pool
+            registry, one object policy and one pool.
+            </summary>
+            <remarks>
+            The policy registration deliberately differs between the two callers. A factory the caller passed
+            explicitly is appended (<c>AddSingleton</c>), so it wins over anything registered earlier, matching
+            the "last declaration wins" rule repeated registrations follow. The built-in default only fills the
+            gap (<c>TryAddSingleton</c>), so a policy registered directly in the container is honoured instead
+            of being silently replaced by the library's own — before 2.9 the default was appended
+            unconditionally, which made registering a policy yourself an order-dependent no-op.
+            </remarks>
         </member>
         <member name="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.AddNamedPool``1(DotNetCore.HayateOP.IHayateServiceCollection,System.String,System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
             <summary>

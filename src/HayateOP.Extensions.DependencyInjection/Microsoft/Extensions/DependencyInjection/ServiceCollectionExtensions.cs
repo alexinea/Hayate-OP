@@ -46,6 +46,13 @@ public static class ServiceCollectionExtensions
     /// <param name="configure">Optional callback to configure the pool options.</param>
     /// <typeparam name="T">The pooled object type.</typeparam>
     /// <returns>The Hayate service collection for chaining.</returns>
+    /// <remarks>
+    /// The object policy is the library default (<see cref="HayateObjectPolicies.Default{T}"/>), which
+    /// creates objects with their public parameterless constructor; a type that does not have one needs
+    /// <see cref="RegisterHayatePool{T}(IHayateServiceCollection, Func{IServiceProvider, IHayateObjectPolicy{T}}, Action{HayatePoolOptions}?)"/>
+    /// or a policy registered directly in the container, which this overload honours rather than
+    /// replaces.
+    /// </remarks>
     /// <example>
     /// <code>
     /// services.AddHayatePoolSupport();
@@ -54,6 +61,71 @@ public static class ServiceCollectionExtensions
     /// </example>
     public static IHayateServiceCollection RegisterHayatePool<T>(this IHayateServiceCollection services,
         Action<HayatePoolOptions>? configure = null)
+        where T : class
+    {
+        RegisterHayatePoolCore<T>(services, sp => HayateObjectPolicies.Default<T>(), configure,
+            policyIsExplicit: false);
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers a HayateOP pool of type <typeparamref name="T"/> whose objects are created by the
+    /// policy that <paramref name="policyFactory"/> builds.
+    /// </summary>
+    /// <param name="services">The Hayate service collection.</param>
+    /// <param name="policyFactory">Builds the object policy with the container's services in hand — how
+    /// a policy that needs a connection string reads it from configuration.</param>
+    /// <param name="configure">Optional callback to configure the pool options.</param>
+    /// <typeparam name="T">The pooled object type.</typeparam>
+    /// <returns>The Hayate service collection for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="policyFactory"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// This is the container path for a pooled type that has no public parameterless constructor —
+    /// <c>new NpgsqlConnection(cs)</c>, <c>new SmtpClient(host)</c> — and for any policy that has to be
+    /// told something the container knows. The factory runs once, when the pool is first resolved; the
+    /// policy it returns is registered as a singleton, so it is shared by every pool of
+    /// <typeparamref name="T"/>.<br />
+    /// It wins over a policy registered earlier in the container, the way repeated registrations
+    /// normally keep the last one. Registering the policy directly
+    /// (<c>services.AddSingleton&lt;IHayateObjectPolicy&lt;T&gt;&gt;(sp =&gt; ...)</c>) works too and
+    /// needs no HayateOP call — both routes end in the same place.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// services.AddHayatePoolSupport();
+    /// services.RegisterHayatePool&lt;MyConnection&gt;(
+    ///     sp =&gt; new ConnectionPolicy(sp.GetRequiredService&lt;IConfiguration&gt;().GetConnectionString("db")!),
+    ///     opt =&gt; opt.MaxPoolSize = 64);
+    /// </code>
+    /// </example>
+    public static IHayateServiceCollection RegisterHayatePool<T>(this IHayateServiceCollection services,
+        Func<IServiceProvider, IHayateObjectPolicy<T>> policyFactory,
+        Action<HayatePoolOptions>? configure = null)
+        where T : class
+    {
+        if (policyFactory is null) throw new ArgumentNullException(nameof(policyFactory));
+
+        RegisterHayatePoolCore<T>(services, policyFactory, configure, policyIsExplicit: true);
+
+        return services;
+    }
+
+    /// <summary>
+    /// The body both <c>RegisterHayatePool</c> overloads share: one options registration, one pool
+    /// registry, one object policy and one pool.
+    /// </summary>
+    /// <remarks>
+    /// The policy registration deliberately differs between the two callers. A factory the caller passed
+    /// explicitly is appended (<c>AddSingleton</c>), so it wins over anything registered earlier, matching
+    /// the "last declaration wins" rule repeated registrations follow. The built-in default only fills the
+    /// gap (<c>TryAddSingleton</c>), so a policy registered directly in the container is honoured instead
+    /// of being silently replaced by the library's own — before 2.9 the default was appended
+    /// unconditionally, which made registering a policy yourself an order-dependent no-op.
+    /// </remarks>
+    private static void RegisterHayatePoolCore<T>(IHayateServiceCollection services,
+        Func<IServiceProvider, IHayateObjectPolicy<T>> policyFactory,
+        Action<HayatePoolOptions>? configure, bool policyIsExplicit)
         where T : class
     {
         var poolRegisterName = typeof(T).Name;
@@ -65,11 +137,12 @@ public static class ServiceCollectionExtensions
         // look it up by logical pool name instead of using Type.GetType reflection.
         services.Services.TryAddSingleton<IHayateObjectPoolRegistry, HayateObjectPoolRegistry>();
 
-        services.Services.AddSingleton<IHayateObjectPolicy<T>>(sp => HayateObjectPolicies.Default<T>());
+        if (policyIsExplicit)
+            services.Services.AddSingleton<IHayateObjectPolicy<T>>(policyFactory);
+        else
+            services.Services.TryAddSingleton<IHayateObjectPolicy<T>>(policyFactory);
 
         services.Services.AddSingleton<IHayateObjectPool<T>>(sp => BuildPool<T>(sp, poolRegisterName));
-
-        return services;
     }
 
     /// <summary>

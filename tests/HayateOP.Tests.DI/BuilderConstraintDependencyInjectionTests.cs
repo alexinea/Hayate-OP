@@ -7,9 +7,9 @@ namespace HayateOP.Tests.DI;
 /// <summary>
 /// B1 (2.9) on the container path: a pooled type without a public parameterless constructor.
 /// <c>AddNamedPool</c> registers the default policy with <c>TryAdd</c>, so a policy the application
-/// registered first wins and the pool resolves; <c>RegisterHayatePool</c> owns its policy registration, so
-/// until it gains the factory overload of B2 the missing constructor is reported when the pool is built,
-/// naming the type.
+/// registered first wins and the pool resolves; since B2 <c>RegisterHayatePool</c> does the same, and its
+/// factory overload is what lets that type work through it. Without a policy of either kind the missing
+/// constructor is reported when the pool is built, naming the type.
 /// </summary>
 public class BuilderConstraintDependencyInjectionTests
 {

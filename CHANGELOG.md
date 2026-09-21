@@ -80,6 +80,19 @@ Breaking changes are described in full — with migration guidance — in
   and a type with a parameterless constructor still resolves to the same default policy.
   `Extensions.ObjectPoolCompat` drops the `MakeGenericMethod` dispatch it needed to reach the builder
   around that constraint — the MEOP policy it already passes goes straight through.
+- **Object-policy factory on the container path** (B2): `RegisterHayatePool<T>` takes a
+  `Func<IServiceProvider, IHayateObjectPolicy<T>>`, so a pooled type that has no public parameterless
+  constructor can be registered through DI at all — the gap B1 left open on this path — and a policy can
+  be told what the container knows. A policy that needs a connection string reads it from configuration
+  inside the factory: `RegisterHayatePool<MyConnection>(sp => new ConnectionPolicy(
+  sp.GetRequiredService<IConfiguration>().GetConnectionString("db")!), opt => opt.MaxPoolSize = 64)`.
+  The factory runs once, when the pool is first resolved, and the policy it returns is a singleton shared
+  by every pool of `T`; passing one wins over a policy registered earlier, the way repeated DI
+  registrations normally keep the last. The existing overload is untouched, and because a lambda whose
+  body yields a policy binds to the new overload while `o => o.MaxPoolSize = 64` still binds to the old
+  one, neither call site needs a cast. Registering the policy directly
+  (`services.AddSingleton<IHayateObjectPolicy<T>>(sp => ...)`) remains an equivalent route that needs no
+  HayateOP call at all.
 
 ### Fixed
 
@@ -107,6 +120,15 @@ Breaking changes are described in full — with migration guidance — in
   `WithOpenApi`, which is neither obsolete nor replaced on them. The warning was pre-existing — the
   asynchronous batch never touched this package — and surfaced only when the batch-end gate swept every
   `src` project on a clean build instead of the core package alone.
+- **A policy registered directly in the container is no longer replaced by the library default** (B2;
+  behaviour change, not breaking): `RegisterHayatePool<T>` appended
+  `AddSingleton<IHayateObjectPolicy<T>>(...)` unconditionally, so an application that registered its own
+  policy *before* the call had it silently discarded — the library's default was resolved instead, because
+  DI returns the last registration. It now uses `TryAddSingleton`, matching `AddNamedPool<T>`, so the
+  application's policy wins whether it is registered before or after; `RegisterHayatePool<T>` on its own
+  still falls back to the library default. Only a caller that registered a policy and expected it to be
+  overridden is affected, which is the opposite of what registering one means; the factory overload above
+  is unaffected and still wins over an earlier registration, as repeated registrations do.
 
 ## [2.8.0] - 2026-09-20
 
