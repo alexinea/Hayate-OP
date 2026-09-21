@@ -116,6 +116,7 @@ jobs:
           - { project: OpenTelemetry, tfm: net10.0 }
           - { project: DI,            tfm: net10.0 }
           - { project: Configuration, tfm: net10.0 }
+          - { project: HealthCheck,   tfm: net10.0 }
           - { project: Endpoints,     tfm: net10.0 }
     steps:
       - uses: actions/checkout@v4

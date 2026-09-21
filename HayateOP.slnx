@@ -22,6 +22,7 @@
     <Project Path="tests/HayateOP.PressureTests/HayateOP.PressureTests.csproj" />
     <Project Path="tests/HayateOP.Tests.Configuration/HayateOP.Tests.Configuration.csproj" Id="748f7e1e-6f62-41c9-a6e8-da895c38e923" />
     <Project Path="tests/HayateOP.Tests.DI/HayateOP.Tests.DI.csproj" Id="8f3ce109-b0c9-4181-9a2c-1e1d38893ee5" />
+    <Project Path="tests/HayateOP.Tests.HealthCheck/HayateOP.Tests.HealthCheck.csproj" />
     <Project Path="tests/HayateOP.Tests.Endpoints/HayateOP.Tests.Endpoints.csproj" Id="6cc9b753-68e3-4a3f-b30f-de4884a44ab5" />
     <Project Path="tests/HayateOP.Tests.OpenTelemetry/HayateOP.Tests.OpenTelemetry.csproj" />
     <Project Path="tests/HayateOP.Tests.Compat/HayateOP.Tests.Compat.csproj" />
@@ -30,6 +31,7 @@
     <Project Path="tests/legacy/HayateOP.Tests.Legacy/HayateOP.Tests.Legacy.csproj" />
     <Project Path="tests/legacy/HayateOP.Tests.Configuration.Legacy/HayateOP.Tests.Configuration.Legacy.csproj" />
     <Project Path="tests/legacy/HayateOP.Tests.DI.Legacy/HayateOP.Tests.DI.Legacy.csproj" />
+    <Project Path="tests/legacy/HayateOP.Tests.HealthCheck.Legacy/HayateOP.Tests.HealthCheck.Legacy.csproj" />
     <Project Path="tests/legacy/HayateOP.Tests.Endpoints.Legacy/HayateOP.Tests.Endpoints.Legacy.csproj" />
   </Folder>
 </Solution>

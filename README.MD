@@ -760,11 +760,36 @@ builder.Services.AddHayatePoolSupport()
 var app = builder.Build();
 
 // Standard ASP.NET Core health endpoint backed by the pool health check.
-// Reports "Degraded" when the pool has no available slots.
+//   Unhealthy — the pool's circuit breaker is open (every borrow is refused), or a
+//               configured object health probe rejected a real pooled object.
+//   Degraded  — every concurrent slot is busy; the pool works, the next borrower waits.
+//   Healthy   — otherwise.
 app.MapHealthChecks("/health");
 
 app.Run();
 ```
+
+The check reports on the pool's own counters, which is all most hosts need. When "the pool
+has a free object" and "the object still works" are different questions — which, for anything
+holding a network resource, they are — supply an object-level probe and the check will borrow a
+real object and ask it:
+
+```csharp
+// The pool supplies the mechanism: borrow, ask, give the object back on every path.
+// The implementation supplies the meaning, which for a connection pool is a PING.
+public sealed class ConnectionProbe : IHayateObjectHealthProbe<MyConnection>
+{
+    public async Task<bool> IsHealthyAsync(MyConnection c, CancellationToken ct = default)
+        => await c.PingAsync(ct);
+}
+
+builder.Services.AddHayatePoolSupport()
+    .RegisterHayatePool<MyConnection>()
+    .RegisterHealthChecks<MyConnection, ConnectionProbe>();
+```
+
+The probe is skipped, not waited for, when no slot is free — a health check that blocks is worse
+than one that reports less.
 
 ### Diagnostics
 

@@ -139,8 +139,32 @@ Breaking changes are described in full — with migration guidance — in
   *key* its own sink — the two arguments here are per keyed pool, shared by all of its sub-pools.
   Note that an injected sink only records once metrics are on (`EnableMetrics` is off by default) — pass
   `configure: (key, opt) => opt.EnableMetrics = true`, which the callback can also decide per key.
+- **Object-level health probe, and a payload that carries the counters** (B4): `HayateOpHealthCheck<T>`
+  accepts an `IHayateObjectHealthProbe<T>` and reports on what it says about a real borrowed object. A pool
+  knows how many objects it holds and whether its own breaker is open, but it cannot know whether a pooled
+  connection still answers — that needs a round trip, and only the code that owns the protocol can make it.
+  The check supplies the mechanism (borrow, hand over, take the verdict, give the object back on every path
+  including the throwing one); the implementation supplies the meaning, which for a connection pool is a
+  PING. `RegisterHealthChecks<T, TProbe>()` wires one up from the container; the probe defaults to `null`,
+  which is exactly the check that existed before. The probe is skipped when every slot is busy rather than
+  waited for: a health check that blocks is worse than one that reports less, and "no slot free" is already
+  the degraded answer. The `data` payload also grew from six fields to fourteen, and the eight new ones are
+  the ones an operator actually acts on — `TotalAcquired`, `TotalDestroyed`, `CurrentSize`,
+  `LeakDetectedCount`, `LeakSuspectedCount`, `AbandonedRemovedCount`, `LifetimeRotatedCount` and
+  `CircuitBreakerOpen` — under the same names `HayatePoolStats` gives them. The timing and allocation
+  averages were left out on purpose: they describe how the pool has been used, not whether it is usable,
+  and two of them read `double.MaxValue` until their first sample.
 
 ### Changed
+
+- **An open circuit breaker is no longer reported as a healthy pool** (B4; behaviour change, not
+  breaking): `HayateOpHealthCheck<T>` decided healthy-versus-degraded on `AvailableSlots` alone, so a pool
+  whose breaker had tripped — a pool that refuses every borrow — was reported `Healthy` as long as it still
+  happened to be holding idle objects. It is reported `Unhealthy` now, and the breaker state is in the
+  payload as `CircuitBreakerOpen`. The two remaining verdicts are unchanged and asked in a fixed order: all
+  slots busy is `Degraded` (the pool still works, the next borrower waits), and a probe that rejects the
+  object it was handed is `Unhealthy`. A host that alerted on "the pool is degraded" is unaffected; one that
+  read "not unhealthy" as "the dependency is fine" now gets the honest answer, which is the point.
 
 - **Per-pool Microsoft.Extensions.Logging categories** (L2; behaviour change, not breaking): every pool
   registered through the container or through configuration now logs under its own MEL category — the
