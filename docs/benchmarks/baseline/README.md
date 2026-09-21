@@ -34,13 +34,18 @@ The workflow reads `baseline.json`'s `calibration` flag to pick its mode:
 
 | `calibration` | Behaviour |
 | :--- | :--- |
-| `true` (current) | Advisory: `failMeanPercent` / `allocFailBytes` regressions are **reported** (`--no-fail`), because the committed baseline was captured on the maintainer's local machine and comparing a GitHub runner against it is a cross-environment comparison (measured up to 2.4× run-to-run spread on the sub-50 ns rows). |
-| `false` | Enforcing: mean and allocation regressions **fail the job**, like any required check. |
+| `true` | Advisory: `failMeanPercent` / `allocFailBytes` regressions are **reported** (`--no-fail`). This was the seeded state while the committed baseline came from the maintainer's local machine, so comparing a GitHub runner against it was a cross-environment comparison (measured up to 2.4× run-to-run spread on the sub-50 ns rows). |
+| `false` (**current**) | Enforcing: mean and allocation regressions **fail the job**, like any required check. |
 
 The calibration flag is therefore the switch: committing a CI-native baseline removes it
 and hardens the gate in the same commit. No workflow change is needed.
 
-## Capturing the CI-native baseline (one-time runbook)
+The current baseline was captured on a GitHub-hosted runner (2026-09-21), so the gate has
+been enforcing since. The first capture ran before the `update_baseline` emit path carried
+per-target thresholds, and the three sub-100 ns lean rows had to have their 30/60 overrides
+re-stamped by hand — see the note below before replacing this file.
+
+## Capturing the CI-native baseline (runbook)
 
 1. On GitHub: **Actions → Performance regression → Run workflow → `update_baseline` = true.**
    The job runs the hot-path benchmarks on the runner and writes a complete, committable
@@ -48,6 +53,14 @@ and hardens the gate in the same commit. No workflow change is needed.
    **`ci-baseline`** artifact.
 2. Download the artifact, replace `docs/benchmarks/baseline/baseline.json` with it, and commit.
 3. The next workflow run reports `calibration=false` and enforces the gate.
+
+> **Re-apply the PG4 overrides after every re-capture.** `--emit-baseline-file` builds the
+> file through `build_baseline_json()`, which does not emit `warnMeanPercentOverride` /
+> `failMeanPercentOverride`. The three sub-100 ns lean rows (`Acquire+Release | Hayate Lean`,
+> `Release | Hayate Lean`, `AcquireAsync+Release | Hayate Lean`) therefore come back without
+> them and silently fall back to the global 15/30 — on rows whose own run-to-run spread
+> exceeds that, so ordinary noise would fail the gate. Re-stamp warn 30 / fail 60 before
+> committing, or teach the emit path to carry the thresholds forward.
 
 Local captures stay useful for spot checks, but never commit a local capture as the gate
 baseline — that is exactly the cross-environment comparison the calibration flag guards
@@ -72,7 +85,9 @@ python scripts/bench-compare.py --emit-baseline-file candidate.json   # never co
 | `allocWarnBytes` | 0 | allocated-bytes growth that raises a warning |
 | `allocFailBytes` | 64 | allocated-bytes growth that fails the gate |
 
-Thresholds live in `baseline.json`. The concurrent suite stays excluded because its
-run-to-run variance exceeds the thresholds; the sub-100 ns lean rows carry 30/60 overrides
-per the PG4 noise measurements. After the first CI-native capture lands, tighten the
-overrides with real CI variance data if it allows.
+Thresholds live in `baseline.json`. The `concurrent` category is never gated (only the `hot`
+category is run in CI) because its run-to-run variance exceeds the thresholds; the sub-100 ns
+lean rows carry 30/60 overrides per the PG4 noise measurements. The first CI-native capture
+(2026-09-21) confirmed the delivered picture — all three asynchronous rows came in below the
+previous local figures — but it does not yet carry enough repeats to justify tightening the
+overrides; keep 30/60 until CI variance data allows it.
