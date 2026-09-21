@@ -4476,7 +4476,12 @@
              lease returns the object when it is disposed — once per lease, on the exception paths included.<br />
              These calls add nothing to the borrow itself: they delegate to the ordinary <c>Acquire</c> /
              <c>AcquireAsync</c> path, so the acquire timeout, cancellation, validation and every other configured
-             semantics apply unchanged. Only the return side is automated, at the cost of one lease allocation.
+             semantics apply unchanged. Only the return side is automated, at the cost of one lease allocation.<br />
+             On <c>net6.0</c> and later the lease also implements <c>IAsyncDisposable</c>, so dispose it with
+             <c>await using</c> wherever the pooled object's return may be asynchronous: the asynchronous form waits
+             for that return, while <c>using</c> blocks the calling thread on it. On <c>net48</c> and
+             <c>netstandard2.0</c> the lease is <c>IDisposable</c> only — those targets produce no asynchronous
+             return path, so <c>using</c> is the only form.
              </remarks>
              <example>
              <code>
@@ -4541,9 +4546,12 @@
             <remarks>
             Await this and dispose the resulting lease, so cancellation during the wait cannot leave a borrowed
             object unowned: when the wait fails, no object was taken at all.<br />
-            The lease implements <see cref="T:System.IDisposable"/>, so it is used with <c>using</c> after the await —
-            not <c>await using</c>, which would require <c>IAsyncDisposable</c> (unavailable on the
-            <c>net48</c> and <c>netstandard2.0</c> targets). Disposal does no asynchronous work anyway.
+            On <c>net6.0</c> and later the lease implements <c>IAsyncDisposable</c>, so dispose it with
+            <c>await using</c>: when the pool's policy implements the asynchronous contract, returning the object
+            runs asynchronous hooks, and the synchronous <c>using</c> blocks the calling thread on them. On
+            <c>net48</c> and <c>netstandard2.0</c> the lease is <see cref="T:System.IDisposable"/> only — those targets
+            produce no asynchronous return path, so there is nothing to wait for and <c>using</c> is the only
+            form.
             </remarks>
             <example>
             <code>
