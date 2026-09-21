@@ -738,6 +738,14 @@ public partial class HayatePoolBasic<T>
     /// </remarks>
     private void ReleaseLean(T item)
     {
+#if NET6_0_OR_GREATER
+        if (_asyncPolicy is not null)
+        {
+            ReleaseLeanAsync(item).GetAwaiter().GetResult();
+            return;
+        }
+#endif
+
         if (item is null)
         {
             _logger.LogWarning("Returned null object to pool. Type: {Type}", typeof(T).Name);
@@ -762,6 +770,42 @@ public partial class HayatePoolBasic<T>
             return;
         }
 
+        CompleteLeanReturn(item);
+    }
+
+#if NET6_0_OR_GREATER
+    private async ValueTask ReleaseLeanAsync(T item)
+    {
+        if (item is null)
+        {
+            _logger.LogWarning("Returned null object to pool. Type: {Type}", typeof(T).Name);
+            return;
+        }
+
+        try
+        {
+            await _asyncPolicy!.OnPassivateAsync(item).ConfigureAwait(false);
+
+            if (!await _asyncPolicy.OnReleaseAsync(item).ConfigureAwait(false))
+            {
+                _logger.LogWarning("Policy rejected object on release. Disposing. Type: {Type}", typeof(T).Name);
+                DestroyLean(item);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during object return validation. Disposing. Type: {Type}", typeof(T).Name);
+            DestroyLean(item);
+            return;
+        }
+
+        CompleteLeanReturn(item);
+    }
+#endif
+
+    private void CompleteLeanReturn(T item)
+    {
         if (!TryReturnLean(item))
         {
             // Buffer already at MaxPoolSize idle objects: drop it. An overflow is a normal

@@ -50,7 +50,7 @@ namespace DotNetCore.HayateOP;
 /// <typeparam name="T">The pooled object type.</typeparam>
 public sealed class HayatePreparationPool<T> : IHayateObjectPool<T>
 #if NET6_0_OR_GREATER
-    , IHayateAsyncObjectPool<T>
+    , IHayateAsyncObjectPool<T>, IHayateAsyncReturnPool<T>
 #endif
     where T : class
 {
@@ -178,6 +178,19 @@ public sealed class HayatePreparationPool<T> : IHayateObjectPool<T>
     /// </summary>
     /// <inheritdoc />
     public void Release(T item) => _inner.Release(item);
+
+#if NET6_0_OR_GREATER
+    ValueTask IHayateAsyncReturnPool<T>.ReleaseAsync(T item)
+    {
+        if (_inner is IHayateAsyncReturnPool<T> asyncInner)
+        {
+            return asyncInner.ReleaseAsync(item);
+        }
+
+        _inner.Release(item);
+        return default;
+    }
+#endif
 
     /// <inheritdoc />
     public HayatePoolStats GetStats() => _inner.GetStats();

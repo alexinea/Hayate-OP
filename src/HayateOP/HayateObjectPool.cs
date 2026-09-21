@@ -13,7 +13,7 @@ namespace DotNetCore.HayateOP;
 
 public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 #if NET6_0_OR_GREATER
-    , IHayateAsyncObjectPool<T>
+    , IHayateAsyncObjectPool<T>, IHayateAsyncReturnPool<T>
 #endif
     where T : class
 {
@@ -1141,6 +1141,14 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// </code></example>
     public void Release(T item)
     {
+#if NET6_0_OR_GREATER
+        if (_asyncPolicy is not null)
+        {
+            ReleaseAsync(item).GetAwaiter().GetResult();
+            return;
+        }
+#endif
+
         // Lean fast path dispatch (off by default → constant branch, JIT-eliminable).
         if (_enableLean)
         {
@@ -1161,18 +1169,78 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         Interlocked.Increment(ref _releaseAllocationSamples);
     }
 
-    private void ReleaseCore(T item)
+#if NET6_0_OR_GREATER
+    ValueTask IHayateAsyncReturnPool<T>.ReleaseAsync(T item) => ReleaseAsync(item);
+
+    internal async ValueTask ReleaseAsync(T item)
     {
-        if (item is null)
+        if (_asyncPolicy is null)
         {
-            _logger.LogWarning("Returned null object to pool. Type: {Type}", typeof(T).Name);
+            Release(item);
             return;
         }
 
-        // Find the corresponding wrapper object and verify it belongs to the pool.
-        // After the registry is split by shard, reverse lookup by T requires probing each shard (read-only and lock-free; the shard count is single-digit,
-        // so the cost is negligible). The same object is only registered in its creation shard; a hit in any shard confirms it belongs to this pool.
-        HayateObject<T> w = null!;
+        if (_enableLean)
+        {
+            await ReleaseLeanAsync(item).ConfigureAwait(false);
+            return;
+        }
+
+        if (!_enableAllocationTracking)
+        {
+            await ReleaseCoreAsync(item).ConfigureAwait(false);
+            return;
+        }
+
+        var allocatedBefore = GetAllocatedBytesForCurrentThread();
+        await ReleaseCoreAsync(item).ConfigureAwait(false);
+        Interlocked.Add(ref _releaseAllocatedBytes, GetAllocatedBytesForCurrentThread() - allocatedBefore);
+        Interlocked.Increment(ref _releaseAllocationSamples);
+    }
+#endif
+
+    private void ReleaseCore(T item)
+    {
+        if (!TryPrepareReturn(item, out var w)) return;
+
+        try
+        {
+            _policy.OnPassivate(item);
+            CompleteReturn(w, item, _policy.OnRelease(item));
+        }
+        catch (Exception ex)
+        {
+            HandleReturnFailure(w, item, ex);
+        }
+    }
+
+#if NET6_0_OR_GREATER
+    private async ValueTask ReleaseCoreAsync(T item)
+    {
+        if (!TryPrepareReturn(item, out var w)) return;
+
+        try
+        {
+            await _asyncPolicy!.OnPassivateAsync(item).ConfigureAwait(false);
+            var accepted = await _asyncPolicy.OnReleaseAsync(item).ConfigureAwait(false);
+            CompleteReturn(w, item, accepted);
+        }
+        catch (Exception ex)
+        {
+            HandleReturnFailure(w, item, ex);
+        }
+    }
+#endif
+
+    private bool TryPrepareReturn(T item, out HayateObject<T> w)
+    {
+        w = null!;
+        if (item is null)
+        {
+            _logger.LogWarning("Returned null object to pool. Type: {Type}", typeof(T).Name);
+            return false;
+        }
+
         foreach (var shard in _shards)
         {
             if (shard.TryGetTracked(item, out w)) break;
@@ -1181,193 +1249,126 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         if (w is null)
         {
             _logger.LogWarning("Returned object does not belong to pool. Disposing. Type: {Type}", typeof(T).Name);
-
             Destroy(item);
 
-            // Covered by the _enableMetrics gate (the reject path was originally ungated — a missed allocation point after enabling HayateDiagnostics)
             if (_enableMetrics)
             {
                 _metrics.RecordObjectReleased(_name, item, false);
             }
 
-            return;
+            return false;
         }
 
-        #region Return validation (only when validation is enabled)
-
-        //if (_options.EnableValidation && _options.ValidateOnReturn && !_policy.Validate(item))
         if (_enableValidation && _options.ValidateOnReturn && !_policy.Validate(item))
         {
             _logger.LogWarning("Object returned to pool. Disposing. Type: {Type}", typeof(T).Name);
-
             Destroy(w);
 
-            // Covered by the _enableMetrics gate (validation-reject path leak-trace point)
             if (_enableMetrics)
             {
                 _metrics.RecordObjectReleased(_name, item, false);
+            }
+
+            return false;
+        }
+
+        return true;
+    }
+
+    private void CompleteReturn(HayateObject<T> w, T item, bool accepted)
+    {
+        w.LastReleasedAt = Stopwatch.GetTimestamp();
+        w.LeaseTimeMs = (long)((w.LastReleasedAt - w.LastBorrowedAt) * 1000.0 / Stopwatch.Frequency);
+
+        if (!accepted)
+        {
+            _logger.LogWarning(
+                "Policy rejected object on release. Disposing. Type: {Type}",
+                typeof(T).Name);
+
+            Destroy(w);
+
+            if (_enableMetrics)
+            {
+                _metrics.RecordObjectReleased(_name, item, false);
+            }
+
+            if (_enableAutoScaling && _options.MinPoolSize > 0 &&
+                TrackedObjectCount < _options.MinPoolSize)
+            {
+                ForceScaleUpOneStep();
             }
 
             return;
         }
 
-        #endregion
-
-        try
+        if (_enableMetrics)
         {
-            #region Core return handling
+            UpdateLeaseTimeStats(w.LeaseTimeMs);
+            Interlocked.Increment(ref _totalReleased);
+            _metrics.RecordObjectReleased(_name, item, true);
+        }
 
-            // Passivate the object
-            _policy.OnPassivate(item);
-
-            // The returned state is no longer cleared separately — a successful shard.Add below moves Location back
-            // to InPool (IsBorrowed becomes false); if Add is rejected, Destroy runs (Location = Destroyed).
-
-            // The return timestamp is recorded unconditionally (the same 2.5 invariant): the old conditional gating
-            // (eviction/metrics) left LastReleasedAt at the creation time when everything was off,
-            // structurally breaking Evict(Idle)'s idle judgment; a single QPC costs the same as on the borrow side and is acceptable.
-            w.LastReleasedAt = Stopwatch.GetTimestamp();
-            w.LeaseTimeMs = (long)((w.LastReleasedAt - w.LastBorrowedAt) * 1000.0 / Stopwatch.Frequency);
-
-            // Reset the object; the policy can reject the return by returning false (e.g., the object is corrupted or not reusable)
-            if (!_policy.OnRelease(item))
+        if (_softCapacity > 0)
+        {
+            var idle = IdleObjectCount();
+            if (idle >= _softCapacity)
             {
-                _logger.LogWarning(
-                    "Policy rejected object on release. Disposing. Type: {Type}",
-                    typeof(T).Name);
+                if (_enableDiagnostics)
+                {
+                    _logger.LogDebug(
+                        "Object dropped on return: soft capacity reached. Type: {Type}, idle: {Idle}, soft capacity: {SoftCapacity}",
+                        typeof(T).Name, idle, _softCapacity);
+                }
 
                 Destroy(w);
-
-                // Covered by the _enableMetrics gate (policy-reject path leak-trace point)
-                if (_enableMetrics)
-                {
-                    _metrics.RecordObjectReleased(_name, item, false);
-                }
-
-                // Maintain the minimum idle watermark: after the policy rejects, the pool may be drained, so proactively replenish.
-                // Only triggers when auto-scaling is enabled and MinPoolSize > 0, to avoid meaningless overhead.
-                if (_enableAutoScaling && _options.MinPoolSize > 0 &&
-                    TrackedObjectCount < _options.MinPoolSize)
-                {
-                    ForceScaleUpOneStep();
-                }
-
                 return;
-            }
-
-            #endregion
-
-            #region Metrics statistics (only when metrics are enabled)
-
-            if (_enableMetrics)
-            {
-                // Record lease-time statistics
-                UpdateLeaseTimeStats(w.LeaseTimeMs);
-                Interlocked.Increment(ref _totalReleased);
-                _metrics.RecordObjectReleased(_name, item, true);
-            }
-
-            #endregion
-
-            #region Soft-capacity drop (T-R, off by default → constant branch, JIT-eliminable)
-
-            // The soft ceiling is enforced on the return path only, and only as a read of the idle count
-            // followed by the store: two returns that both observe room may both be retained, which is
-            // what makes the ceiling soft. A dropped object goes through the same single destroy path the
-            // shard-overflow branch below uses, so the policy's OnDestroy hook fires and the registry
-            // entry is removed. It is a normal steady-state outcome, not an error, so it is traced rather
-            // than warned — a warning here would fire once per return through a burst drain.
-            if (_softCapacity > 0)
-            {
-                var idle = IdleObjectCount();
-                if (idle >= _softCapacity)
-                {
-                    if (_enableDiagnostics)
-                    {
-                        _logger.LogDebug(
-                            "Object dropped on return: soft capacity reached. Type: {Type}, idle: {Idle}, soft capacity: {SoftCapacity}",
-                            typeof(T).Name, idle, _softCapacity);
-                    }
-
-                    Destroy(w);
-                    return;
-                }
-            }
-
-            #endregion
-
-            #region Return to shard
-
-            // Critical fix (D3): round-trip by the ShardIndex recorded at Acquire,
-            // never revert to Thread.GetCurrentProcessorId() % _shards.Length —
-            // the latter silently disposes objects in 2/3 of shards (those with max = 0) when MaxPoolSize < ShardCount.
-            var shardIndex = (uint)w.ShardIndex < (uint)_shards.Length ? w.ShardIndex : 0;
-            var shard = _shards[shardIndex];
-            if (!shard.Add(w))
-            {
-                // The shard refused to accept; two possibilities:
-                // 1) The shard is full (overflow) — after Add no longer disposes the object itself,
-                //    so this path's Destroy(w) performs the full destruction (triggering OnDestroy), avoiding missed hooks;
-                // 2) The object was already claimed by eviction / idle validation — the other thread is destroying it.
-                // Either way, the object is no longer reusable; destroy it here uniformly and remove it from the global index;
-                // Destroy is idempotent and will not double-Dispose.
-                _logger.LogWarning("Object rejected by shard on release. Removing from pool. Type: {Type}, shard: {ShardIndex}",
-                    typeof(T).Name, shardIndex);
-
-                // Destroy untracks the object from the registry internally — no separate UntrackObject
-                // call is needed here (it would be a no-op anyway, since Destroy drops the value
-                // reference and UntrackObject short-circuits on a null value).
-                Destroy(w);
-
-                // Fix: the shard rejected and destroyed an object, so the pool total may drop below MinPoolSize
-                // (especially when the eviction thread first claims an InPool object, then this returned object is overflowed).
-                // Consistent with the OnRelease=false path, replenish once only when auto-scaling is enabled and the pool is genuinely below the watermark,
-                // to avoid latency-sensitive work hitting a cold start under eviction/return interleaving.
-                if (_enableAutoScaling && _options.MinPoolSize > 0 &&
-                    TrackedObjectCount < _options.MinPoolSize)
-                {
-                    ForceScaleUpOneStep();
-                }
-
-                return;
-            }
-
-            #endregion
-
-            // Lease ends — clear the current async flow's lease context (Current becomes null;
-            // AsyncLocal writes incur an execution-context copy cost, paid only when forensics is enabled).
-            if (_enableLeakDetection && _leakTraceCaptureMode != HayateLeakTraceCaptureMode.Off)
-            {
-                HayateLeaseContext.DetachFromFlow();
-            }
-
-            // The object returned to the pool successfully; wake one waiting Acquire (Block/BlockTimeout/CreateNew).
-            // When there is no waiter, the counter accumulates and is consumed by the borrow path's Wait(0), so it never leaks.
-            try { _blockGate.Release(); }
-            catch (SemaphoreFullException)
-            {
-                // int.MaxValue counter cap protection; unreachable under normal load; swallowed to keep the Release path uninterrupted.
-            }
-
-            // Capacity-alarm probe — the borrow-water-level drop on return is sensed here (reset/retripped on state transition).
-            CheckCapacityAlarm();
-
-            // Per-operation trace — suppressed by the diagnostics master switch (O11), which is what keeps
-            // the return path free of the params-array allocation this call would otherwise make.
-            if (_enableDiagnostics)
-            {
-                _logger.LogDebug("Object returned to pool. Type: {Type} LeaseTime: {LeaseTime:F2}ms, shard: {ShardIndex}", typeof(T).Name, w.LeaseTimeMs, shardIndex);
             }
         }
-        catch (Exception ex)
+
+        var shardIndex = (uint)w.ShardIndex < (uint)_shards.Length ? w.ShardIndex : 0;
+        var shard = _shards[shardIndex];
+        if (!shard.Add(w))
         {
-            _logger.LogError(ex, "Error during object return validation. Disposing. Type: {Type}", typeof(T).Name);
+            _logger.LogWarning("Object rejected by shard on release. Removing from pool. Type: {Type}, shard: {ShardIndex}",
+                typeof(T).Name, shardIndex);
             Destroy(w);
-            //if (_options.EnableMetrics)
-            if (_enableMetrics)
+
+            if (_enableAutoScaling && _options.MinPoolSize > 0 &&
+                TrackedObjectCount < _options.MinPoolSize)
             {
-                _metrics.RecordObjectReleased(_name, item, false);
+                ForceScaleUpOneStep();
             }
+
+            return;
+        }
+
+        if (_enableLeakDetection && _leakTraceCaptureMode != HayateLeakTraceCaptureMode.Off)
+        {
+            HayateLeaseContext.DetachFromFlow();
+        }
+
+        try { _blockGate.Release(); }
+        catch (SemaphoreFullException)
+        {
+        }
+
+        CheckCapacityAlarm();
+
+        if (_enableDiagnostics)
+        {
+            _logger.LogDebug("Object returned to pool. Type: {Type} LeaseTime: {LeaseTime:F2}ms, shard: {ShardIndex}", typeof(T).Name, w.LeaseTimeMs, shardIndex);
+        }
+    }
+
+    private void HandleReturnFailure(HayateObject<T> w, T item, Exception ex)
+    {
+        _logger.LogError(ex, "Error during object return validation. Disposing. Type: {Type}", typeof(T).Name);
+        Destroy(w);
+
+        if (_enableMetrics)
+        {
+            _metrics.RecordObjectReleased(_name, item, false);
         }
     }
 

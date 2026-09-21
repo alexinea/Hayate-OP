@@ -53,6 +53,14 @@ Breaking changes are described in full — with migration guidance — in
   synchronous pool and the zero-dependency core. Second item of the three-item batch in
   `docs/async-policy.md` (A1 → A2 → B5); with A2 in, only `OnReleaseAsync` / `OnPassivateAsync`
   remain unwired, which is B5's work.
+- **Asynchronous return contract** (B5, `net6.0`+): built-in pools now await
+  `OnPassivateAsync` and then `OnReleaseAsync` whenever the policy implements
+  `IHayateAsyncObjectPolicy<T>`; a synchronous `Release()` waits on the same sequence, while a
+  synchronous-only policy keeps its existing hooks. `HayatePoolScope<T>` now implements
+  `IAsyncDisposable`, allowing `await using` to wait for the return path. The lease remains
+  exactly-once and falls back to synchronous `Release()` for third-party pools that have no
+  asynchronous return capability. The general engine, Lean mode, and the preparation decorator
+  preserve the async path; `netstandard2.0` and `net48` retain their synchronous-only API.
 
 ### Fixed
 

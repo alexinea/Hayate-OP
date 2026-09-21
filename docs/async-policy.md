@@ -7,17 +7,18 @@ releases would append members to `IHayateAsyncObjectPolicy<T>` after implementer
 against it, which is a second breaking change for exactly the people the interface is meant to
 help.
 
-**Implementation status: A1 (asynchronous creation) and A2 (asynchronous disposal) implemented,
-B5 (asynchronous return) pending.** The engine dispatches `CreateAsync` on every creation path —
+**Implementation status: A1 (asynchronous creation), A2 (asynchronous disposal) and B5
+(asynchronous return) implemented.** The engine dispatches `CreateAsync` on every creation path —
 general and lean, synchronous and asynchronous entry points — so a synchronous caller waits on the
 asynchronous hook instead of calling the synchronous one (rule 1 below). `DisposeAsync` now drains
 every built-in pool — the sharded engine (general and lean), the preparation decorator and the
 unbounded pool — preferring `IAsyncDisposable` over `IDisposable` on each object and awaiting
 `OnDestroyAsync` where the policy provides one, with the synchronous `Dispose()` keeping its
-current semantics. `OnReleaseAsync` and `OnPassivateAsync` are part of the interface an implementer
-must supply, but the engine does not call them yet; B5 wires them. Where this page and the code
-disagree, this page is the design and the code is the bug — until a decision here is deliberately
-revised, in which case this page is updated first.
+current semantics. Return paths now await `OnPassivateAsync` followed by `OnReleaseAsync` for an
+asynchronous policy; synchronous `Release()` waits on that same sequence. `HayatePoolScope<T>`
+implements `IAsyncDisposable` on `net6.0` and later, so `await using` waits for the return to finish.
+Where this page and the code disagree, this page is the design and the code is the bug — until a
+decision here is deliberately revised, in which case this page is updated first.
 
 ## 1. Why the synchronous contract is not enough
 

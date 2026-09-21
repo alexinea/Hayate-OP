@@ -4455,6 +4455,15 @@
             </code>
             </example>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolScope`1.DisposeAsync">
+            <summary>
+            Returns the borrowed object asynchronously. Called automatically at the end of an <c>await using</c> block.
+            </summary>
+            <remarks>
+            For a pool with an asynchronous return path, completion means its asynchronous policy hooks have finished.
+            Other pool implementations use their ordinary synchronous return path.
+            </remarks>
+        </member>
         <member name="T:DotNetCore.HayateOP.HayatePoolScopeExtensions">
              <summary>
              <c>using</c>-friendly borrows for every <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/>: the synchronous and

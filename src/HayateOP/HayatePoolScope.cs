@@ -1,5 +1,6 @@
 using System;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace DotNetCore.HayateOP;
 
@@ -27,7 +28,11 @@ namespace DotNetCore.HayateOP;
 /// lease.Value.DoWork();     // returned to the pool at the end of the enclosing block
 /// </code>
 /// </example>
-public sealed class HayatePoolScope<T> : IDisposable where T : class
+public sealed class HayatePoolScope<T> : IDisposable
+#if NET6_0_OR_GREATER
+    , IAsyncDisposable
+#endif
+    where T : class
 {
     // 0 = the lease is live and owns the borrowed object; 1 = the object has been returned. The claim is
     // atomic so concurrent disposals collapse into one return, and a lease whose body threw can still be
@@ -98,18 +103,56 @@ public sealed class HayatePoolScope<T> : IDisposable where T : class
     /// </example>
     public void Dispose()
     {
-        // Atomic claim: only the caller that flips the flag from 0 to 1 performs the return. Everything
-        // needed for that return is captured into locals first, so the losers observe a settled state.
-        if (Interlocked.Exchange(ref _returned, 1) != 0) return;
-
-        var pool = _pool;
-        var value = _value;
-        _pool = null;
-        _value = null;
-
-        if (pool is not null && value is not null)
+        if (TryClaimReturn(out var pool, out var value))
         {
             pool.Release(value);
         }
     }
+
+#if NET6_0_OR_GREATER
+    /// <summary>
+    /// Returns the borrowed object asynchronously. Called automatically at the end of an <c>await using</c> block.
+    /// </summary>
+    /// <remarks>
+    /// For a pool with an asynchronous return path, completion means its asynchronous policy hooks have finished.
+    /// Other pool implementations use their ordinary synchronous return path.
+    /// </remarks>
+    public ValueTask DisposeAsync()
+    {
+        if (!TryClaimReturn(out var pool, out var value)) return default;
+
+        if (pool is IHayateAsyncReturnPool<T> asyncPool)
+        {
+            return asyncPool.ReleaseAsync(value);
+        }
+
+        pool.Release(value);
+        return default;
+    }
+#endif
+
+    private bool TryClaimReturn(out IHayateObjectPool<T> pool, out T value)
+    {
+        pool = null!;
+        value = null!;
+        if (Interlocked.Exchange(ref _returned, 1) != 0) return false;
+
+        var claimedPool = _pool;
+        var claimedValue = _value;
+        _pool = null;
+        _value = null;
+
+        if (claimedPool is null || claimedValue is null) return false;
+
+        pool = claimedPool;
+        value = claimedValue;
+        return true;
+    }
 }
+
+#if NET6_0_OR_GREATER
+internal interface IHayateAsyncReturnPool<T> where T : class
+{
+    ValueTask ReleaseAsync(T item);
+}
+#endif
