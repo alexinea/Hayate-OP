@@ -127,6 +127,18 @@ Breaking changes are described in full — with migration guidance — in
   `IsValid()` returns `false` and `Build()` throws `InvalidOperationException`, in either builder order —
   because silently disabling it is precisely the failure the switch exists to remove, an owner who
   believes objects are rotated on hand-out while they are not.
+- **Injectable metrics and logger on a keyed pool** (B3): `ParameterizedHayatePool<TKey, TValue>`'s
+  convenience constructor — the one that takes `Func<TKey, TValue> create` — accepts an optional
+  `IHayateMetrics` and `IHayateLogger` that every sub-pool it creates uses. It hard-coded the empty sink
+  and the built-in no-op logger, so a keyed pool was invisible to OpenTelemetry and to structured logging
+  however it was configured — and a pool keyed by connection string is exactly the place where per-key
+  visibility matters: `pools.GetObject("tenant-a")` and `pools.GetObject("tenant-b")` were
+  indistinguishable in every counter and every log line. Both arguments default to the two that were
+  hard-coded, so an unchanged caller sees exactly what it saw before, and the escape hatch is untouched:
+  the other constructor still hands you the whole sub-pool to build, which is also how a caller gives each
+  *key* its own sink — the two arguments here are per keyed pool, shared by all of its sub-pools.
+  Note that an injected sink only records once metrics are on (`EnableMetrics` is off by default) — pass
+  `configure: (key, opt) => opt.EnableMetrics = true`, which the callback can also decide per key.
 
 ### Changed
 

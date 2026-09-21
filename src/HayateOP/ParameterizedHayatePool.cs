@@ -101,6 +101,13 @@ public sealed class ParameterizedHayatePool<TKey, TValue> : IDisposable
     /// so it cannot affect other keys.</param>
     /// <param name="registry">Where to register each sub-pool; see the other constructor.</param>
     /// <param name="name">An optional name prefix for the sub-pool names.</param>
+    /// <param name="metrics">An optional <see cref="IHayateMetrics"/> shared by every sub-pool this keyed
+    /// pool creates, so a keyed pool can publish counters the way any other pool does. Defaults to the
+    /// empty sink — no counters are recorded, which is what this constructor did before it took one.</param>
+    /// <param name="logger">An optional <see cref="IHayateLogger"/> shared by every sub-pool this keyed pool
+    /// creates. Defaults to the built-in no-op logger, which is what this constructor used before it took
+    /// one. Pass a logger built per key when the keys need to be told apart downstream — the instance given
+    /// here is shared, so every sub-pool writes to the same place.</param>
     /// <exception cref="ArgumentNullException"><paramref name="create"/> is <c>null</c>.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxSizePerKey"/> is not greater than
     /// zero.</exception>
@@ -115,7 +122,13 @@ public sealed class ParameterizedHayatePool<TKey, TValue> : IDisposable
     /// than the default shard count is given a matching shard count instead of being split into shards that
     /// can hold nothing. And a sub-pool creates on demand rather than waiting for a return: created empty,
     /// with nothing held in reserve, it would otherwise hand out one object and make every later borrow wait
-    /// for the background scaler. At the per-key size it waits like any other pool.
+    /// for the background scaler. At the per-key size it waits like any other pool.<br />
+    /// Every sub-pool shares the <see cref="IHayateMetrics"/> and <see cref="IHayateLogger"/> given here,
+    /// or the empty sink and the built-in no-op logger when none is given — the two this constructor
+    /// hard-coded before it accepted them, so an unchanged caller sees exactly what it saw then. Sharing is
+    /// the point for metrics, which aggregate; a caller who needs the keys told apart in a log should pass a
+    /// logger that routes by key itself, or use the other constructor, which hands over the whole sub-pool
+    /// and can give each key its own.
     /// </remarks>
     /// <example>
     /// <code>
@@ -127,9 +140,10 @@ public sealed class ParameterizedHayatePool<TKey, TValue> : IDisposable
     /// </example>
     public ParameterizedHayatePool(Func<TKey, TValue> create, int maxSizePerKey,
         Action<TKey, TValue>? onGet = null, Action<TKey, HayatePoolOptions>? configure = null,
-        IHayateObjectPoolRegistry? registry = null, string? name = null)
+        IHayateObjectPoolRegistry? registry = null, string? name = null,
+        IHayateMetrics? metrics = null, IHayateLogger? logger = null)
         : this(key => BuildSubPool(key, create!, maxSizePerKey, onGet, configure,
-                  string.IsNullOrWhiteSpace(name) ? typeof(TValue).Name : name!),
+                  string.IsNullOrWhiteSpace(name) ? typeof(TValue).Name : name!, metrics, logger),
               registry, name)
     {
         // Guarded here as well as in BuildSubPool so the exception is raised by the constructor call the
@@ -144,7 +158,7 @@ public sealed class ParameterizedHayatePool<TKey, TValue> : IDisposable
 
     private static IHayateObjectPool<TValue> BuildSubPool(TKey key, Func<TKey, TValue> create,
         int maxSizePerKey, Action<TKey, TValue>? onGet, Action<TKey, HayatePoolOptions>? configure,
-        string namePrefix)
+        string namePrefix, IHayateMetrics? metrics, IHayateLogger? logger)
     {
         if (create is null) throw new ArgumentNullException(nameof(create));
         if (maxSizePerKey <= 0)
@@ -182,8 +196,8 @@ public sealed class ParameterizedHayatePool<TKey, TValue> : IDisposable
                 onGet is null ? null : new Action<TValue>(value => onGet(key, value))),
             options,
             new ThresholdScalingStrategy(),
-            EmptyHayateMetrics.Instance,
-            new DefaultHayateLogger(),
+            metrics ?? EmptyHayateMetrics.Instance,
+            logger ?? new DefaultHayateLogger(),
             SubPoolNameOf(namePrefix, key));
     }
 
