@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
+using DotNetCore.HayateOP.Common;
 
 namespace DotNetCore.HayateOP;
 
@@ -50,7 +51,7 @@ public class HayateUnboundedPool<T> : IHayateObjectPool<T>
 #if NET6_0_OR_GREATER
     , IHayateAsyncObjectPool<T>
 #endif
-    where T : class, new()
+    where T : class
 {
     /// <summary>
     /// The default <see cref="MaxIdle"/>: 32 retained objects.
@@ -78,8 +79,11 @@ public class HayateUnboundedPool<T> : IHayateObjectPool<T>
     /// Builds an unbounded pool that keeps at most <see cref="DefaultMaxIdle"/> idle objects and
     /// creates new ones with their parameterless constructor.
     /// </summary>
+    /// <exception cref="InvalidOperationException"><typeparamref name="T"/> has no public parameterless
+    /// constructor, so this overload cannot create objects of it; use the overload taking a creation
+    /// factory.</exception>
     public HayateUnboundedPool()
-        : this(DefaultMaxIdle, static () => new T())
+        : this(DefaultMaxIdle, HayateDefaultConstruction.Factory<T>())
     {
     }
 
@@ -91,8 +95,11 @@ public class HayateUnboundedPool<T> : IHayateObjectPool<T>
     /// zero.</param>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxIdle"/> is not greater than
     /// zero.</exception>
+    /// <exception cref="InvalidOperationException"><typeparamref name="T"/> has no public parameterless
+    /// constructor, so this overload cannot create objects of it; use the overload taking a creation
+    /// factory.</exception>
     public HayateUnboundedPool(int maxIdle)
-        : this(maxIdle, static () => new T())
+        : this(maxIdle, HayateDefaultConstruction.Factory<T>())
     {
     }
 

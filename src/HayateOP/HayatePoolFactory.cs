@@ -95,6 +95,10 @@ public class HayatePoolFactory : IHayatePoolFactory
         }
     }
 
+    // Keeps the new() constraint on purpose: ValidateElementType has already rejected an element type
+    // without a public parameterless constructor, and this path exposes no policy hook — the constraint
+    // documents a requirement the factory really has. (2.9, B1 relaxed the builder, the DI registrations
+    // and the unbounded pool; the factory keeps its requirement.)
     private static IHayateObjectPool BuildTyped<T>(HayateServiceKey key, Action<HayatePoolOptions>? configure)
         where T : class, new()
     {

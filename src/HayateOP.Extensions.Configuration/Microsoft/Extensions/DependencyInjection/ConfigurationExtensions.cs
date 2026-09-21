@@ -50,7 +50,7 @@ public static class ConfigurationExtensions
         IConfiguration configuration,
         string? poolName = null,
         string configSectionPath = "HayatePool")
-        where T : class, new()
+        where T : class
     {
         poolName ??= typeof(T).Name;
         var poolConfigSection = configuration.GetSection($"{configSectionPath}:Pools:{poolName}");
@@ -58,7 +58,7 @@ public static class ConfigurationExtensions
         // Register the pool's named configuration (overrides the global configuration).
         services.Services.Configure<HayatePoolOptions>(poolName, poolConfigSection);
 
-        services.Services.TryAddSingleton<IHayateObjectPolicy<T>, DefaultHayateObjectPolicy<T>>();
+        services.Services.TryAddSingleton<IHayateObjectPolicy<T>>(sp => HayateObjectPolicies.Default<T>());
 
         // Register the pool instance.
         services.Services.AddSingleton<IHayateObjectPool<T>>(sp =>
@@ -97,7 +97,7 @@ public static class ConfigurationExtensions
         IConfiguration configuration,
         string name,
         string configSectionPath = "HayatePool")
-        where T : class, new()
+        where T : class
     {
         var key = HayateServiceKey.Create<T>(name);
         var poolConfigSection = configuration.GetSection($"{configSectionPath}:Pools:{name}");
@@ -107,7 +107,7 @@ public static class ConfigurationExtensions
         // user writes in appsettings.
         services.Services.Configure<HayatePoolOptions>(key.RegistryName, poolConfigSection);
         services.Services.TryAddSingleton<IHayateObjectPoolRegistry, HayateObjectPoolRegistry>();
-        services.Services.TryAddSingleton<IHayateObjectPolicy<T>, DefaultHayateObjectPolicy<T>>();
+        services.Services.TryAddSingleton<IHayateObjectPolicy<T>>(sp => HayateObjectPolicies.Default<T>());
         services.Services.AddSingleton<HayatePoolConfigurationCleanup>();
 
         services.Services.TryAddSingleton<HayateNamedPoolCollection<T>>();
@@ -126,7 +126,7 @@ public static class ConfigurationExtensions
     /// </summary>
     private static IHayateObjectPool<T> BuildConfiguredPool<T>(IServiceProvider sp, string poolName,
         IConfiguration poolConfigSection, bool registerInRegistry)
-        where T : class, new()
+        where T : class
     {
         // Resolve dependencies.
         var optionsMonitor = sp.GetRequiredService<IOptionsMonitor<HayatePoolOptions>>();

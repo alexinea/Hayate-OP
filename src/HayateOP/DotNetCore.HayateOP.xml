@@ -143,6 +143,51 @@
             (corresponds to <see cref="P:DotNetCore.HayateOP.HayateCircuitBreakerOptions.ProbeInterval"/>).
             </summary>
         </member>
+        <member name="T:DotNetCore.HayateOP.Common.HayateDefaultConstruction">
+            <summary>
+            Runtime resolution of the default object policy and of the default creation factory, for the entry
+            points whose generic constraint is <c>where T : class</c>.
+            </summary>
+            <remarks>
+            <see cref="T:DotNetCore.HayateOP.Policies.DefaultHayateObjectPolicy`1"/> keeps its <c>new()</c> constraint, because it really does
+            create objects with <c>new T()</c>; a caller that no longer carries that constraint cannot therefore
+            name the type directly. Both members below establish first that the constraint is satisfiable — with an
+            exception that names the fix when it is not — and only then reach the constrained code, so the
+            requirement is reported rather than assumed.<br />
+            The policy goes through <see cref="T:System.Activator"/>: it is resolved once per pool, on the cold build path,
+            and a fresh instance per pool keeps the ownership story unchanged. The factory is a cached
+            <c>new T()</c> delegate instead, because an unbounded pool calls it once per object it creates — that
+            path keeps exactly the cost it had before the constraint was relaxed.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Common.HayateDefaultConstruction.Policy``1">
+            <summary>
+            Creates the default policy for <typeparamref name="T"/>, so a builder or container that no longer
+            requires a parameterless constructor can still fall back to it.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <returns>A new default policy.</returns>
+            <exception cref="T:System.InvalidOperationException"><typeparamref name="T"/> has no public parameterless
+            constructor, so the default policy cannot create objects of it.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Common.HayateDefaultConstruction.Factory``1">
+            <summary>
+            Returns a factory that creates <typeparamref name="T"/> with its parameterless constructor, for the
+            pools that take a creation delegate rather than a policy.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <returns>A cached factory; calling it costs what <c>new T()</c> costs.</returns>
+            <exception cref="T:System.InvalidOperationException"><typeparamref name="T"/> has no public parameterless
+            constructor.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Common.HayateDefaultConstruction.RequireParameterlessConstructor``1">
+            <summary>
+            Throws when <typeparamref name="T"/> cannot satisfy <c>new()</c>, naming the entry points that do not
+            need it. It runs before the constrained code is reached, so the caller reads a sentence instead of a
+            <see cref="T:System.MissingMethodException"/> from inside an object factory.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+        </member>
         <member name="T:DotNetCore.HayateOP.Common.ValueStopwatch">
             <summary>
             High-performance value-type stopwatch for accurately measuring elapsed time intervals.
@@ -1697,7 +1742,11 @@
             dispose it, and do not wrap it in <c>using</c>; the pool outlives the call. Tear it down through
             the catalog when the process shuts down, or in a test that needs a clean slate. Use the
             overload taking a configuration callback to set the pool's shape, and
-            <see cref="T:DotNetCore.HayateOP.HayatePoolBuilder`1"/> when the pool is not meant to be shared at all.
+            <see cref="T:DotNetCore.HayateOP.HayatePoolBuilder`1"/> when the pool is not meant to be shared at all.<br />
+            The shared pool is built with the library's default policy, which creates objects with
+            <c>new T()</c>. The catalog exposes no way to supply a policy, so the <c>new()</c> constraint stays
+            here on purpose: a type without a public parameterless constructor is pooled through
+            <see cref="T:DotNetCore.HayateOP.HayatePoolBuilder`1"/> and its <c>WithPolicy</c> instead (2.9, B1).
             </remarks>
             <example>
             <code>
@@ -1722,13 +1771,27 @@
             <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.GetOrCreate``1(System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/>). Configure the
             shared pool once, at start-up, or use
             <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.GetOrCreateNamed``1(System.String,System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/> with
-            a distinct name for a second, differently configured shared pool of the same type.
+            a distinct name for a second, differently configured shared pool of the same type.<br />
+            As with the parameterless overload, the pool is built with the library's default policy and the
+            <c>new()</c> constraint is kept deliberately — see <see cref="M:DotNetCore.HayateOP.HayatePool.Shared``1"/>.
             </remarks>
             <example>
             <code>
             var pool = HayatePool.Shared&lt;MyBuffer&gt;(o =&gt; { o.MaxPoolSize = 4096; o.MinPoolSize = 64; });
             </code>
             </example>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolBuilder`1.Policy">
+            <summary>
+            The policy the pool is built with: the one <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithPolicy(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0})"/> set, or the library default.
+            </summary>
+            <remarks>
+            The default is resolved here rather than in the constructor, so that a type without a public
+            parameterless constructor can still be pooled once a policy is supplied (2.9, B1): the requirement
+            moved from the generic constraint — which blocked the builder at compile time — to this point, where
+            it is reported with an actionable message. Nothing is resolved for a builder whose policy was set
+            explicitly, which is the whole point of the relaxation.
+            </remarks>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLean(System.Boolean)">
             <summary>
@@ -3019,7 +3082,11 @@
             These are thin adapters: the pool is still built (and registered) by the factory's non-generic
             method, so <see cref="M:DotNetCore.HayateOP.HayatePoolFactoryExtensions.GetOrCreatePool``1(DotNetCore.HayateOP.IHayatePoolFactory,System.String,System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/> deduplicates exactly like
             <see cref="M:DotNetCore.HayateOP.IHayatePoolFactory.GetOrCreate(DotNetCore.HayateOP.HayateServiceKey,System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/> does. The cast is safe by construction — a factory
-            builds <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/> for the key's element type.
+            builds <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/> for the key's element type.<br />
+            Both methods keep the <c>new()</c> constraint on purpose: the factory builds with the library's default
+            policy and exposes no way to supply one, so a type without a public parameterless constructor cannot be
+            pooled through this path. Pool such a type through <see cref="T:DotNetCore.HayateOP.HayatePoolBuilder`1"/> and its
+            <c>WithPolicy</c> instead (2.9, B1).
             </remarks>
             <example>
             <code>
@@ -5250,7 +5317,11 @@
             auto-scaling and leak detection on) and has created nothing yet, so the first borrow pays the
             object-creation cost once. Use the overload taking a configuration callback, or
             <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.GetOrCreateNamed``1(System.String,System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/> for several pools per type,
-            when the default shape is not the right one.
+            when the default shape is not the right one.<br />
+            The pool is built with the library's default policy, which creates objects with <c>new T()</c>. This
+            catalog exposes no way to supply a policy, so the <c>new()</c> constraint stays here on purpose: a
+            type without a public parameterless constructor is pooled through <see cref="T:DotNetCore.HayateOP.HayatePoolBuilder`1"/>
+            and its <c>WithPolicy</c> instead (2.9, B1).
             </remarks>
             <example>
             <code>
@@ -5276,7 +5347,9 @@
             is configured once, by whoever creates it, and the alternatives to that ambiguity are a
             silently reconfigured pool or a pool whose configuration depends on call order, both worse.
             Check with <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.TryGet``1(DotNetCore.HayateOP.IHayateObjectPool{``0}@)"/> first when a specific shape is
-            required, or use a distinct <c>name</c> for a separately configured pool.
+            required, or use a distinct <c>name</c> for a separately configured pool.<br />
+            As with the parameterless overload, the pool is built with the library's default policy and the
+            <c>new()</c> constraint is kept deliberately — see <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.GetOrCreate``1"/>.
             </remarks>
             <example>
             <code>
@@ -5308,7 +5381,9 @@
             This is a separate method rather than an overload of <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.GetOrCreate``1(System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/>
             so that a <c>null</c> name cannot silently select the wrong overload: passing <c>null</c> to an
             overload set containing a delegate-taking member would resolve to that member and quietly build
-            the default pool, here it is a rejected argument.
+            the default pool, here it is a rejected argument.<br />
+            As with the parameterless overload, the pool is built with the library's default policy and the
+            <c>new()</c> constraint is kept deliberately — see <see cref="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.GetOrCreate``1"/>.
             </remarks>
         </member>
         <member name="M:DotNetCore.HayateOP.HayateSharedPoolRegistry.TryGet``1(DotNetCore.HayateOP.IHayateObjectPool{``0}@)">
@@ -5522,6 +5597,9 @@
             Builds an unbounded pool that keeps at most <see cref="F:DotNetCore.HayateOP.HayateUnboundedPool`1.DefaultMaxIdle"/> idle objects and
             creates new ones with their parameterless constructor.
             </summary>
+            <exception cref="T:System.InvalidOperationException"><typeparamref name="T"/> has no public parameterless
+            constructor, so this overload cannot create objects of it; use the overload taking a creation
+            factory.</exception>
         </member>
         <member name="M:DotNetCore.HayateOP.HayateUnboundedPool`1.#ctor(System.Int32)">
             <summary>
@@ -5532,6 +5610,9 @@
             zero.</param>
             <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="maxIdle"/> is not greater than
             zero.</exception>
+            <exception cref="T:System.InvalidOperationException"><typeparamref name="T"/> has no public parameterless
+            constructor, so this overload cannot create objects of it; use the overload taking a creation
+            factory.</exception>
         </member>
         <member name="M:DotNetCore.HayateOP.HayateUnboundedPool`1.#ctor(System.Int32,System.Func{`0})">
             <summary>
@@ -6488,6 +6569,46 @@
             The default object-pool policy.
             </summary>
             <typeparam name="T"></typeparam>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Policies.HayateObjectPolicies">
+            <summary>
+            The library's own object policies, so a caller can obtain the default one — to use it as-is, to
+            decorate it, or to hand it to a pool that is built without naming a policy.
+            </summary>
+            <remarks>
+            From 2.9 the pool-building entry points (fluent builder, DI registrations, configuration bindings) no
+            longer require a public parameterless constructor at compile time, because connection-like objects
+            rarely have one. The default policy still creates objects with <c>new T()</c>, so that requirement did
+            not disappear — it moved from the signature to the moment the default policy is actually needed, which
+            is where <see cref="M:DotNetCore.HayateOP.Policies.HayateObjectPolicies.Default``1"/> reports it. Pooling a type without a parameterless constructor means
+            supplying a policy that knows how to create it (<c>HayatePoolBuilder&lt;T&gt;.WithPolicy</c>, or an
+            <c>IHayateObjectPolicy&lt;T&gt;</c> registration in the container), which is also what makes the
+            asynchronous creation contract of 2.9 usable — a connection is created by I/O, not by a constructor.
+            </remarks>
+            <example>
+            <code>
+            // The default policy: new T(), reset IHayateResettable, validity from IHayateValidatable.
+            var policy = HayateObjectPolicies.Default&lt;MyBuffer&gt;();
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Policies.HayateObjectPolicies.Default``1">
+            <summary>
+            Creates the default policy for <typeparamref name="T"/>: objects are created with their public
+            parameterless constructor, a released object is reset when it implements
+            <see cref="T:DotNetCore.HayateOP.IHayateResettable"/>, and its validity follows <see cref="T:DotNetCore.HayateOP.IHayateValidatable"/>.
+            </summary>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <returns>A new default policy. It holds no state, so the caller owns it and may share it.</returns>
+            <exception cref="T:System.InvalidOperationException"><typeparamref name="T"/> has no public parameterless
+            constructor, so the default policy cannot create objects of it; supply a policy that can.</exception>
+            <example>
+            <code>
+            var pool = new HayatePoolBuilder&lt;MyBuffer&gt;()
+                .WithPolicy(HayateObjectPolicies.Default&lt;MyBuffer&gt;())
+                .Build();
+            </code>
+            </example>
         </member>
         <member name="T:DotNetCore.HayateOP.Policies.IHayateAsyncObjectPolicy`1">
             <summary>

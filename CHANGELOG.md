@@ -61,6 +61,25 @@ Breaking changes are described in full — with migration guidance — in
   exactly-once and falls back to synchronous `Release()` for third-party pools that have no
   asynchronous return capability. The general engine, Lean mode, and the preparation decorator
   preserve the async path; `netstandard2.0` and `net48` retain their synchronous-only API.
+- **Relaxed `new()` on the pool-building entry points** (B1): `HayatePoolBuilder<T>`,
+  `HayateUnboundedPool<T>` and the DI / configuration registrations no longer require a public
+  parameterless constructor at compile time. This is what a connection-like type needs —
+  `new NpgsqlConnection(cs)` has none — and until now the one entry point that can configure a pool
+  fully, the fluent builder, was unusable for it at compile time; DI was blocked the same way. The
+  requirement did not disappear, it moved: `DefaultHayateObjectPolicy<T>` keeps its own `new()`
+  constraint, because it really does create objects with `new T()`, and the default policy is now
+  resolved where it is actually needed — `Build()` on the builder, pool resolution in the container —
+  where a type that cannot be created that way is reported with a message naming the type and the fix
+  (`WithPolicy`, an `IHayateObjectPolicy<T>` registration, or `HayateUnboundedPool<T>(maxIdle, factory)`)
+  instead of a compile error. `HayateObjectPolicies.Default<T>()` exposes that resolution, so a caller can
+  obtain the library's default policy or decorate it. The entry points that cannot accept a policy keep
+  the constraint deliberately, because there it documents a real requirement rather than a historical
+  accident: the shared-pool catalog (`HayatePool.Shared<T>`, `HayateSharedPoolRegistry.GetOrCreate*`) and
+  the non-generic pool factory build with the default policy and offer no way to supply another — their
+  XML remarks now say so. Nothing changes for an existing caller: relaxing a constraint cannot break one,
+  and a type with a parameterless constructor still resolves to the same default policy.
+  `Extensions.ObjectPoolCompat` drops the `MakeGenericMethod` dispatch it needed to reach the builder
+  around that constraint — the MEOP policy it already passes goes straight through.
 
 ### Fixed
 

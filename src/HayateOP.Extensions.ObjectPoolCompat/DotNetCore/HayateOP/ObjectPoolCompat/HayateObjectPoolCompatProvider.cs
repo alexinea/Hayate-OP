@@ -1,7 +1,6 @@
 using DotNetCore.HayateOP;
 using Microsoft.Extensions.ObjectPool;
 using System;
-using System.Reflection;
 
 namespace DotNetCore.HayateOP.ObjectPoolCompat;
 
@@ -84,21 +83,14 @@ public sealed class HayateObjectPoolCompatProvider : ObjectPoolProvider
     {
         if (policy is null) throw new ArgumentNullException(nameof(policy));
 
-        // HayatePoolBuilder<T> requires a new() constraint, while MEOP's IPooledObjectPolicy<T> only
-        // has a class constraint; dispatch via MakeGenericMethod (the CLR does not enforce new() at
-        // runtime, and object creation is entirely the policy's responsibility).
-        var pool = (IHayateObjectPool<T>)BuildPoolMethod.MakeGenericMethod(typeof(T))
-            .Invoke(null, new object?[] { policy, _options })!;
-
-        return new HayateObjectPoolAdapter<T>(pool);
+        // Since 2.9 (B1) HayatePoolBuilder<T> only requires `class`, so the MEOP policy — which is what
+        // creates the objects — is handed straight to the builder. Until then this had to go through
+        // MakeGenericMethod, because the builder's new() constraint rejected MEOP's class-only policy type.
+        return new HayateObjectPoolAdapter<T>(BuildPoolCore(policy, _options));
     }
 
-    private static readonly MethodInfo BuildPoolMethod =
-        typeof(HayateObjectPoolCompatProvider).GetMethod(nameof(BuildPoolCore),
-            BindingFlags.NonPublic | BindingFlags.Static)!;
-
     private static IHayateObjectPool<TP> BuildPoolCore<TP>(
-        IPooledObjectPolicy<TP> policy, HayateCompatOptions options) where TP : class, new()
+        IPooledObjectPolicy<TP> policy, HayateCompatOptions options) where TP : class
     {
         return new HayatePoolBuilder<TP>()
             .WithPoolName(options.PoolNamePrefix + typeof(TP).Name)

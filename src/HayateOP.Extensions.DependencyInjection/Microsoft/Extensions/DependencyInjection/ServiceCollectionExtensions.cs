@@ -54,7 +54,7 @@ public static class ServiceCollectionExtensions
     /// </example>
     public static IHayateServiceCollection RegisterHayatePool<T>(this IHayateServiceCollection services,
         Action<HayatePoolOptions>? configure = null)
-        where T : class, new()
+        where T : class
     {
         var poolRegisterName = typeof(T).Name;
 
@@ -65,7 +65,7 @@ public static class ServiceCollectionExtensions
         // look it up by logical pool name instead of using Type.GetType reflection.
         services.Services.TryAddSingleton<IHayateObjectPoolRegistry, HayateObjectPoolRegistry>();
 
-        services.Services.AddSingleton<IHayateObjectPolicy<T>, DefaultHayateObjectPolicy<T>>();
+        services.Services.AddSingleton<IHayateObjectPolicy<T>>(sp => HayateObjectPolicies.Default<T>());
 
         services.Services.AddSingleton<IHayateObjectPool<T>>(sp => BuildPool<T>(sp, poolRegisterName));
 
@@ -100,13 +100,13 @@ public static class ServiceCollectionExtensions
     /// </example>
     public static IHayateServiceCollection AddNamedPool<T>(this IHayateServiceCollection services,
         string name, Action<HayatePoolOptions>? configure = null)
-        where T : class, new()
+        where T : class
     {
         var key = HayateServiceKey.Create<T>(name);
 
         services.Services.Configure<HayatePoolOptions>(key.RegistryName, configure ?? (_ => { }));
         services.Services.TryAddSingleton<IHayateObjectPoolRegistry, HayateObjectPoolRegistry>();
-        services.Services.TryAddSingleton<IHayateObjectPolicy<T>, DefaultHayateObjectPolicy<T>>();
+        services.Services.TryAddSingleton<IHayateObjectPolicy<T>>(sp => HayateObjectPolicies.Default<T>());
 
         // One collection per element type gathers every declaration; the accessor reads them by name.
         services.Services.TryAddSingleton<HayateNamedPoolCollection<T>>();
@@ -144,7 +144,7 @@ public static class ServiceCollectionExtensions
     /// </example>
     public static IHayateServiceCollection AddPool<T, TClient>(this IHayateServiceCollection services,
         string name, Action<HayatePoolOptions>? configure = null)
-        where T : class, new()
+        where T : class
         where TClient : class
     {
         services.AddNamedPool<T>(name, configure);
@@ -177,7 +177,7 @@ public static class ServiceCollectionExtensions
     /// </example>
     public static IHayateServiceCollection AddPool<T, TClient>(this IHayateServiceCollection services,
         Action<HayatePoolOptions>? configure = null)
-        where T : class, new()
+        where T : class
         where TClient : class
     {
         // The unnamed pool is a singleton registration of IHayateObjectPool<T>; register it only when
@@ -196,7 +196,7 @@ public static class ServiceCollectionExtensions
     /// services, and registers it into the pool registry when one is present.
     /// </summary>
     private static IHayateObjectPool<T> BuildPool<T>(IServiceProvider sp, string poolName)
-        where T : class, new()
+        where T : class
     {
         var options = sp.GetRequiredService<IOptionsSnapshot<HayatePoolOptions>>().Get(poolName);
         var policy = sp.GetRequiredService<IHayateObjectPolicy<T>>();

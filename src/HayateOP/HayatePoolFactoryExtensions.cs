@@ -10,7 +10,11 @@ namespace DotNetCore.HayateOP;
 /// These are thin adapters: the pool is still built (and registered) by the factory's non-generic
 /// method, so <see cref="GetOrCreatePool{T}"/> deduplicates exactly like
 /// <see cref="IHayatePoolFactory.GetOrCreate"/> does. The cast is safe by construction — a factory
-/// builds <see cref="IHayateObjectPool{T}"/> for the key's element type.
+/// builds <see cref="IHayateObjectPool{T}"/> for the key's element type.<br />
+/// Both methods keep the <c>new()</c> constraint on purpose: the factory builds with the library's default
+/// policy and exposes no way to supply one, so a type without a public parameterless constructor cannot be
+/// pooled through this path. Pool such a type through <see cref="HayatePoolBuilder{T}"/> and its
+/// <c>WithPolicy</c> instead (2.9, B1).
 /// </remarks>
 /// <example>
 /// <code>

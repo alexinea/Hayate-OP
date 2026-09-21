@@ -7,10 +7,12 @@ using DotNetCore.HayateOP.Scaling;
 
 namespace DotNetCore.HayateOP;
 
-public class HayatePoolBuilder<T> where T : class, new()
+public class HayatePoolBuilder<T> where T : class
 {
     private readonly HayatePoolOptions _options = new();
-    private IHayateObjectPolicy<T> _policy;
+
+    // Null means "the library default, not resolved yet" — see Policy.
+    private IHayateObjectPolicy<T>? _policy;
     private IHayateScalingStrategy _scalingStrategy;
     private IHayateMetrics _metrics;
     private IHayateLogger _logger;
@@ -32,12 +34,23 @@ public class HayatePoolBuilder<T> where T : class, new()
 
     public HayatePoolBuilder()
     {
-        _policy = new DefaultHayateObjectPolicy<T>();
         _scalingStrategy = new ThresholdScalingStrategy();
         _metrics = EmptyHayateMetrics.Instance;
         _logger = new DefaultHayateLogger();
         _poolName = typeof(T).Name;
     }
+
+    /// <summary>
+    /// The policy the pool is built with: the one <see cref="WithPolicy"/> set, or the library default.
+    /// </summary>
+    /// <remarks>
+    /// The default is resolved here rather than in the constructor, so that a type without a public
+    /// parameterless constructor can still be pooled once a policy is supplied (2.9, B1): the requirement
+    /// moved from the generic constraint — which blocked the builder at compile time — to this point, where
+    /// it is reported with an actionable message. Nothing is resolved for a builder whose policy was set
+    /// explicitly, which is the whole point of the relaxation.
+    /// </remarks>
+    private IHayateObjectPolicy<T> Policy => _policy ??= HayateDefaultConstruction.Policy<T>();
 
     #region Feature toggles
 
@@ -1679,7 +1692,7 @@ public class HayatePoolBuilder<T> where T : class, new()
         var logger = ResolveLogger();
 
         var pool = new HayatePoolBasic<T>(
-            _policy,
+            Policy,
             _options,
             _scalingStrategy,
             _metrics,
@@ -1777,7 +1790,7 @@ public class HayatePoolBuilder<T> where T : class, new()
         var logger = ResolveLogger();
 
         var pool = new HayatePoolBasic<T>(
-            _policy,
+            Policy,
             degraded,
             new ThresholdScalingStrategy(),
             EmptyHayateMetrics.Instance,

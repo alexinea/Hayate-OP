@@ -106,7 +106,11 @@ public static class HayatePool
     /// dispose it, and do not wrap it in <c>using</c>; the pool outlives the call. Tear it down through
     /// the catalog when the process shuts down, or in a test that needs a clean slate. Use the
     /// overload taking a configuration callback to set the pool's shape, and
-    /// <see cref="HayatePoolBuilder{T}"/> when the pool is not meant to be shared at all.
+    /// <see cref="HayatePoolBuilder{T}"/> when the pool is not meant to be shared at all.<br />
+    /// The shared pool is built with the library's default policy, which creates objects with
+    /// <c>new T()</c>. The catalog exposes no way to supply a policy, so the <c>new()</c> constraint stays
+    /// here on purpose: a type without a public parameterless constructor is pooled through
+    /// <see cref="HayatePoolBuilder{T}"/> and its <c>WithPolicy</c> instead (2.9, B1).
     /// </remarks>
     /// <example>
     /// <code>
@@ -132,7 +136,9 @@ public static class HayatePool
     /// <see cref="HayateSharedPoolRegistry.GetOrCreate{T}(Action{HayatePoolOptions})"/>). Configure the
     /// shared pool once, at start-up, or use
     /// <see cref="HayateSharedPoolRegistry.GetOrCreateNamed{T}(string, Action{HayatePoolOptions})"/> with
-    /// a distinct name for a second, differently configured shared pool of the same type.
+    /// a distinct name for a second, differently configured shared pool of the same type.<br />
+    /// As with the parameterless overload, the pool is built with the library's default policy and the
+    /// <c>new()</c> constraint is kept deliberately — see <see cref="Shared{T}()"/>.
     /// </remarks>
     /// <example>
     /// <code>

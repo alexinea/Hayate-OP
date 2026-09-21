@@ -122,7 +122,11 @@ public sealed class HayateSharedPoolRegistry : IDisposable
     /// auto-scaling and leak detection on) and has created nothing yet, so the first borrow pays the
     /// object-creation cost once. Use the overload taking a configuration callback, or
     /// <see cref="GetOrCreateNamed{T}(string, Action{HayatePoolOptions})"/> for several pools per type,
-    /// when the default shape is not the right one.
+    /// when the default shape is not the right one.<br />
+    /// The pool is built with the library's default policy, which creates objects with <c>new T()</c>. This
+    /// catalog exposes no way to supply a policy, so the <c>new()</c> constraint stays here on purpose: a
+    /// type without a public parameterless constructor is pooled through <see cref="HayatePoolBuilder{T}"/>
+    /// and its <c>WithPolicy</c> instead (2.9, B1).
     /// </remarks>
     /// <example>
     /// <code>
@@ -149,7 +153,9 @@ public sealed class HayateSharedPoolRegistry : IDisposable
     /// is configured once, by whoever creates it, and the alternatives to that ambiguity are a
     /// silently reconfigured pool or a pool whose configuration depends on call order, both worse.
     /// Check with <see cref="TryGet{T}(out IHayateObjectPool{T})"/> first when a specific shape is
-    /// required, or use a distinct <c>name</c> for a separately configured pool.
+    /// required, or use a distinct <c>name</c> for a separately configured pool.<br />
+    /// As with the parameterless overload, the pool is built with the library's default policy and the
+    /// <c>new()</c> constraint is kept deliberately — see <see cref="GetOrCreate{T}()"/>.
     /// </remarks>
     /// <example>
     /// <code>
@@ -182,7 +188,9 @@ public sealed class HayateSharedPoolRegistry : IDisposable
     /// This is a separate method rather than an overload of <see cref="GetOrCreate{T}(Action{HayatePoolOptions})"/>
     /// so that a <c>null</c> name cannot silently select the wrong overload: passing <c>null</c> to an
     /// overload set containing a delegate-taking member would resolve to that member and quietly build
-    /// the default pool, here it is a rejected argument.
+    /// the default pool, here it is a rejected argument.<br />
+    /// As with the parameterless overload, the pool is built with the library's default policy and the
+    /// <c>new()</c> constraint is kept deliberately — see <see cref="GetOrCreate{T}()"/>.
     /// </remarks>
     public IHayateObjectPool<T> GetOrCreateNamed<T>(string name, Action<HayatePoolOptions>? configure = null)
         where T : class, new()
