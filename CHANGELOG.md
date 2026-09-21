@@ -155,6 +155,21 @@ Breaking changes are described in full — with migration guidance — in
   averages were left out on purpose: they describe how the pool has been used, not whether it is usable,
   and two of them read `double.MaxValue` until their first sample.
 
+- **net48 assets for the Configuration and HealthCheck packages** (B7): both now target `net48`
+  alongside `net6.0`–`net10.0`, so binding a pool from `appsettings.json` and putting it behind
+  `/health` work on a .NET Framework host — neither was available there at all, which made them the
+  odd ones out among the extension packages: `DependencyInjection`, `ObjectPoolCompat`, `Specialized`
+  and `Buffers` already shipped a net48 asset. A .NET Framework consumer therefore had the pool and
+  the container registration, but not the two things that usually decide how it is configured and
+  watched. No source change was needed: the `Microsoft.Extensions` 8.x packages these depend on carry
+  netstandard2.0 / net462 assets, so net48 takes the 8.x line — verified by building it, not by
+  reading the dependency graph. The dependency surface of the core package and of the other extension
+  packages is untouched; only these two projects gained a condition. `OpenTelemetry` stays without a
+  net48 asset (the SDK's .NET Framework support is narrow and it is not required by downstream),
+  and `Endpoints` / `Diagnostics` remain not applicable to net48. Both packages' legacy suites now
+  run on net48 in CI as well — building an asset is not proof that it loads, and what a .NET Framework
+  consumer actually hits is binding redirects and mixed assembly versions.
+
 ### Changed
 
 - **An open circuit breaker is no longer reported as a healthy pool** (B4; behaviour change, not

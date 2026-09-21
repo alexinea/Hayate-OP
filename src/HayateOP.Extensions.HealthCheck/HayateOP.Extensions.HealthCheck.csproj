@@ -17,6 +17,12 @@
 
     <Import Project="..\..\common.props" />
 
+    <!-- net48 覆盖（B7 / W-B7-1）：与 DependencyInjection 同一写法——仅本库追加，不动 common.props
+         以免波及测试与其余扩展包。健康检查此前在 net48 上完全不可用。 -->
+    <PropertyGroup>
+        <TargetFrameworks>net48;$(TargetFrameworks)</TargetFrameworks>
+    </PropertyGroup>
+
     <Import Project="dependency.props" />
 
     <Import Project="references.props" />

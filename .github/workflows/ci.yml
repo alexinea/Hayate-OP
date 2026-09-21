@@ -104,6 +104,39 @@ jobs:
       - name: Run net7.0
         run: dotnet test tests/legacy/HayateOP.Tests.Legacy/HayateOP.Tests.Legacy.csproj -c ${{ env.CONFIGURATION }} --no-build -f net7.0 -v minimal
 
+  # B7 / W-B7-4: the two packages that gained a net48 asset in 2.9 — Configuration and HealthCheck —
+  # have their legacy suites *executed* on net48 as well. Building the asset is not proof that it runs:
+  # what a net48 consumer hits at runtime is binding redirects and mixed assembly versions, which only
+  # show up when the tests are actually loaded. (The future-generation matrix above cannot cover this:
+  # net48 is a legacy-only target.) The other legacy extension suites are not here because their
+  # packages do not ship a net48 asset.
+  test-extensions-net48:
+    name: Test extensions legacy (${{ matrix.project }} / net48)
+    runs-on: windows-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [Configuration, HealthCheck]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            6.0.x
+            7.0.x
+
+      - name: Restore
+        run: dotnet restore tests/legacy/HayateOP.Tests.${{ matrix.project }}.Legacy/HayateOP.Tests.${{ matrix.project }}.Legacy.csproj --source ${{ env.NUGET_SOURCE }}
+
+      - name: Build
+        run: dotnet build tests/legacy/HayateOP.Tests.${{ matrix.project }}.Legacy/HayateOP.Tests.${{ matrix.project }}.Legacy.csproj -c ${{ env.CONFIGURATION }} --no-restore
+
+      - name: Run net48
+        run: dotnet test tests/legacy/HayateOP.Tests.${{ matrix.project }}.Legacy/HayateOP.Tests.${{ matrix.project }}.Legacy.csproj -c ${{ env.CONFIGURATION }} --no-build -f net48 -v minimal
+
   test-extensions:
     name: Test extensions (${{ matrix.project }} / ${{ matrix.tfm }})
     runs-on: windows-latest

@@ -1,11 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- LEGACY 世代：net6/net7 + xunit v2 + VSTest。与 tests/HayateOP.Tests.HealthCheck(future) 用例同步维护 -->
+  <!-- LEGACY 世代：net48 冒烟 + net6/net7 + xunit v2 + VSTest。与 tests/HayateOP.Tests.HealthCheck(future) 用例同步维护 -->
   <PropertyGroup>
-    <TargetFrameworks>net6.0;net7.0</TargetFrameworks>
+    <TargetFrameworks>net48;net6.0;net7.0</TargetFrameworks>
+    <!-- net48 的 SDK 默认语言版本是 C# 7.3，文件范围命名空间与全局 using 都不可用
+         （主 legacy 套件由 common.tests.props 提供，本项目属性是内联声明的，故在此显式指定）。 -->
+    <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- B7 / W-B7-3：net48 上 M.E 8.x 包族会带入多个版本的依赖程序集，生成绑定重定向，
+         否则运行时按混合版本加载（沿 HayateOP.Tests.Legacy 的 Z1 处理）。 -->
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
   </PropertyGroup>
 
   <ItemGroup>

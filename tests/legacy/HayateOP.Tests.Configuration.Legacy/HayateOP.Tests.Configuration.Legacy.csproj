@@ -1,11 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- LEGACY 世代：net6/net7 + xunit v2 + VSTest。与 tests/HayateOP.Tests.Configuration(future) 用例同步维护 -->
+  <!-- LEGACY 世代：net48 冒烟 + net6/net7 + xunit v2 + VSTest。与 tests/HayateOP.Tests.Configuration(future) 用例同步维护 -->
   <PropertyGroup>
-    <TargetFrameworks>net6.0;net7.0</TargetFrameworks>
+    <TargetFrameworks>net48;net6.0;net7.0</TargetFrameworks>
+    <!-- net48 的 SDK 默认语言版本是 C# 7.3（同上）。 -->
+    <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
     <IsPackable>false</IsPackable>
+    <!-- B7 / W-B7-3：同上，net48 需要绑定重定向。 -->
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
   </PropertyGroup>
 
   <ItemGroup>

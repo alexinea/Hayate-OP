@@ -37,7 +37,7 @@ documented in [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md).
 | `DotNetCore.HayateOP`                                | Core library with basic object pool functionality.                                                   |
 | `DotNetCore.HayateOP.Extensions.DependencyInjection` | Seamless integration with Microsoft.Extensions.DependencyInjection.                                  |
 | `DotNetCore.HayateOP.Extensions.Configuration`       | Integration with Microsoft.Extensions.Configuration for loading pool settings from appsettings.json. |
-| `DotNetCore.HayateOP.Extensions.HealthCheck`         | ASP.NET Core Health Checks integration to monitor pool status in production.                         |
+| `DotNetCore.HayateOP.Extensions.HealthCheck`         | Health Checks integration (`Microsoft.Extensions.Diagnostics.HealthChecks`) to monitor pool status.  |
 | `DotNetCore.HayateOP.Extensions.Endpoints`           | Built-in management endpoints for monitoring and configuration.                                      |
 | `DotNetCore.HayateOP.Extensions.Diagnostics`         | Integration with System.Diagnostics for advanced performance monitoring and telemetry.               |
 | `DotNetCore.HayateOP.Extensions.Specialized`         | Ready-to-use specialized pools for `MemoryStream` and `StringBuilder`, with `using`-based returns.    |
@@ -72,8 +72,9 @@ documented in [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md).
 > pool does nothing an explicit call did not ask for. Empirical IL2CPP AOT / trimming validation of a
 > real Unity project is tracked as backlog for the 2.8 window's follow-ups; until that lands, treat the
 > compatibility claim as structural (assembly shape + coding style) rather than certified.
-> The ASP.NET Core–based packages (`Endpoints`, `HealthCheck`) and the `OpenTelemetry` / `Configuration` /
-> `Diagnostics` extensions do not ship `net48` or `netstandard2.0` assets.
+> `Endpoints`, `OpenTelemetry` and `Diagnostics` do not ship `net48` or `netstandard2.0` assets —
+> `Endpoints` because it is ASP.NET Core–based, `OpenTelemetry` because the SDK's .NET Framework support
+> is narrow, `Diagnostics` by design. `Configuration` and `HealthCheck` gained a `net48` asset in 2.9.
 
 ### .NET CLI
 

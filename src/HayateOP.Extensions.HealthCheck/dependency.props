@@ -1,5 +1,13 @@
 <Project>
 
+    <!-- net48 覆盖（B7 / W-B7-2）：取 8.x 一支，与其它 TFM 一样只引全包一个——**已实证** 8.0.0 在
+         net48 上可还原且含 `AddHealthChecks()` 注册面（曾以为 net48 只拿得到 Abstractions、需要
+         `#if` 分叉掉注册扩展，构建实测证伪，故无源码分叉）。硬约束是「core 与其它扩展包的依赖面
+         不变」，本段只对本包 net48 生效。 -->
+    <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+        <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="8.0.0" />
+    </ItemGroup>
+
     <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
         <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.3" />
     </ItemGroup>
