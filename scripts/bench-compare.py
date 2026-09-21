@@ -240,6 +240,9 @@ def main() -> int:
         results = read_report(report_path)
         payload = build_baseline_json(report_path, results)
         if args.emit_baseline_file:
+            parent = os.path.dirname(os.path.abspath(args.emit_baseline_file))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
             with io.open(args.emit_baseline_file, "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(payload + "\n")
             print("Baseline written to %s" % args.emit_baseline_file)
