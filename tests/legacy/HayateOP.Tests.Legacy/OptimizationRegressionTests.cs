@@ -142,7 +142,7 @@ public class OptimizationRegressionTests
         {
             tasks[i] = Task.Run(() =>
             {
-                TestObject obj = null;
+                TestObject? obj = null;
                 
                 try
                 {

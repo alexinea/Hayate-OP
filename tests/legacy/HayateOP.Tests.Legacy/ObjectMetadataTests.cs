@@ -28,23 +28,23 @@ namespace DotNetCore.HayateOP.Tests
         /// <summary>The wrapper is internal state, so the tests reach it the same way the other suites do.</summary>
         private static HayateObject<TestObject> GetWrapped(IHayateObjectPool<TestObject> pool, TestObject item)
         {
-            var shardsField = pool.GetType().GetField("_shards", BindingFlags.Instance | BindingFlags.NonPublic);
+            var shardsField = pool.GetType().GetField("_shards", BindingFlags.Instance | BindingFlags.NonPublic)!;
             Assert.NotNull(shardsField);
-            var shards = (Array)shardsField.GetValue(pool);
+            var shards = (Array)shardsField.GetValue(pool)!;
 
             foreach (var shard in shards)
             {
                 var objectsField = shard.GetType().GetField("_objects", BindingFlags.Instance | BindingFlags.NonPublic);
                 if (objectsField == null) continue;
 
-                var map = objectsField.GetValue(shard);
-                var tryGet = map.GetType().GetMethod("TryGetValue");
-                var args = new object[] { item, null };
+                var map = objectsField.GetValue(shard)!;
+                var tryGet = map.GetType().GetMethod("TryGetValue")!;
+                var args = new object?[] { item, null };
                 tryGet.Invoke(map, args);
-                if (args[1] != null) return (HayateObject<TestObject>)args[1];
+                if (args[1] != null) return (HayateObject<TestObject>)args[1]!;
             }
 
-            return null;
+            return null!;
         }
 
         [Fact]

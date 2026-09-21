@@ -120,7 +120,7 @@ public class BasicFunctionTests
         using var pool = new HayatePoolBuilder<TestObject>().Build();
 
         // Act & Assert
-        pool.Release(null);
+        pool.Release(null!);
     }
 
     [Fact]

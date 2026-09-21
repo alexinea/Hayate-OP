@@ -191,11 +191,11 @@ public class ShardAffinityTests
             var objectsField = shard.GetType().GetField("_objects", BindingFlags.Instance | BindingFlags.NonPublic);
             if (objectsField == null) continue;
 
-            var map = objectsField.GetValue(shard);
+            var map = objectsField.GetValue(shard)!;
             var tryGet = map.GetType().GetMethod("TryGetValue")!;
-            var args = new object[] { item, null };
+            var args = new object?[] { item, null };
             tryGet.Invoke(map, args);
-            if (args[1] != null) return (HayateObject<TestObject>)args[1];
+            if (args[1] != null) return (HayateObject<TestObject>)args[1]!;
         }
 
         return null!;

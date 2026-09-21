@@ -16,8 +16,8 @@ namespace DotNetCore.HayateOP.Tests
 
         private static ParameterizedHayatePool<string, TestObject> CreateKeyedPool(
             int maxSizePerKey = 1,
-            IHayateObjectPoolRegistry registry = null,
-            Action<string, HayatePoolOptions> configure = null)
+            IHayateObjectPoolRegistry? registry = null,
+            Action<string, HayatePoolOptions>? configure = null)
         {
             return new ParameterizedHayatePool<string, TestObject>(
                 key => new TestObject(),
@@ -117,7 +117,7 @@ namespace DotNetCore.HayateOP.Tests
             using (var pools = CreateKeyedPool())
             {
                 Assert.Throws<InvalidOperationException>(() => pools.ReturnObject("never-used", new TestObject()));
-                Assert.Throws<ArgumentNullException>(() => pools.ReturnObject("a", null));
+                Assert.Throws<ArgumentNullException>(() => pools.ReturnObject("a", null!));
             }
         }
 
@@ -278,9 +278,9 @@ namespace DotNetCore.HayateOP.Tests
         {
             Assert.Throws<ArgumentNullException>(() =>
                 new ParameterizedHayatePool<string, TestObject>(
-                    (Func<string, IHayateObjectPool<TestObject>>)null));
+                    (Func<string, IHayateObjectPool<TestObject>>)null!));
             Assert.Throws<ArgumentNullException>(() =>
-                new ParameterizedHayatePool<string, TestObject>((Func<string, TestObject>)null, 1));
+                new ParameterizedHayatePool<string, TestObject>((Func<string, TestObject>)null!, 1));
 
             Assert.Throws<ArgumentOutOfRangeException>(() =>
                 new ParameterizedHayatePool<string, TestObject>(key => new TestObject(), 0));
@@ -289,14 +289,14 @@ namespace DotNetCore.HayateOP.Tests
 
             using (var pools = CreateKeyedPool())
             {
-                Assert.Throws<ArgumentNullException>(() => pools.GetObject(null));
+                Assert.Throws<ArgumentNullException>(() => pools.GetObject(null!));
             }
         }
 
         [Fact]
         public void FactoryReturningNull_ShouldFailAtTheCreationBoundary()
         {
-            using (var pools = new ParameterizedHayatePool<string, TestObject>(key => null, 1))
+            using (var pools = new ParameterizedHayatePool<string, TestObject>(key => null!, 1))
             {
                 Assert.Throws<InvalidOperationException>(() => pools.GetObject("a"));
             }

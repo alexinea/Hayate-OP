@@ -66,7 +66,7 @@ namespace DotNetCore.HayateOP.Tests
 
                 // Fail-fast: the borrow throws before doing any pool work — even though idle objects exist,
                 // nothing is handed out and the borrow counter does not advance.
-                HayatePoolUnavailableException exception = null;
+                HayatePoolUnavailableException exception = null!;
                 try { pool.Acquire(); }
                 catch (HayatePoolUnavailableException ex) { exception = ex; }
 

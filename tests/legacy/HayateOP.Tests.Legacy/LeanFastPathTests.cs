@@ -190,7 +190,7 @@ public class LeanFastPathTests
     {
         using var pool = Lean(1, 2).Build();
 
-        pool.Release(null);
+        pool.Release(null!);
 
         Assert.Equal(1, pool.GetStats().PooledCount);
     }

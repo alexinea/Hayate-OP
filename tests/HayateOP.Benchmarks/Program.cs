@@ -837,7 +837,7 @@ public class HayateOpBenchmarks
 
         private string Compute(Summary summary, BenchmarkCase benchmarkCase)
         {
-            var runs = summary[benchmarkCase].GetResultRuns()?.ToList();
+            var runs = summary[benchmarkCase]!.GetResultRuns()?.ToList();
             if (runs is null || runs.Count == 0) return "NA";
 
             // Measurement.Nanoseconds is the total time of one iteration; divide by the operation count

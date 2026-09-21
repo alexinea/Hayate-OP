@@ -54,6 +54,7 @@ public class BackgroundTimerTests
             .Where(f => typeof(Timer).IsAssignableFrom(f.FieldType))
             .Select(f => f.GetValue(pool) as Timer)
             .Where(t => t != null)
+            .Select(t => t!)
             .ToArray();
     }
 

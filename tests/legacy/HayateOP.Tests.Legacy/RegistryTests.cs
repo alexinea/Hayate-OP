@@ -74,7 +74,7 @@ public class RegistryTests
         // Repeated removal / unknown name / blank name all return false
         Assert.False(registry.Remove("pool-a"));
         Assert.False(registry.Remove("never-registered"));
-        Assert.False(registry.Remove(null));
+        Assert.False(registry.Remove(null!));
         Assert.False(registry.Remove("  "));
     }
 

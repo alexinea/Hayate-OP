@@ -133,14 +133,14 @@ public class RegressionFixTests
         Assert.NotNull(shards);
         Assert.Equal(4, shards.Length);
 
-        var shardType = shards.GetType().GetElementType();
+        var shardType = shards.GetType().GetElementType()!;
         var maxSizeField = shardType.GetField("_maxSize",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
         Assert.NotNull(maxSizeField);
 
         for (var i = 0; i < shards.Length; i++)
         {
-            var max = (int)maxSizeField.GetValue(shards.GetValue(i));
+            var max = (int)maxSizeField.GetValue(shards.GetValue(i))!;
             Assert.Equal(25, max);
         }
     }
@@ -158,7 +158,7 @@ public class RegressionFixTests
         var optionsField = typeof(HayatePoolBuilder<TestObject>)
             .GetField("_options", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
         Assert.NotNull(optionsField);
-        var options = (HayatePoolOptions)optionsField.GetValue(builder);
+        var options = (HayatePoolOptions)optionsField.GetValue(builder)!;
         Assert.Equal(7, options.ScaleDownStep);
         Assert.True(options.IsValid());
     }
@@ -180,7 +180,7 @@ public class RegressionFixTests
         public bool OnReleaseInvoked { get; private set; }
         public bool OnDestroyInvoked { get; private set; }
 
-        public T Create() => (T)Activator.CreateInstance(typeof(T));
+        public T Create() => (T)Activator.CreateInstance(typeof(T))!;
 
         public bool OnRelease(T item)
         {

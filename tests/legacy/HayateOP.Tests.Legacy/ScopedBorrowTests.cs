@@ -270,7 +270,7 @@ namespace DotNetCore.HayateOP.Tests
         {
             Assert.Throws<ArgumentOutOfRangeException>(() => HayatePool.Simple<TestObject>(0, () => new TestObject()));
             Assert.Throws<ArgumentOutOfRangeException>(() => HayatePool.Simple<TestObject>(-1, () => new TestObject()));
-            Assert.Throws<ArgumentNullException>(() => HayatePool.Simple<TestObject>(2, null));
+            Assert.Throws<ArgumentNullException>(() => HayatePool.Simple<TestObject>(2, null!));
         }
     }
 }

@@ -46,7 +46,7 @@ public class LeaseContextTests
         var done = await Task.WhenAll(Enumerable.Range(0, 8).Select(async id =>
         {
             var obj = BorrowMarked(pool, id);
-            var ctx = HayateLeaseContext.Current;
+            var ctx = HayateLeaseContext.Current!;
             Assert.NotNull(ctx);
             Assert.Same(ctx, GetWrapped(pool, obj).LeaseContext);
 
@@ -81,7 +81,7 @@ public class LeaseContextTests
         for (var i = 0; i < 5; i++)
         {
             var obj = pool.Acquire();
-            var ctx = HayateLeaseContext.Current;
+            var ctx = HayateLeaseContext.Current!;
             Assert.Same(ctx, GetWrapped(pool, obj).LeaseContext);
             Assert.True(seen.Add(ctx.LeaseId));
             pool.Release(obj);
@@ -147,11 +147,11 @@ public class LeaseContextTests
             var objectsField = shard.GetType().GetField("_objects", BindingFlags.Instance | BindingFlags.NonPublic);
             if (objectsField == null) continue;
 
-            var map = objectsField.GetValue(shard);
+            var map = objectsField.GetValue(shard)!;
             var tryGet = map.GetType().GetMethod("TryGetValue")!;
-            var args = new object[] { item, null };
+            var args = new object?[] { item, null };
             tryGet.Invoke(map, args);
-            if (args[1] != null) return (HayateObject<TestObject>)args[1];
+            if (args[1] != null) return (HayateObject<TestObject>)args[1]!;
         }
 
         return null!;

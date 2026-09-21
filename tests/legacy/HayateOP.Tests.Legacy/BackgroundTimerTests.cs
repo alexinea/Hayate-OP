@@ -54,6 +54,7 @@ namespace DotNetCore.HayateOP.Tests
                 .Where(f => typeof(Timer).IsAssignableFrom(f.FieldType))
                 .Select(f => f.GetValue(pool) as Timer)
                 .Where(t => t != null)
+                .Select(t => t!)
                 .ToArray();
         }
 
@@ -61,7 +62,7 @@ namespace DotNetCore.HayateOP.Tests
         {
             var field = pool.GetType().GetField(fieldName, PrivateInstance);
             Assert.NotNull(field);
-            return (long)field.GetValue(pool);
+            return (long)field!.GetValue(pool)!;
         }
 
         [Fact]
