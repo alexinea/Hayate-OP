@@ -18,6 +18,14 @@ public static class EndpointsExtensions
     /// </summary>
     /// <param name="endpoints">The endpoint route builder.</param>
     /// <returns>The endpoint convention builder for the mapped group.</returns>
+    /// <remarks>
+    /// OpenAPI operation metadata is emitted through three different surfaces, because no single
+    /// one spans every target: <c>net6.0</c> uses Swashbuckle's <c>SwaggerOperationAttribute</c>;
+    /// <c>net10.0</c> and later use the framework's own <c>WithSummary</c> / <c>WithDescription</c>
+    /// (<c>WithOpenApi</c> is obsolete there, ASPDEPR002); the remaining targets keep
+    /// <c>WithOpenApi</c>, which is neither obsolete nor replaced on them. The three produce the
+    /// same summary and description in the generated document.
+    /// </remarks>
     /// <example>
     /// <code>
     /// app.MapHayatePoolEndpoints();   // maps GET /hayateop, /hayateop/pools, ...
@@ -31,6 +39,9 @@ public static class EndpointsExtensions
             .WithMetadata(new SwaggerOperationAttribute(
                 summary: "Hayate Object Pool Management API",
                 description: "Endpoints for managing Hayate Object Pools, including configuration and statistics."))
+#elif NET10_0_OR_GREATER
+            .WithSummary("Hayate Object Pool Management API")
+            .WithDescription("Endpoints for managing Hayate Object Pools, including configuration and statistics.")
 #else
             .WithOpenApi(op =>
             {
@@ -48,6 +59,9 @@ public static class EndpointsExtensions
             .WithMetadata(new SwaggerOperationAttribute(
                 summary: "Get pool overview",
                 description: "Returns basic information and the version of the management endpoint."))
+#elif NET10_0_OR_GREATER
+            .WithSummary("Get pool overview")
+            .WithDescription("Returns basic information and the version of the management endpoint.")
 #else
             .WithOpenApi(op =>
             {
@@ -66,6 +80,9 @@ public static class EndpointsExtensions
             .WithMetadata(new SwaggerOperationAttribute(
                 summary: "Get pool list",
                 description: "Enumerates all pools in the registry (name, element type, registration time, pooled/borrowed counts)."))
+#elif NET10_0_OR_GREATER
+            .WithSummary("Get pool list")
+            .WithDescription("Enumerates all pools in the registry (name, element type, registration time, pooled/borrowed counts).")
 #else
             .WithOpenApi(op =>
             {
@@ -83,6 +100,9 @@ public static class EndpointsExtensions
             .WithMetadata(new SwaggerOperationAttribute(
                 summary: "Get pool details",
                 description: "Returns configuration and live statistics for the specified pool."))
+#elif NET10_0_OR_GREATER
+            .WithSummary("Get pool details")
+            .WithDescription("Returns configuration and live statistics for the specified pool.")
 #else
             .WithOpenApi(op =>
             {
@@ -101,6 +121,9 @@ public static class EndpointsExtensions
             .WithMetadata(new SwaggerOperationAttribute(
                 summary: "Update pool configuration",
                 description: "Validates and updates the pool configuration, returning the operation result."))
+#elif NET10_0_OR_GREATER
+            .WithSummary("Update pool configuration")
+            .WithDescription("Validates and updates the pool configuration, returning the operation result.")
 #else
             .WithOpenApi(op =>
             {
@@ -120,6 +143,9 @@ public static class EndpointsExtensions
             .WithMetadata(new SwaggerOperationAttribute(
                 summary: "Get pool statistics",
                 description: "Returns live statistics and the current snapshot of the pool."))
+#elif NET10_0_OR_GREATER
+            .WithSummary("Get pool statistics")
+            .WithDescription("Returns live statistics and the current snapshot of the pool.")
 #else
             .WithOpenApi(op =>
             {
@@ -138,6 +164,9 @@ public static class EndpointsExtensions
             .WithMetadata(new SwaggerOperationAttribute(
                 summary: "Clear the specified pool",
                 description: "Clears the pool immediately and returns the operation timestamp."))
+#elif NET10_0_OR_GREATER
+            .WithSummary("Clear the specified pool")
+            .WithDescription("Clears the pool immediately and returns the operation timestamp.")
 #else
             .WithOpenApi(op =>
             {

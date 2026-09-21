@@ -97,6 +97,16 @@ Breaking changes are described in full — with migration guidance — in
   same per-request timing, and its acquire timeout moves from 100ms to 2s: at 100ms a degraded `Get`
   returned inside the old 500ms burst bound, so that assertion could not detect the regression it was
   written for.
+- **`Extensions.Endpoints` builds warning-free on `net10.0` again** (ASPDEPR002; no behaviour change):
+  `WithOpenApi` — the `Microsoft.AspNetCore.OpenApi` extension that attached each operation's summary
+  and description — is obsolete from .NET 10, and the package used it at all seven call sites, so the
+  project emitted 14 diagnostics that broke the "`src` builds with zero warnings" bar every other
+  project in the tree already held. On `net10.0` and later the framework's own `WithSummary` /
+  `WithDescription` (from `Microsoft.AspNetCore.Routing`) carry the same metadata into the generated
+  document; `net6.0` keeps its Swashbuckle branch, and `net7.0` / `net8.0` / `net9.0` keep
+  `WithOpenApi`, which is neither obsolete nor replaced on them. The warning was pre-existing — the
+  asynchronous batch never touched this package — and surfaced only when the batch-end gate swept every
+  `src` project on a clean build instead of the core package alone.
 
 ## [2.8.0] - 2026-09-20
 
