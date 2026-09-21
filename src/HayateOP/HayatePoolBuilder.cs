@@ -698,8 +698,10 @@ public class HayatePoolBuilder<T> where T : class, new()
 
     /// <summary>
     /// Sets the custom starting-shard delegate and switches into Custom mode. The return value should
-    /// fall in [0, ShardCount); on null / out-of-range / exception it falls back to a sequential scan
-    /// for that borrow (without throwing).
+    /// fall in [0, ShardCount); a value outside that range falls back to a sequential scan for that
+    /// borrow, silently (no log). If the delegate throws, the borrow falls back as well, but the
+    /// exception is logged. The delegate cannot return null -- to express "no affinity for this
+    /// borrow", return an out-of-range value such as -1.
     /// </summary>
     /// <param name="shardSelector">The delegate that returns the preferred starting shard index.</param>
     /// <returns>The same builder instance for chaining.</returns>
