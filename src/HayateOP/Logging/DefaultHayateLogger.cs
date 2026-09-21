@@ -26,23 +26,20 @@ internal class DefaultHayateLogger : IHayateLogger
 #if DEBUG
     public void LogInformation(string message, params object[] args)
     {
-        var processedMessage = RenderTemplate(message, args);
-        Console.WriteLine($"[INFO] {DateTime.Now:HH:mm:ss} - {string.Format(processedMessage, args)}");
+        Console.WriteLine($"[INFO] {DateTime.Now:HH:mm:ss} - {RenderTemplate(message, args)}");
     }
 
     public void LogWarning(string message, params object[] args)
     {
-        var processedMessage = RenderTemplate(message, args);
         Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine($"[WARN] {DateTime.Now:HH:mm:ss} - {string.Format(processedMessage, args)}");
+        Console.WriteLine($"[WARN] {DateTime.Now:HH:mm:ss} - {RenderTemplate(message, args)}");
         Console.ResetColor();
     }
 
     public void LogError(Exception ex, string message, params object[] args)
     {
-        var processedMessage = RenderTemplate(message, args);
         Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine($"[ERROR] {DateTime.Now:HH:mm:ss} - {string.Format(processedMessage, args)}");
+        Console.WriteLine($"[ERROR] {DateTime.Now:HH:mm:ss} - {RenderTemplate(message, args)}");
         if (ex != null)
         {
             Console.WriteLine($"[ERROR] {DateTime.Now:HH:mm:ss} - Exception: {ex.GetType().Name}\n{ex.StackTrace}");
@@ -52,9 +49,8 @@ internal class DefaultHayateLogger : IHayateLogger
 
     public void LogDebug(string message, params object[] args)
     {
-        var processedMessage = RenderTemplate(message, args);
         Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine($"[DEBUG] {DateTime.Now:HH:mm:ss} - {string.Format(processedMessage, args)}");
+        Console.WriteLine($"[DEBUG] {DateTime.Now:HH:mm:ss} - {RenderTemplate(message, args)}");
         Console.ResetColor();
     }
 
@@ -67,6 +63,15 @@ internal class DefaultHayateLogger : IHayateLogger
     /// For production structured logging use HayateMicrosoftLoggerAdapter{T} (MEL natively supports named templates).
     /// No regex, single-pass scan -- eliminates the per-call Regex overhead.
     /// </summary>
+    /// <remarks>
+    /// The result is written out as-is. It used to be handed to <see cref="string.Format(string, object[])"/>
+    /// a second time, which could only do harm: the placeholders are already substituted by the time this
+    /// returns, so the second pass had nothing to do — unless a substituted *value* happened to contain a
+    /// brace, in which case it treated the value as a template and threw <see cref="FormatException"/> from
+    /// inside a log call. A pool logging an object whose <c>ToString()</c> contains braces would therefore
+    /// crash on the line that was only meant to report something. Removing the second pass changes nothing
+    /// for a value without braces and turns that crash into the text it was trying to print.
+    /// </remarks>
     private static string RenderTemplate(string message, object[] args)
     {
         if (args is null || args.Length == 0) return message;

@@ -6270,6 +6270,15 @@
             For production structured logging use HayateMicrosoftLoggerAdapter{T} (MEL natively supports named templates).
             No regex, single-pass scan -- eliminates the per-call Regex overhead.
             </summary>
+            <remarks>
+            The result is written out as-is. It used to be handed to <see cref="M:System.String.Format(System.String,System.Object[])"/>
+            a second time, which could only do harm: the placeholders are already substituted by the time this
+            returns, so the second pass had nothing to do — unless a substituted *value* happened to contain a
+            brace, in which case it treated the value as a template and threw <see cref="T:System.FormatException"/> from
+            inside a log call. A pool logging an object whose <c>ToString()</c> contains braces would therefore
+            crash on the line that was only meant to report something. Removing the second pass changes nothing
+            for a value without braces and turns that crash into the text it was trying to print.
+            </remarks>
         </member>
         <member name="T:DotNetCore.HayateOP.Logging.DefaultHayateLoggerFactory">
             <summary>

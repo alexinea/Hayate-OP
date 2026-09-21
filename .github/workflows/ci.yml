@@ -137,6 +137,35 @@ jobs:
       - name: Run net48
         run: dotnet test tests/legacy/HayateOP.Tests.${{ matrix.project }}.Legacy/HayateOP.Tests.${{ matrix.project }}.Legacy.csproj -c ${{ env.CONFIGURATION }} --no-build -f net48 -v minimal
 
+  # L6 / W-B7-4 note: DefaultHayateLogger's implementation is #if DEBUG — on a Release build its four
+  # methods are empty, so the rendering cases compile to nothing and no Release job can exercise them.
+  # CI runs Release, so without this job that code — and the console logger a host without MEL now gets
+  # after L3 — has no automated coverage at all. Only the DI suite runs here: it is small and has no
+  # timing-sensitive cases, so a slower Debug build cannot make it flaky.
+  test-debug:
+    name: Test debug-only paths (Debug / net10.0)
+    runs-on: windows-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore tests/HayateOP.Tests.DI/HayateOP.Tests.DI.csproj --source ${{ env.NUGET_SOURCE }}
+
+      - name: Build
+        run: dotnet build tests/HayateOP.Tests.DI/HayateOP.Tests.DI.csproj -c Debug --no-restore
+
+      - name: Run
+        shell: bash
+        run: ./tests/HayateOP.Tests.DI/bin/Debug/net10.0/HayateOP.Tests.DI.exe
+
   test-extensions:
     name: Test extensions (${{ matrix.project }} / ${{ matrix.tfm }})
     runs-on: windows-latest

@@ -217,6 +217,19 @@ Breaking changes are described in full — with migration guidance — in
 
 ### Fixed
 
+- **A log call that could throw while reporting something** (L6; DEBUG builds only): the built-in console
+  logger substituted the template's placeholders and then handed the result to `string.Format` a second
+  time. By then there was nothing left to substitute — unless a substituted *value* happened to contain a
+  brace, in which case the second pass read the value as a template of its own and threw
+  `FormatException`. A pool that logged an object whose `ToString()` contains braces crashed on the line
+  that existed only to report it, which is a poor way to find out. The second pass is gone. For a value
+  without braces the rendered text is byte-identical — the format specifiers (`{Size:D3}` and friends) are
+  applied by the substitution pass itself, not by the one that followed it — so the change is visible only
+  when it saves you from the crash. Note that this is the DEBUG-only console logger; the Release build's
+  empty implementation and every structured sink are unaffected.
+  Coverage note: because the implementation is `#if DEBUG`, these cases compile to nothing on a Release
+  build, and CI runs Release — a Debug job was added for the suite that holds them.
+
 - **A Serilog-only operator in a pool log template** (L4): the "configuration reloaded" message addressed
   its payload as `{@Config}`. `@` is Serilog's destructuring operator — in a Serilog template it means
   "capture this object's members instead of calling ToString() on it" — and this message never reaches a
