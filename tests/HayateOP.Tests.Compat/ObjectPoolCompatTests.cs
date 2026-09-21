@@ -132,14 +132,17 @@ public class ObjectPoolCompatTests
         {
             MinSize = 0,
             MaxSize = 8,                                   // comfortably above the request count
-            AcquireTimeout = TimeSpan.FromMilliseconds(100)
+            // Far above any plausible creation cost, so a policy that degraded to waiting out the timeout
+            // before creating shows up as >= 2s per request. The 100ms this used to carry could not: a
+            // degraded Get returns at ~100ms, well inside any bound wide enough to tolerate CI noise.
+            AcquireTimeout = TimeSpan.FromSeconds(2)
         });
         var policy = new CountingPolicy();
         var pool = provider.Create(policy);
 
         var results = new CompatResource[requests];
+        var getMs = new long[requests];
         using var barrier = new Barrier(requests);
-        var sw = Stopwatch.StartNew();
 
         var tasks = new Task[requests];
         for (var i = 0; i < requests; i++)
@@ -148,18 +151,22 @@ public class ObjectPoolCompatTests
             tasks[index] = Task.Run(() =>
             {
                 barrier.SignalAndWait();
+                // Timed from the barrier release, not from the task start: the thread pool's scheduling of
+                // the four participants sits outside Get, where it says nothing about the reject policy.
+                var sw = Stopwatch.StartNew();
                 results[index] = pool.Get();
+                getMs[index] = sw.ElapsedMilliseconds;
             });
         }
 
         Task.WaitAll(tasks);
-        sw.Stop();
 
         Assert.All(results, Assert.NotNull);
         Assert.Equal(requests, results.Distinct().Count());     // one object per request, no double lending
         Assert.Equal(requests, policy.Created);                 // every miss created its own object
-        Assert.True(sw.ElapsedMilliseconds < 500,
-            $"concurrent cold Gets took {sw.ElapsedMilliseconds}ms — below capacity each miss must create without waiting");
+        var slowest = getMs.Max();
+        Assert.True(slowest < 1500,
+            $"below capacity each miss must create without waiting, but the slowest cold Get took {slowest}ms");
     }
 
     // ─────────────────────────────────────────────────────────────

@@ -10,6 +10,23 @@ Breaking changes are described in full — with migration guidance — in
 
 ## [Unreleased]
 
+### Fixed
+
+- **The create-on-demand concurrency cases no longer measure the thread pool** (test-only; no runtime
+  change): `CreateOnDemand_BelowCapacityMisses_ShouldEachCreateWithoutWaiting` timed the whole
+  four-request burst and failed the net48 CI leg at 1984ms against a 1500ms bound. Nothing had waited
+  out a timeout — the burst total landed *below* the 2s acquire timeout the pool is built with, and a
+  request that degraded to wait-then-create can only return after that timeout, so the policy was
+  provably not at fault. The 1984ms was the .NET Framework thread pool injecting the four `Task.Run` +
+  `Barrier` participants on a 4-core runner, which happens before `Acquire` is ever entered. Both
+  generations now time each request from the barrier release and assert on the slowest one, keeping
+  scheduling outside the pool out of the measurement while a genuine wait-out regression still lands at
+  ≥ 2s and trips the bound (verified by switching the burst to `CreateNew`, which fails the case at
+  2072ms). The MEOP compat case `HayateCompatProvider_ConcurrentMissesBelowCapacity_AllServed` takes the
+  same per-request timing, and its acquire timeout moves from 100ms to 2s: at 100ms a degraded `Get`
+  returned inside the old 500ms burst bound, so that assertion could not detect the regression it was
+  written for.
+
 ## [2.8.0] - 2026-09-20
 
 Pool-model expansion and specialization release, no breaking API change. Highlights: a

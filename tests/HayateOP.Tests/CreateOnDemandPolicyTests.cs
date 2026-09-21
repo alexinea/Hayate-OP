@@ -48,21 +48,28 @@ public class CreateOnDemandPolicyTests
         Assert.Equal(1, pool.GetStats().TotalCreated);
     }
 
-    private static TestObject[] RunConcurrentBurst(IHayateObjectPool<TestObject> pool, int requests)
+    private static (TestObject[] Objects, long[] AcquireMilliseconds) RunConcurrentBurst(
+        IHayateObjectPool<TestObject> pool, int requests)
     {
         var results = new TestObject[requests];
+        var acquireMs = new long[requests];
         using var barrier = new Barrier(requests);
 
         var tasks = Enumerable.Range(0, requests)
             .Select(i => Task.Run(() =>
             {
                 barrier.SignalAndWait();
+                // Timed from the barrier release, not from the task start: on a 4-core CI runner the
+                // thread pool injects the four participants slowly, and that delay sits outside Acquire,
+                // where it says nothing about the reject policy.
+                var sw = Stopwatch.StartNew();
                 results[i] = pool.Acquire();
+                acquireMs[i] = sw.ElapsedMilliseconds;
             }))
             .ToArray();
 
         Task.WaitAll(tasks);
-        return results;
+        return (results, acquireMs);
     }
 
     private static HayatePoolBuilder<TestObject> ConcurrentBurstPoolBuilder(string name) => new HayatePoolBuilder<TestObject>()
@@ -84,8 +91,7 @@ public class CreateOnDemandPolicyTests
         const int requests = 4;
 
         // Warm-up burst on a throwaway pool: primes the JIT of the acquire/create path and the
-        // thread-pool ramp-up. Without it, the measured wall clock on a 4-core CI VM includes cold-start
-        // noise (1.5s observed on the net48 leg), which says nothing about the policy.
+        // thread-pool ramp-up, so the measured burst does not pay first-touch costs.
         using (var warmup = ConcurrentBurstPoolBuilder("on-demand-concurrent-warmup").Build())
         {
             RunConcurrentBurst(warmup, requests);
@@ -93,16 +99,18 @@ public class CreateOnDemandPolicyTests
 
         using var pool = ConcurrentBurstPoolBuilder("on-demand-concurrent").Build();
 
-        var sw = Stopwatch.StartNew();
-        var results = RunConcurrentBurst(pool, requests);
-        sw.Stop();
+        var burst = RunConcurrentBurst(pool, requests);
 
-        Assert.All(results, Assert.NotNull);
-        Assert.Equal(requests, results.Distinct().Count());   // one object per request, nothing lent twice
-        // Correct behavior is milliseconds warm; a wait-then-create degradation pays the full 2s timeout.
-        // The bound sits between the two with CI headroom on both sides.
-        Assert.True(sw.ElapsedMilliseconds < 1500,
-            $"{requests} concurrent misses below capacity must each create without waiting, but took {sw.ElapsedMilliseconds}ms");
+        Assert.All(burst.Objects, Assert.NotNull);
+        Assert.Equal(requests, burst.Objects.Distinct().Count());   // one object per request, nothing lent twice
+        // The contract is per request: a wait-then-create degradation spends the whole 2s acquire timeout
+        // inside Acquire, so the slowest acquire is what has to stay in the milliseconds. The old burst
+        // wall-clock bound also counted the thread pool's scheduling of the four barrier participants
+        // (1984ms on the net48 leg) and failed a run whose acquires were all fast -- a burst total below
+        // the 2s timeout already proved no request waited it out.
+        var slowest = burst.AcquireMilliseconds.Max();
+        Assert.True(slowest < 1500,
+            $"{requests} concurrent misses below capacity must each create without waiting, but the slowest acquire took {slowest}ms");
     }
 
     [Fact(Timeout = 30_000)]
