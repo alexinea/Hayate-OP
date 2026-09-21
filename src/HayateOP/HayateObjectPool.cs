@@ -18,6 +18,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     private readonly Shard[] _shards;
     private readonly IHayateObjectPolicy<T> _policy;
+#if NET6_0_OR_GREATER
+    // The policy seen as its asynchronous contract (docs/async-policy.md), resolved once at
+    // construction so dispatch is a null test on a readonly field and a policy that does not implement
+    // the interface pays nothing for the feature. Always null on netstandard2.0 / net48, where the
+    // interface is not part of the build.
+    private readonly IHayateAsyncObjectPolicy<T>? _asyncPolicy;
+#endif
     private readonly HayatePoolOptions _options;
     private readonly IHayateScalingStrategy _scalingStrategy;
 
@@ -264,6 +271,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         IHayateEvictionPolicy<T>? evictionPolicy = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
+#if NET6_0_OR_GREATER
+        _asyncPolicy = policy as IHayateAsyncObjectPolicy<T>;
+#endif
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _scalingStrategy = scalingStrategy ?? throw new ArgumentNullException(nameof(scalingStrategy));
         _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
@@ -1050,10 +1060,25 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             // for the return signal, so a Min=0 empty pool's first borrow would hang forever until cancellation; cold boot is the only deterministic exit.
             // The create-on-demand policy goes one step further and also creates while the pool still has room, so an async borrow of a
             // fully lent-out pool does not have to wait for a return either.
-            var coldBoot = _options.RejectPolicy == HayatePoolRejectPolicy.CreateOnDemand
-                ? TryCreateOnDemand(0)
-                : TryColdBootAcquire(0);
-            if (coldBoot is not null) return coldBoot;
+#if NET6_0_OR_GREATER
+            if (_asyncPolicy is not null)
+            {
+                // An asynchronous policy is driven through its asynchronous creation hook here, so the
+                // creation genuinely awaits instead of blocking this thread (rule 1 of docs/async-policy.md).
+                // Every other policy runs the synchronous branch below unchanged (rule 2).
+                var createdAsync = _options.RejectPolicy == HayatePoolRejectPolicy.CreateOnDemand
+                    ? await TryCreateOnDemandAsync(0, cancellationToken).ConfigureAwait(false)
+                    : await TryColdBootAcquireAsync(0, cancellationToken).ConfigureAwait(false);
+                if (createdAsync is not null) return createdAsync;
+            }
+            else
+#endif
+            {
+                var coldBoot = _options.RejectPolicy == HayatePoolRejectPolicy.CreateOnDemand
+                    ? TryCreateOnDemand(0)
+                    : TryColdBootAcquire(0);
+                if (coldBoot is not null) return coldBoot;
+            }
 
             await _blockGate.WaitAsync(cancellationToken);
         }
@@ -1650,6 +1675,25 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     #region Helper methods
 
+    /// <summary>
+    /// Invokes the policy's creation hook. A policy that implements
+    /// <c>IHayateAsyncObjectPolicy&lt;T&gt;</c> is driven through its asynchronous hook even from a
+    /// synchronous caller — a synchronous entry point waits on it instead of calling the synchronous
+    /// <see cref="IHayateObjectPolicy{T}.Create"/> (rule 1 of docs/async-policy.md) — while every other
+    /// policy keeps calling <c>Create</c> exactly as it did before the interface existed (rule 2).
+    /// </summary>
+    /// <remarks>
+    /// The asynchronous interface is named as plain code, not a <c>cref</c>: this member compiles on
+    /// every target, and the type does not exist on netstandard2.0 / net48.
+    /// </remarks>
+    private T CreateObject()
+    {
+#if NET6_0_OR_GREATER
+        if (_asyncPolicy is not null) return _asyncPolicy.CreateAsync().GetAwaiter().GetResult();
+#endif
+        return _policy.Create();
+    }
+
     private HayateObject<T> CreateWrappedObject(Shard targetShard)
     {
         // Wrapper recycling: prefer a wrapper parked by a previous destroy (zero allocation on this
@@ -1662,7 +1706,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         {
             try
             {
-                var o = _policy.Create();
+                var o = CreateObject();
                 if (o is null)
                     throw new ArgumentNullException("value"); // keep the constructor's null-value contract
 
@@ -1808,14 +1852,24 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// <summary>
     /// Creates one object and hands it out already borrowed: picks the next shard by the round-robin
     /// cursor, creates and registers the wrapper (a fresh object is registered as borrowed, never placed
-    /// in the idle list, so no other waiter can claim it through a take), runs the policy acquire hook,
-    /// and updates the counters, the capacity alarm and the metrics.
+    /// in the idle list, so no other waiter can claim it through a take), then runs the shared hand-out
+    /// bookkeeping.
     /// Shared by the cold-boot path and both create-on-miss paths so they all allocate identically.
     /// </summary>
     private T CreateBorrowedOnDemand(long waitTimeMs)
     {
         var shard = _shards[(int)(Interlocked.Increment(ref _createCursor) - 1) % _shards.Length];
         var w = CreateWrappedObject(shard);   // TryTrack registration is already done internally (includes the _totalCreated counter)
+        FinishBorrowedOnDemand(shard, w, waitTimeMs);
+        return w.Value;
+    }
+
+    /// <summary>
+    /// The hand-out half of <see cref="CreateBorrowedOnDemand"/>, shared with its asynchronous twin:
+    /// runs the policy acquire hook and updates the counters, the capacity alarm and the metrics.
+    /// </summary>
+    private void FinishBorrowedOnDemand(Shard shard, HayateObject<T> w, long waitTimeMs)
+    {
         w.Location = HayateObjectLocation.Borrowed;
         // A freshly created object handed out already borrowed must join the borrowed list too (K2),
         // or the abandoned scan would never see create-on-miss / cold-boot borrows.
@@ -1838,9 +1892,116 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             UpdateWaitTimeStats(waitTimeMs);
             _metrics.RecordObjectAcquired(_name, w.Value, waitTimeMs);
         }
+    }
 
+#if NET6_0_OR_GREATER
+    // Asynchronous creation twins. They are reached only when the policy implements
+    // IHayateAsyncObjectPolicy<T> (every caller dispatches on _asyncPolicy), so a pool whose policy
+    // keeps the synchronous contract runs the routines above untouched — that is what makes the
+    // asynchronous surface additive instead of a rewrite of the creation path. Each twin mirrors its
+    // synchronous counterpart statement for statement: same retry budget, same registration order,
+    // same give-up exception. The differences are that the creation hook is awaited and that the retry
+    // delay yields the thread instead of sleeping on it.
+
+    /// <summary>Asynchronous twin of <see cref="CreateWrappedObject"/>, awaited by the cold-boot and create-on-miss paths.</summary>
+    private async ValueTask<HayateObject<T>> CreateWrappedObjectAsync(Shard targetShard, CancellationToken cancellationToken)
+    {
+        // Wrapper recycling, taken once for the whole retry loop, exactly as the synchronous twin does.
+        var w = targetShard.TryTakeSpare();
+
+        for (var retry = 0; retry < _options.CreationRetryCount; retry++)
+        {
+            try
+            {
+                var o = await _asyncPolicy!.CreateAsync(cancellationToken).ConfigureAwait(false);
+                if (o is null)
+                    throw new ArgumentNullException("value"); // keep the constructor's null-value contract
+
+                if (w != null)
+                {
+                    w.PrepareForRecycle(o, _name, targetShard.Index);
+                }
+                else
+                {
+                    w = new HayateObject<T>(o) { ShardIndex = targetShard.Index, OwnerPoolName = _name };
+                }
+
+                if (targetShard.TryTrack(o, w))
+                {
+                    if (_enableMetrics) Interlocked.Increment(ref _totalCreated);
+                    return w;
+                }
+
+                // The same key already exists (a pathological case where the policy creates the same instance twice): destroy the new instance and retry.
+                _logger.LogWarning("Duplicate pooled object instance detected. Retrying. Type: {Type}", typeof(T).Name);
+                _policy.OnDestroy(o);
+                if (o is IDisposable d) d.Dispose();
+            }
+            // A cancelled token is not a creation failure: it propagates to the caller instead of
+            // consuming retries and logging an error.
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "Error creating object. Retry {Retry}/{MaxRetries}", retry + 1, _options.CreationRetryCount);
+
+                if (retry == _options.CreationRetryCount - 1)
+                {
+                    // Park the taken wrapper before giving up so a future creation can still reuse it
+                    // (same reasoning as the synchronous twin).
+                    if (w != null) targetShard.ReturnSpare(w);
+                    throw new InvalidOperationException("Failed to create object after retries", ex);
+                }
+
+                await Task.Delay(_options.CreationRetryDelay, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        if (w != null) targetShard.ReturnSpare(w);
+        throw new InvalidOperationException("Failed to create object after retries");
+    }
+
+    /// <summary>Asynchronous twin of <see cref="TryColdBootAcquire"/>: the atomic claim and the double-checks are the same.</summary>
+    private async ValueTask<T?> TryColdBootAcquireAsync(long waitTimeMs, CancellationToken cancellationToken)
+    {
+        if (_options.MaxPoolSize <= 0) return null;
+        if (TrackedObjectCount != 0) return null;
+        if (Interlocked.CompareExchange(ref _coldBootClaimed, 1, 0) != 0) return null;
+
+        try
+        {
+            // Double-check: during the CAS, a concurrent return / scale-up may make the pool non-empty — just fall back to the normal wait path then.
+            if (TrackedObjectCount != 0) return null;
+
+            var value = await CreateBorrowedOnDemandAsync(waitTimeMs, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation("Pool [{PoolName}] cold-boot acquired on demand (pool was empty)", _name);
+            return value;
+        }
+        finally
+        {
+            // Whether creation succeeds or fails, the flag must be reset, so the pool can cold-boot again after being emptied.
+            Interlocked.Exchange(ref _coldBootClaimed, 0);
+        }
+    }
+
+    /// <summary>Asynchronous twin of <see cref="TryCreateOnDemand"/>: same cold-boot delegation, same ceiling check.</summary>
+    private async ValueTask<T?> TryCreateOnDemandAsync(long waitTimeMs, CancellationToken cancellationToken)
+    {
+        var coldBoot = await TryColdBootAcquireAsync(waitTimeMs, cancellationToken).ConfigureAwait(false);
+        if (coldBoot is not null) return coldBoot;
+
+        if (TrackedObjectCount >= _options.MaxPoolSize) return null;
+
+        return await CreateBorrowedOnDemandAsync(waitTimeMs, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Asynchronous twin of <see cref="CreateBorrowedOnDemand"/>: only the creation is awaited, the hand-out bookkeeping is the shared helper.</summary>
+    private async ValueTask<T> CreateBorrowedOnDemandAsync(long waitTimeMs, CancellationToken cancellationToken)
+    {
+        var shard = _shards[(int)(Interlocked.Increment(ref _createCursor) - 1) % _shards.Length];
+        var w = await CreateWrappedObjectAsync(shard, cancellationToken).ConfigureAwait(false);
+        FinishBorrowedOnDemand(shard, w, waitTimeMs);
         return w.Value;
     }
+#endif
 
     private void UpdateShardMaxSizes()
     {

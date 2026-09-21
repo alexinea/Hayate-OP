@@ -7,9 +7,13 @@ releases would append members to `IHayateAsyncObjectPolicy<T>` after implementer
 against it, which is a second breaking change for exactly the people the interface is meant to
 help.
 
-**Implementation status: not implemented yet.** Where this page and the code disagree, this page
-is the design and the code is the bug — until a decision here is deliberately revised, in which
-case this page is updated first.
+**Implementation status: A1 (asynchronous creation) implemented, A2 and B5 pending.** The engine
+dispatches `CreateAsync` on every creation path — general and lean, synchronous and asynchronous
+entry points — so a synchronous caller waits on the asynchronous hook instead of calling the
+synchronous one (rule 1 below). `OnReleaseAsync`, `OnPassivateAsync` and `OnDestroyAsync` are part
+of the interface an implementer must supply, but the engine does not call them yet; A2 and B5 wire
+them. Where this page and the code disagree, this page is the design and the code is the bug —
+until a decision here is deliberately revised, in which case this page is updated first.
 
 ## 1. Why the synchronous contract is not enough
 

@@ -117,7 +117,7 @@ public partial class HayatePoolBasic<T>
         {
             try
             {
-                return _policy.Create();
+                return CreateObject();
             }
             catch (Exception ex)
             {
@@ -167,6 +167,68 @@ public partial class HayatePoolBasic<T>
 
         return true;
     }
+
+#if NET6_0_OR_GREATER
+    /// <summary>
+    /// Asynchronous twin of <see cref="CreateLeanObject"/>: drives an
+    /// <see cref="Policies.IHayateAsyncObjectPolicy{T}"/> through its asynchronous hook instead of the
+    /// synchronous one (rule 1 of docs/async-policy.md). Reachable only when the pool holds such a
+    /// policy, so the synchronous retry path above is unchanged for every other policy (rule 2).
+    /// </summary>
+    private async ValueTask<T> CreateLeanObjectAsync(CancellationToken cancellationToken)
+    {
+        for (var retry = 0; retry < _options.CreationRetryCount; retry++)
+        {
+            try
+            {
+                return await _asyncPolicy!.CreateAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                // A cancelled token is not a creation failure: it propagates to the caller instead of
+                // consuming retries and logging an error.
+                _logger.LogError(ex, "Error creating object. Retry {Retry}/{MaxRetries}", retry + 1, _options.CreationRetryCount);
+
+                if (retry == _options.CreationRetryCount - 1)
+                    throw new InvalidOperationException("Failed to create object after retries", ex);
+
+                await Task.Delay(_options.CreationRetryDelay, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        throw new InvalidOperationException("Failed to create object after retries");
+    }
+
+    /// <summary>
+    /// Asynchronous twin of <see cref="TryGrowLean(out T)"/>: same atomic reservation against the
+    /// <see cref="HayatePoolOptions.MaxPoolSize"/> ceiling, asynchronous creation.
+    /// </summary>
+    /// <returns>
+    /// A tuple rather than the <c>out</c> pair of the synchronous twin: a policy is allowed to return
+    /// <c>null</c>, so a null sentinel could not distinguish "at capacity" from "created nothing" —
+    /// while the synchronous signature has the <c>bool</c> return to carry that meaning.
+    /// </returns>
+    private async ValueTask<(bool Grown, T? Item)> TryGrowLeanAsync(CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            var live = Volatile.Read(ref _leanLive);
+            if (live >= _leanCapacity) return (false, null);
+            if (Interlocked.CompareExchange(ref _leanLive, live + 1, live) != live) continue;
+            break;
+        }
+
+        try
+        {
+            return (true, await CreateLeanObjectAsync(cancellationToken).ConfigureAwait(false));
+        }
+        catch
+        {
+            Interlocked.Decrement(ref _leanLive);
+            throw;
+        }
+    }
+#endif
 
     /// <summary>
     /// Takes an idle object out of the lean buffer: the single-slot fast lane first (the
@@ -573,6 +635,18 @@ public partial class HayatePoolBasic<T>
                 return item;
             }
 
+#if NET6_0_OR_GREATER
+            if (_asyncPolicy is not null)
+            {
+                var (grown, createdAsync) = await TryGrowLeanAsync(cancellationToken).ConfigureAwait(false);
+                if (grown)
+                {
+                    _policy.OnAcquire(createdAsync!);
+                    return createdAsync!;
+                }
+            }
+            else
+#endif
             if (TryGrowLean(out var created))
             {
                 _policy.OnAcquire(created);

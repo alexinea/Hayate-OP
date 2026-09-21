@@ -10,6 +10,27 @@ Breaking changes are described in full — with migration guidance — in
 
 ## [Unreleased]
 
+### Added
+
+- **Asynchronous creation contract** (A1, `net6.0`+): `IHayateAsyncObjectPolicy<T>`, the policy
+  counterpart of `IHayateObjectPolicy<T>` whose `CreateAsync` builds a pooled object without blocking
+  the borrowing thread — the shape a connection pool actually needs (`TcpClient.ConnectAsync`,
+  `DbConnection.OpenAsync`, an SMTP `STARTTLS` handshake), which today can only be expressed as
+  `GetAwaiter().GetResult()` inside the synchronous `Create()`. On ASP.NET Core that occupies a
+  request thread; under a `SynchronizationContext` it can deadlock — a structural contradiction for
+  a pool that sells itself on performance, not a missing optimisation. The engine dispatches on
+  `policy is IHayateAsyncObjectPolicy<T>` at every creation site (general-purpose and lean,
+  synchronous and asynchronous entry points), so `Acquire()` on an asynchronous policy waits on
+  `CreateAsync` rather than running a second, divergent implementation, while a policy that does not
+  implement the interface takes the existing branch unchanged — byte for byte, which is what makes
+  the batch additive. `netstandard2.0` / `net48` produce neither the type nor a `Task.Run`
+  stand-in: those consumers keep the fully synchronous pool, and the core package keeps its
+  zero-dependency policy. First of the three-item asynchronous batch specified in
+  [`docs/async-policy.md`](docs/async-policy.md) (A1 → A2 → B5, shipped as one sequence because
+  appending members to the interface across two releases would break implementers twice); the
+  remaining hooks `OnReleaseAsync` / `OnPassivateAsync` / `OnDestroyAsync` are declared and must be
+  implemented now, but are wired by A2 / B5.
+
 ### Fixed
 
 - **The create-on-demand concurrency cases no longer measure the thread pool** (test-only; no runtime

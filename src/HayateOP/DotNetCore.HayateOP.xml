@@ -1061,6 +1061,19 @@
             saturates instead of overflowing); <c>null</c> lets the caller apply its own default.
             </summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.CreateObject">
+            <summary>
+            Invokes the policy's creation hook. A policy that implements
+            <c>IHayateAsyncObjectPolicy&lt;T&gt;</c> is driven through its asynchronous hook even from a
+            synchronous caller — a synchronous entry point waits on it instead of calling the synchronous
+            <see cref="M:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1.Create"/> (rule 1 of docs/async-policy.md) — while every other
+            policy keeps calling <c>Create</c> exactly as it did before the interface existed (rule 2).
+            </summary>
+            <remarks>
+            The asynchronous interface is named as plain code, not a <c>cref</c>: this member compiles on
+            every target, and the type does not exist on netstandard2.0 / net48.
+            </remarks>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryColdBootAcquire(System.Int64)">
             <summary>
             Cold boot. When the pool is completely empty (no idle and no borrowed) and the capacity limit &gt; 0,
@@ -1085,10 +1098,28 @@
             <summary>
             Creates one object and hands it out already borrowed: picks the next shard by the round-robin
             cursor, creates and registers the wrapper (a fresh object is registered as borrowed, never placed
-            in the idle list, so no other waiter can claim it through a take), runs the policy acquire hook,
-            and updates the counters, the capacity alarm and the metrics.
+            in the idle list, so no other waiter can claim it through a take), then runs the shared hand-out
+            bookkeeping.
             Shared by the cold-boot path and both create-on-miss paths so they all allocate identically.
             </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.FinishBorrowedOnDemand(DotNetCore.HayateOP.HayatePoolBasic{`0}.Shard,DotNetCore.HayateOP.HayateObject{`0},System.Int64)">
+            <summary>
+            The hand-out half of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.CreateBorrowedOnDemand(System.Int64)"/>, shared with its asynchronous twin:
+            runs the policy acquire hook and updates the counters, the capacity alarm and the metrics.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.CreateWrappedObjectAsync(DotNetCore.HayateOP.HayatePoolBasic{`0}.Shard,System.Threading.CancellationToken)">
+            <summary>Asynchronous twin of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.CreateWrappedObject(DotNetCore.HayateOP.HayatePoolBasic{`0}.Shard)"/>, awaited by the cold-boot and create-on-miss paths.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryColdBootAcquireAsync(System.Int64,System.Threading.CancellationToken)">
+            <summary>Asynchronous twin of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryColdBootAcquire(System.Int64)"/>: the atomic claim and the double-checks are the same.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryCreateOnDemandAsync(System.Int64,System.Threading.CancellationToken)">
+            <summary>Asynchronous twin of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryCreateOnDemand(System.Int64)"/>: same cold-boot delegation, same ceiling check.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.CreateBorrowedOnDemandAsync(System.Int64,System.Threading.CancellationToken)">
+            <summary>Asynchronous twin of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.CreateBorrowedOnDemand(System.Int64)"/>: only the creation is awaited, the hand-out bookkeeping is the shared helper.</summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.SelectStartShardIndex">
             <summary>
@@ -1223,6 +1254,25 @@
             The reservation is a compare-exchange loop rather than a bare increment, so concurrent
             borrowers can never overshoot the ceiling; a creation failure rolls the reservation back.
             </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.CreateLeanObjectAsync(System.Threading.CancellationToken)">
+            <summary>
+            Asynchronous twin of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.CreateLeanObject"/>: drives an
+            <see cref="T:DotNetCore.HayateOP.Policies.IHayateAsyncObjectPolicy`1"/> through its asynchronous hook instead of the
+            synchronous one (rule 1 of docs/async-policy.md). Reachable only when the pool holds such a
+            policy, so the synchronous retry path above is unchanged for every other policy (rule 2).
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryGrowLeanAsync(System.Threading.CancellationToken)">
+            <summary>
+            Asynchronous twin of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryGrowLean(`0@)"/>: same atomic reservation against the
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/> ceiling, asynchronous creation.
+            </summary>
+            <returns>
+            A tuple rather than the <c>out</c> pair of the synchronous twin: a policy is allowed to return
+            <c>null</c>, so a null sentinel could not distinguish "at capacity" from "created nothing" —
+            while the synchronous signature has the <c>bool</c> return to carry that meaning.
+            </returns>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryTakeLean(`0@)">
             <summary>
@@ -6282,6 +6332,56 @@
             The default object-pool policy.
             </summary>
             <typeparam name="T"></typeparam>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Policies.IHayateAsyncObjectPolicy`1">
+            <summary>
+            The asynchronous counterpart of <see cref="T:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1"/>. It extends that contract
+            rather than replacing it, so an existing policy keeps compiling unchanged.
+            </summary>
+            <remarks>
+            <para>
+            A policy that implements this interface takes the asynchronous path in the engine: the hooks below
+            are the ones the pool calls, and a synchronous entry point (<c>Acquire</c> / <c>Release</c>) waits on
+            them instead of calling the synchronous hooks. Implementing both interfaces is legal, and the
+            asynchronous hooks win where the two overlap.
+            </para>
+            <para>
+            Four of the six synchronous hooks have an asynchronous counterpart. <c>Validate</c> and
+            <c>OnAcquire</c> stay synchronous by design — validation is a hot-path decision with retry
+            semantics, and acquisition notification is bookkeeping rather than I/O.
+            </para>
+            <para>
+            The type is available on <c>net6.0</c> and later only: <c>ValueTask</c> is not a BCL type on
+            <c>netstandard2.0</c> / <c>net48</c>, and the core package keeps its zero-dependency policy. Those
+            targets keep the fully synchronous pool — no pseudo-asynchronous fallback.
+            </para>
+            <para>
+            The dispatch rules that govern this interface are specified in <c>docs/async-policy.md</c>; that
+            page is the design and this type is expected to match it.
+            </para>
+            </remarks>
+            <typeparam name="T">The pooled object type.</typeparam>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Policies.IHayateAsyncObjectPolicy`1.CreateAsync(System.Threading.CancellationToken)">
+            <summary>Creates a new pooled object asynchronously.</summary>
+            <param name="cancellationToken">Token that cancels the creation.</param>
+            <returns>A new instance of <typeparamref name="T"/>; must not be <c>null</c>.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Policies.IHayateAsyncObjectPolicy`1.OnReleaseAsync(`0,System.Threading.CancellationToken)">
+            <summary>Called asynchronously when an object is returned to the pool.</summary>
+            <param name="item">The object being returned.</param>
+            <param name="cancellationToken">Token that cancels the hook.</param>
+            <returns><c>true</c> to accept the object back into the pool; <c>false</c> to destroy it.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Policies.IHayateAsyncObjectPolicy`1.OnPassivateAsync(`0,System.Threading.CancellationToken)">
+            <summary>Called asynchronously just before an object is placed back into the pool after return.</summary>
+            <param name="item">The object about to be passivated.</param>
+            <param name="cancellationToken">Token that cancels the hook.</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Policies.IHayateAsyncObjectPolicy`1.OnDestroyAsync(`0,System.Threading.CancellationToken)">
+            <summary>Called asynchronously when an object is destroyed (removed from the pool for good).</summary>
+            <param name="item">The object being destroyed.</param>
+            <param name="cancellationToken">Token that cancels the hook.</param>
         </member>
         <member name="T:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1">
             <summary>
