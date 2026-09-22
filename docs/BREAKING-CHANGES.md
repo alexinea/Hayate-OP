@@ -4,11 +4,14 @@ Migration guidance for every breaking change, newest first, plus the behavioural
 frequently surprise adopters. For a per-version summary of all changes see
 [`../CHANGELOG.md`](../CHANGELOG.md).
 
-## 3.0 — Lifetime semantics named (no breaking API change)
+## 3.0 — Lifetime semantics named, blocking wake-up made signal-driven
 
 3.0 states the meaning `MaxLifeTime` always had, in full, and leaves the enforcement of the borrowed
-half exactly where 2.9 put it: behind an opt-in switch that is off by default. Nothing in this section
-asks an existing application to change code, and no default behaviour moves.
+half exactly where 2.9 put it: behind an opt-in switch that is off by default. It also removes the
+100 ms quantisation that blocking borrows used to carry. No public signature changes and no default
+option value moves — but the last two bullets below are an observable behaviour change, so read them
+before adopting: a blocking wait now wakes on the signal, and its timeout is a boundary rather than a
+floor.
 
 - **`MaxLifeTime` is documented as the maximum lifetime of a pooled object from the moment it is
   created — idle or borrowed** (β-1). The documented scope used to be the idle half only, which read as
@@ -21,11 +24,28 @@ asks an existing application to change code, and no default behaviour moves.
   only idle objects are retired for age, and an object held by the application for longer than
   `MaxLifeTime` is never treated as expired. That is the behaviour of every release before 2.9, and it is
   what 3.0 keeps.
+- **Blocking wake-up is signal-driven, not quantised** (B6). `Block`, `BlockTimeout` and
+  `CreateNew` / `CreateOnDemand` used to re-check their shard in fixed 100 ms slices, so a waiter
+  could not observe a return sooner than the next slice boundary and the tail latency of the
+  release-to-wake-to-borrow handoff was quantised to that step. The wait is now a single
+  `SemaphoreSlim` wait: it returns the moment a signal is published, and sleeps until its timeout
+  when none is. Every site that makes an object available — a return, the constructor's pre-warm,
+  `PreWarm(n)`, the background scaler, and an abandoned-lease reclaim — publishes that signal, so a
+  woken waiter no longer re-scans the shard on a timer. **Lean mode (`EnableLean`) is not covered**:
+  it keeps the 100 ms slice, because its borrow path grows from a fixed buffer before it parks and
+  a return that is rejected or overflows that buffer frees a slot without publishing a signal.
+- **The blocking timeout is a boundary, not a floor** (B6). `BlockTimeout` and `CreateNew` threw
+  once `elapsed >= timeout`, but only at a slice boundary, so a configured 400 ms timeout could
+  surface anywhere up to roughly 500 ms. The same check now runs when the wait itself expires, so
+  the exception arrives at the configured timeout plus scheduling noise. The `TimeoutException`
+  type, its message and the throw-rather-than-return-null contract are unchanged, and `Block` still
+  has no timeout at all: it waits until a signal arrives.
 
 ### Migration
 
-There is nothing to migrate. An application that compiled and ran against 2.9 compiles and behaves the
-same against 3.0: this section records a naming decision, not a change.
+Nothing to migrate for the lifetime semantics: an application that compiled and ran against 2.9
+compiles and behaves the same against 3.0 on that count — those two bullets record a naming decision,
+not a change.
 
 If you do want the borrowed half enforced — the case where a server-side `max_connection_lifetime` or an
 intermediary's idle timeout can invalidate a connection the pool still believes is good — turn the switch
@@ -48,6 +68,23 @@ Two constraints come with the switch, and 3.0 changes neither. It cannot be comb
 the lean fast path keeps no per-object timestamps, so the combination fails validation rather than being
 silently ignored. And making it the default would change behaviour for every existing pool, so that would
 need its own major release and its own migration guide.
+
+### Migrating to the signal-driven wake-up
+
+The wake-up change needs no code change either, but three things are worth checking before you adopt
+it:
+
+- **Re-measure blocking tail latency if you baseline it.** A p99 that used to sit just under 100 ms
+  because of the slice now reflects the real release-to-wake path. Your load tests, SLOs and capacity
+  plans move; the pool's throughput characteristics do not.
+- **Tighten any bound that assumed the old floor.** A test that allowed a 400 ms timeout to surface as
+  late as 500 ms still passes, but one that asserted the *floor* — "`Block` returned no sooner than
+  100 ms", or a tail latency of "at least a slice" — no longer describes the behaviour.
+- **`Block` now waits until a signal is published, with no timeout of its own.** That is what it
+  always documented; what changed is that the slice used to recover a waiter the signal missed. The
+  library now publishes a signal from every path that frees an object or a slot, so the reachable set
+  is the same: a pool whose objects are all leaked and never reclaimed parks for good, exactly as it
+  did before.
 
 ## 2.9 — Asynchronous contracts and logging (no breaking API change)
 
@@ -327,9 +364,11 @@ Behaviours to be aware of before adopting HayateOP.
   first waits up to the acquire timeout for a return, and only then synchronously creates a new
   tracked object. A cold first call on an empty pool therefore incurs up to a full-timeout delay
   before the new object is handed out.
-- **Blocking wake-up granularity is ~100 ms.** Blocking waits (`Block` / `BlockTimeout` /
-  `CreateNew`) re-check in fixed slices of 100 ms, so the observed tail latency of a
-  return-to-acquire handoff is quantized to that slice size.
+- **Lean mode's blocking wake-up granularity is ~100 ms.** In lean mode (`EnableLean`) blocking waits
+  (`Block` / `BlockTimeout` / `CreateNew` / `CreateOnDemand`) still re-check in fixed slices of 100 ms,
+  so the observed tail latency of a return-to-acquire handoff is quantized to that slice size. The
+  general-purpose engine no longer has that step: since 3.0 its blocking waits are signal-driven (see
+  [3.0](#30--lifetime-semantics-named-blocking-wake-up-made-signal-driven)).
 - **`MinPoolSize = 0` cold pools bootstrap on first acquire.** No background component pre-creates
   objects to reach `MinPoolSize`; the pool starts empty, and the first acquire on a fully empty
   pool creates its object on demand. (A non-zero `MinPoolSize` is pre-warmed once, at construction,

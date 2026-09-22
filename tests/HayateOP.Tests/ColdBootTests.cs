@@ -8,8 +8,8 @@ namespace DotNetCore.HayateOP.Tests;
 /// eliminating the uncertainty of "waiting for a timeouter to replenish" (ColdStart measurements showed two timing patterns: 2/5 and 5/5 timeouts);
 /// the CreateNew policy keeps the "create after the full timeout elapses" semantics unchanged.<br />
 /// Since 3.0 (B6) the file also carries the borrow path's growth and wake-up contract: which policies grow the
-/// pool on a miss and which wait, and how a parked waiter observes an object that was added without a wake-up
-/// signal.
+/// pool on a miss and which wait, and that a parked waiter is woken by a signal rather than by a periodic
+/// re-check.
 /// </summary>
 public class ColdBootTests
 {
@@ -238,8 +238,9 @@ public class ColdBootTests
         // The wait-based policies are not growth-less, they just never grow *on the borrow path*: the pool can
         // still be grown from outside while a caller waits, and auto-scaling is the one such path in the
         // library. So a waiter that outlives a scaling period is served by an object it was never handed a
-        // wake-up signal for — the implicit dependency between the re-check and "objects that appear without a
-        // release". This test is what holds that dependency in place across the wake-up refactor.
+        // wake-up signal for. Before B6-1 that object reached the waiter only through the bounded re-check;
+        // since then the scaler publishes a signal like every other site that makes an object available, so
+        // this scenario now holds the signal path rather than the re-check. See the invariant on _blockGate.
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("coldboot-e1-scaler")
             .WithEnableAutoScaling(true)
@@ -267,13 +268,14 @@ public class ColdBootTests
     }
 
     [Fact(Timeout = 60000)]
-    public void BlockTimeout_SeesAPreWarmedObjectWithoutASignal()
+    public void BlockTimeout_SeesAPreWarmedObjectPromptly()
     {
-        // PreWarm() puts objects into the idle lists without publishing a wake-up signal, so a waiter that is
-        // already parked can only see them through the bounded re-check. This pins that dependency from the
-        // outside: the waiter has to be served promptly - which today means "within a re-check interval", and
-        // after the B6-1 refactor means "the site publishes a signal". If the re-check interval ever grows past
-        // the bound below without the signal being added, this fails.
+        // PreWarm() is the one idle-list write a caller can trigger directly, so it is the cheapest way to hand
+        // a parked waiter an object that no return produced. Since B6-1 it publishes a wake-up signal, and the
+        // waiter is woken by that signal rather than by a re-check. The bound below is deliberately loose - it
+        // only separates "served by a signal" from "waited out the acquire timeout" - because the tight,
+        // discriminating version of this measurement is
+        // BlockTimeout_ParkedWaiterIsWokenByTheSignalNotByTheSlice.
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("coldboot-e2-prewarm")
             .WithEnableAutoScaling(false)
@@ -302,4 +304,118 @@ public class ColdBootTests
         pool.Release(held);
         pool.Release(served);
     }
+
+
+    [Fact(Timeout = 60000)]
+    public void BlockTimeout_ParkedWaiterIsWokenByTheSignalNotByTheSlice()
+    {
+        // B6-1 acceptance (wake-up granularity): the synchronous borrow path now waits once, on the signal,
+        // instead of re-checking the shard every 100ms. PreWarm() is the event used here because it publishes a
+        // signal only after the refactor, which is what makes the two mechanisms separable by measurement: a
+        // signal-driven wake lands within a few milliseconds, while a slice-driven one cannot land before the
+        // 100ms boundary. System.Threading.ThreadState.WaitSleepJoin is what makes the measurement meaningful - it is observed
+        // while the thread is blocked on the gate, so the timer starts from a parked waiter rather than from a
+        // thread that might still be on its way in.
+        using var pool = new HayatePoolBuilder<TestObject>()
+            .WithPoolName("coldboot-b61-wake")
+            .WithEnableAutoScaling(false)
+            .WithEnableMetrics(true)
+            .WithMinSize(0)
+            .WithMaxSize(8)
+            .WithRejectPolicy(HayatePoolRejectPolicy.BlockTimeout)
+            .Build();
+
+        var held = pool.Acquire(TimeSpan.FromMilliseconds(500));   // cold boot; the pool is no longer empty
+        Assert.Equal(1, pool.GetStats().TotalCreated);
+
+        TestObject served = null;
+        var waiter = new Thread(() => { served = pool.Acquire(TimeSpan.FromSeconds(5)); });
+        waiter.IsBackground = true;
+        waiter.Start();
+
+        var spin = Stopwatch.StartNew();
+        while ((waiter.ThreadState & System.Threading.ThreadState.WaitSleepJoin) == 0 && spin.ElapsedMilliseconds < 2000) Thread.Sleep(5);
+        Assert.True((waiter.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0, $"the waiter must be parked on the gate, state was {waiter.ThreadState}");
+
+        var sw = Stopwatch.StartNew();
+        Assert.Equal(2, pool.PreWarm(2));   // two idle objects appear, and a signal is published for them
+        Assert.True(waiter.Join(TimeSpan.FromSeconds(5)), "the pre-warm signal must wake the parked waiter");
+        sw.Stop();
+
+        Assert.NotNull(served);
+        Assert.True(sw.ElapsedMilliseconds < 50, $"a signal-driven wake must not wait for the 100ms slice, took {sw.Elapsed.TotalMilliseconds:F0}ms");
+        Assert.Equal(3, pool.GetStats().TotalCreated);   // the waiter reused a pre-warmed object
+
+        pool.Release(held);
+        pool.Release(served);
+    }
+
+    [Fact(Timeout = 60000)]
+    public void Block_WaitsWithoutATimeoutUntilASignalArrives()
+    {
+        // The Block policy now waits on the gate with no timeout at all, so the two properties the slice used to
+        // provide have to hold on their own: the thread really parks (it is not spinning), and the only way out
+        // is a signal. Both are observed from the outside - the thread state while nothing happens, and the
+        // object it ends up holding once a return publishes a signal.
+        using var pool = new HayatePoolBuilder<TestObject>()
+            .WithPoolName("coldboot-b61-block")
+            .WithEnableAutoScaling(false)
+            .WithEnableMetrics(true)
+            .WithMinSize(0)
+            .WithMaxSize(8)
+            .WithRejectPolicy(HayatePoolRejectPolicy.Block)
+            .Build();
+
+        var held = pool.Acquire(TimeSpan.FromMilliseconds(500));   // cold boot; the pool is no longer empty
+        Assert.Equal(1, pool.GetStats().TotalCreated);
+
+        TestObject served = null;
+        var waiter = new Thread(() => { served = pool.Acquire(); });
+        waiter.IsBackground = true;
+        waiter.Start();
+
+        var spin = Stopwatch.StartNew();
+        while ((waiter.ThreadState & System.Threading.ThreadState.WaitSleepJoin) == 0 && spin.ElapsedMilliseconds < 2000) Thread.Sleep(5);
+        Assert.True((waiter.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0, $"the waiter must be parked on the gate, state was {waiter.ThreadState}");
+
+        // Nothing is returned and no signal is published for a full second: with no timeout to expire and no
+        // slice to re-check, the waiter has to still be parked. A policy that quietly reintroduced either would
+        // have left this state by now.
+        Thread.Sleep(1000);
+        Assert.True((waiter.ThreadState & System.Threading.ThreadState.WaitSleepJoin) != 0, $"the Block waiter must stay parked, state was {waiter.ThreadState}");
+
+        pool.Release(held);   // the one event that can wake it
+        Assert.True(waiter.Join(TimeSpan.FromSeconds(5)), "the return signal must wake the Block waiter");
+        Assert.Same(held, served);
+    }
+
+    [Fact(Timeout = 60000)]
+    public void BlockTimeout_HonoursTheTimeoutWithoutOvershooting()
+    {
+        // B6-1 acceptance (timeout boundary): the wait is bounded by the timeout itself now, so a miss can no
+        // longer overshoot it by up to a re-check slice. The lower bound is the contract that was already
+        // pinned - the miss waits the timeout out rather than returning early - and the upper bound is what the
+        // refactor buys: the overshoot is scheduling noise rather than a slice.
+        using var pool = new HayatePoolBuilder<TestObject>()
+            .WithPoolName("coldboot-b61-timeout")
+            .WithEnableAutoScaling(false)
+            .WithEnableMetrics(true)
+            .WithMinSize(0)
+            .WithMaxSize(8)
+            .WithRejectPolicy(HayatePoolRejectPolicy.BlockTimeout)
+            .Build();
+
+        var held = pool.Acquire(TimeSpan.FromMilliseconds(500));   // cold boot; the pool is no longer empty
+
+        var sw = Stopwatch.StartNew();
+        Assert.Throws<TimeoutException>(() => pool.Acquire(TimeSpan.FromMilliseconds(400)));
+        sw.Stop();
+
+        Assert.True(sw.Elapsed >= TimeSpan.FromMilliseconds(380), $"the miss must wait out the timeout, took {sw.Elapsed.TotalMilliseconds:F0}ms");
+        Assert.True(sw.Elapsed < TimeSpan.FromMilliseconds(600), $"the timeout must not be overshot, took {sw.Elapsed.TotalMilliseconds:F0}ms");
+        Assert.Equal(1, pool.GetStats().TotalCreated);
+
+        pool.Release(held);
+    }
 }
+

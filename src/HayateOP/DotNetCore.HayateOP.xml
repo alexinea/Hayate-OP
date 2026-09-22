@@ -886,6 +886,13 @@
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.UntrackKey(`0)">
             <summary>When only a bare object reference (no wrapper) is available, scans all shards to remove the registry entry.</summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.RemainingWaitMs(System.TimeSpan,System.TimeSpan)">
+            <summary>
+            Milliseconds left before <paramref name="timeout"/> elapses, clamped to what
+            <see cref="M:System.Threading.SemaphoreSlim.Wait(System.Int32)"/> accepts. Callers check the timeout first, so the result is at
+            least 1: a wait can never degenerate into a spin.
+            </summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.#ctor(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0},DotNetCore.HayateOP.HayatePoolOptions,DotNetCore.HayateOP.Scaling.IHayateScalingStrategy,DotNetCore.HayateOP.Metrics.IHayateMetrics,DotNetCore.HayateOP.Logging.IHayateLogger,System.String,DotNetCore.HayateOP.IHayateShutdownHook,DotNetCore.HayateOP.IHayateEvictionPolicy{`0})">
             <exception cref="T:System.ArgumentNullException">Thrown if policy, options, scalingStrategy, metrics, logger, or poolName is null.</exception>
             <exception cref="T:System.InvalidOperationException">Thrown if the configured options are invalid.</exception>

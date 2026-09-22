@@ -109,27 +109,48 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         }
     }
 
-    // Return-event notification gate. Released once by Release() on a successful return to the pool; Block/BlockTimeout/CreateNew
-    // waiters use Wait instead of SpinWait busy-waiting, eliminating the 100% CPU idle spin during the wait.
+    // Return-event notification gate. Block/BlockTimeout/CreateNew waiters use Wait instead of SpinWait
+    // busy-waiting, eliminating the 100% CPU idle spin during the wait.
     // The counter means "number of consumable wake-up signals"; on a successful borrow it consumes one signal via Wait(0),
     // preventing stale signals from accumulating and causing waiters to be spuriously woken one by one into a busy loop.
     //
-    // A waiter can observe a newly available object in exactly two ways: this gate is released, so it wakes at once, or
-    // its bounded re-check comes round (see BlockWaitSliceMs). Only Release() publishes a signal today. The other sites
-    // that put an object into an idle list - the constructor's pre-warm, PreWarm(), ForceScaleUpOneStep() and the
-    // auto-scaling callback - publish nothing, so a waiter that arrives after one of them was served by the re-check and
-    // not by the signal. That is the implicit dependency B6-E2 names, and it is what makes
-    // BlockTimeout_SeesAPreWarmedObjectWithoutASignal and BlockTimeout_GrowsOnlyThroughBackgroundScaling pass at all.
-    // The dependency is invisible while the re-check is a fixed slice, and it breaks the moment the wait becomes a
-    // single uninterruptible SemaphoreSlim.Wait(timeout). B6-1 therefore turns it into a mechanism: every site that
-    // makes an object available must publish a signal, and the re-check stops being load-bearing. Until that lands, a
-    // new site that adds to an idle list has to say how a waiter is supposed to see the object.
+    // A waiter's wait is a single uninterruptible SemaphoreSlim wait: it is woken by a signal or by its own
+    // timeout, and never by a periodic re-check. Complete signalling is therefore a correctness requirement and
+    // not an optimisation: every event that lets a parked borrower make progress must call SignalAvailability(),
+    // or that borrower sleeps until its timeout (and Block, which has no timeout, never wakes at all).
+    // Two kinds of event qualify:
+    //   * an object became available - an addition to a shard's idle list (the constructor's pre-warm,
+    //     PreWarm(), Release(), ForceScaleUpOneStep(), the auto-scaling callback) or a lean return;
+    //   * a slot was freed - the tracked or live count dropped, so a create-on-miss waiter may now grow
+    //     (ReclaimAbandoned, DestroyLean).
+    // Before 3.0 only Release() published a signal and a fixed 100 ms re-check covered everything else; that
+    // implicit dependency is what B6-E2 named and B6-1 replaced with the rule above. Do not add a site that
+    // makes an object available, or frees a slot, without calling SignalAvailability().
     private readonly SemaphoreSlim _blockGate = new(0, int.MaxValue);
 
-    // The suspended-wait slice used when no signal arrives. A signal wakes immediately; the slice merely caps the re-check interval when no signal arrives.
-    // Load-bearing: it is the only reason a waiter ever sees an object that was added without a signal (see the invariant
-    // on _blockGate). B6-1 replaces it with a one-shot wait and makes those sites publish a signal instead.
-    private const int BlockWaitSliceMs = 100;
+    // Publishes a wake-up signal on the gate: something just happened that lets a parked borrower make
+    // progress. See the invariant on _blockGate for the two kinds of event that qualify - every site of
+    // either kind has to call this, because a waiter's wait is a single uninterruptible SemaphoreSlim wait.
+    private void SignalAvailability()
+    {
+        try { _blockGate.Release(); }
+        catch (SemaphoreFullException)
+        {
+            // int.MaxValue counter cap; unreachable under normal load.
+        }
+    }
+
+    /// <summary>
+    /// Milliseconds left before <paramref name="timeout"/> elapses, clamped to what
+    /// <see cref="SemaphoreSlim.Wait(int)"/> accepts. Callers check the timeout first, so the result is at
+    /// least 1: a wait can never degenerate into a spin.
+    /// </summary>
+    private static int RemainingWaitMs(TimeSpan timeout, TimeSpan elapsed)
+    {
+        var remaining = (timeout - elapsed).TotalMilliseconds;
+        if (remaining < 1.0) return 1;
+        return remaining >= int.MaxValue ? int.MaxValue : (int)Math.Ceiling(remaining);
+    }
 
     // Background tasks.
     // Eviction, auto-scaling and idle validation share a single timer. The timer ticks at the smallest
@@ -522,9 +543,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 {
                     // Register into the target shard. If the shard rejects (capacity is clamped, theoretically unreachable), destroy as fallback,
                     // to avoid orphaned entries that are registered but in no free list.
-                    // No wake-up signal: a waiter sees this object only through the re-check (see the invariant on _blockGate).
                     var w = CreateWrappedObject(shard);
                     if (!shard.Add(w)) Destroy(w);
+                    else SignalAvailability();
                     totalPreWarmed++;
                 }
 
@@ -593,10 +614,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             }
             else
             {
-                // No wake-up signal: a waiter sees this object only through the re-check (see the invariant on _blockGate).
                 var w = CreateWrappedObject(shard);
                 if (shard.Add(w))
                 {
+                    SignalAvailability();
                     warmed++;
                     remaining--;
                     skipped = 0;
@@ -1038,10 +1059,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         var coldBoot = TryColdBootAcquire((long)sw.Elapsed.TotalMilliseconds);
                         if (coldBoot is not null) return coldBoot;
 
-                        // Wait indefinitely until an object is obtained. Suspend waiting for the return signal (slice caps the re-check interval),
-                        // waking immediately on signal to retry TryTake; replaces the original SpinOnce busy-wait (100% CPU).
-                        // The Block policy has no timeout; the timeout argument is not used (consistent with the original behavior).
-                        _blockGate.Wait(BlockWaitSliceMs);
+                        // Wait indefinitely until an object is obtained. This is a single SemaphoreSlim wait, so its latency
+                        // is the signalling site's and not a re-check period; it replaces the original SpinOnce busy-wait
+                        // (100% CPU). The Block policy has no timeout, so the timeout argument is not used (consistent with
+                        // the original behaviour) — which also means a missed signal would hang rather than be recovered by
+                        // a re-check. See the invariant on _blockGate for why every site signals.
+                        _blockGate.Wait();
                         continue;
                     }
 
@@ -1062,8 +1085,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                             throw new TimeoutException($"HayatePool [{_name}] timed out acquiring an object after {timeout.TotalSeconds}s.");
                         }
 
-                        // Wait for a return signal; if none arrives within the slice, wake and re-check the timeout and the shard.
-                        _blockGate.Wait(BlockWaitSliceMs);
+                        // Wait for a signal, and for no longer than the timeout still allows: a signal wakes at once, and
+                        // when none arrives the wait itself expires the timeout, so the loop re-checks and throws above.
+                        _blockGate.Wait(RemainingWaitMs(timeout, elapsed));
                         continue;
                     }
 
@@ -1099,8 +1123,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                             return CreateBorrowedOnDemand((long)sw.Elapsed.TotalMilliseconds);
                         }
 
-                        // Wait for a return signal; if none arrives within the slice, wake and re-check the timeout and the shard.
-                        _blockGate.Wait(BlockWaitSliceMs);
+                        // Wait for a signal, and for no longer than the timeout still allows: a signal wakes at once, and
+                        // when none arrives the wait itself expires the timeout, so the loop re-checks and creates above.
+                        _blockGate.Wait(RemainingWaitMs(timeout, elapsed));
                         continue;
                     }
 
@@ -1523,10 +1548,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             HayateLeaseContext.DetachFromFlow();
         }
 
-        try { _blockGate.Release(); }
-        catch (SemaphoreFullException)
-        {
-        }
+        SignalAvailability();
 
         CheckCapacityAlarm();
 
@@ -1970,9 +1992,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             {
                 var shard = _shards[i % _shards.Length];
                 // Register into the target shard; under concurrency Add may still be filled first by another thread and rejected, so destroy as fallback to prevent orphaned registry entries.
-                // No wake-up signal: a waiter sees this object only through the re-check (see the invariant on _blockGate).
                 var w = CreateWrappedObject(shard);
                 if (!shard.Add(w)) Destroy(w);
+                else SignalAvailability();
                 added++;
             }
 
@@ -2760,6 +2782,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             }
         }
 
+        // Reclaimed objects were borrowed, so the tracked count just dropped: a create-on-miss waiter parked at
+        // capacity can grow again. See the invariant on _blockGate (the "slot was freed" half).
+        if (reclaimed > 0) SignalAvailability();
+
         return reclaimed;
     }
 
@@ -2832,9 +2858,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 {
                     var shard = _shards[i % _shards.Length];
                     // Register into the target shard; if Add is rejected, destroy as fallback to prevent orphaned registry entries.
-                    // No wake-up signal: a waiter sees this object only through the re-check (see the invariant on _blockGate).
                     var w = CreateWrappedObject(shard);
                     if (!shard.Add(w)) Destroy(w);
+                    else SignalAvailability();
                 }
 
                 _lastScaleUpTime = Stopwatch.GetTimestamp();

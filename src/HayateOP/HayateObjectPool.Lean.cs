@@ -617,6 +617,18 @@ public partial class HayatePoolBasic<T>
         return AcquireLeanSlow(timeout);
     }
 
+    // The suspended-wait slice used by the lean acquire path when no signal arrives. A signal wakes
+    // immediately; the slice merely caps the re-check interval when none does.
+    //
+    // The general-purpose engine no longer has a slice (B6-1): its synchronous borrow paths wait once,
+    // on the signal, and every site that frees an object or a slot publishes one. Lean cannot follow
+    // yet. TryGrowLean() only succeeds below the ceiling, so a borrower parks exactly when the live
+    // count has reached it, and the drop that would let it grow again can come from a path that
+    // publishes nothing: DestroyLean(), reached when the policy rejects a return or the buffer
+    // overflows, only decrements the live count. The slice is what covers that gap, so it is
+    // load-bearing here and cannot be removed until those paths signal too.
+    private const int BlockWaitSliceMs = 100;
+
     /// <summary>
     /// The lean acquire path once the buffer came back empty: grow up to the ceiling first, and
     /// only then fall back to the configured reject policy. The elapsed-time measurement starts

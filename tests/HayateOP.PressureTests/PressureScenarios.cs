@@ -334,6 +334,10 @@ public class PressureScenarios
     //    the SemaphoreSlim rework already achieved the "far below busy-spin" goal;
     //   - Hitting the strict 5% target requires Block backoff slicing (exponential 100->200->400->800ms backoff when no signal arrives)
     //     plus random jitter to break the in-phase wakeups; logged as an optimization item.
+    // SUPERSEDED (3.0 / B6-1): the periodic 100 ms slice that produced the in-phase wakeups described above is gone.
+    //   The general-purpose engine's synchronous borrow paths now wait once, on the signal, and sleep until the
+    //   timeout when no signal arrives, so there are no periodic wakeups left to fall in phase. The numbers above
+    //   stand as the pre-B6-1 record; restating them needs a fresh measurement, not a re-reading of this comment.
     // This scenario asserts the "busy-spin guard line 80%" (single-core basis; busy-spin would be thousands of percent), and reports the gap to the 5% target.
     // ─────────────────────────────────────────────────────────────
     [Fact(Timeout = 90_000)]
