@@ -1134,7 +1134,12 @@ disables idle eviction by construction) fails the build rather than silently nev
 ### Object lifetime and borrow-side rotation
 
 `MaxLifeTime` is the maximum lifetime of a pooled object from the moment it is created — idle or
-borrowed. Which half of that meaning the pool enforces is a choice:
+borrowed. Which half of that meaning the pool enforces is a choice: the borrowed half is gated by
+`EnableLifetimeRotationOnBorrow`, which is off by default, so the default is the backward-compatible
+idle-side semantics — the eviction run and the manual `Evict` call evaluate this value against **idle**
+objects only, and an object held by the application for longer than this value is never treated as
+expired, which is the behaviour of every release before 2.9. With the switch on, this value also becomes
+a ceiling on what the borrow path may hand out.
 
 ```csharp
 var pool = new HayatePoolBuilder<Connection>()
@@ -1143,19 +1148,19 @@ var pool = new HayatePoolBuilder<Connection>()
     .Build();
 ```
 
-**Off** — the default, and the behaviour of every release before 2.9 — only **idle** objects are ever
-retired for age, by the background eviction run or by `Evict(Expired)`. A connection you borrow and then
-hold for an hour never ages, so a server-side `max_connection_lifetime` or a middleware idle timeout can
-close it without the pool ever learning. That is the case HikariCP's `maxLifetime` and SQLAlchemy's
-`pool_recycle` exist for.
+**Off** (the default) — only **idle** objects are ever retired for age, by the background eviction run or
+by `Evict(Expired)`. A connection you borrow and then hold for an hour never ages, so a server-side
+`max_connection_lifetime` or a middleware idle timeout can close it without the pool ever learning. That
+is the case HikariCP's `maxLifetime` and SQLAlchemy's `pool_recycle` exist for.
 
-**On**, `MaxLifeTime` also becomes a ceiling on what the borrow path may hand out: a borrow that finds an
-object past it destroys that object and hands out a replacement instead. The replacement is created
-through the same capacity-reservation path a create-on-miss uses, so a lifetime event never degrades into
-a rejection, and at most one rotation happens per borrow — the replacement is never re-checked, so a
-`MaxLifeTime` shorter than the time it takes to create an object cannot spin. When the per-borrow budget
-is spent, the aged object is handed out anyway and the event is logged: availability outranks lifetime.
-`AcquireAsync` applies the same rule, and `HayatePoolStats.LifetimeRotatedCount` /
+**On**, a borrow that finds an idle object past it destroys that object and hands out a replacement
+instead. The replacement is created through the same capacity-reservation path a create-on-miss uses, so
+a lifetime event never degrades into a rejection, and at most one rotation happens per borrow — the
+replacement is never re-checked, so a `MaxLifeTime` shorter than the time it takes to create an object
+cannot spin. When the per-borrow budget is spent, the aged object is handed out anyway and the event is
+logged: availability outranks lifetime. An object that is currently borrowed is not touched — the
+rotation happens on the borrow path and never takes an object away from its borrower. `AcquireAsync`
+applies the same rule, and `HayatePoolStats.LifetimeRotatedCount` /
 `HayatePoolSnapshot.LifetimeRotatedCount` count the rotations.
 
 The check is close to free. The borrow path already computes the object's age when
