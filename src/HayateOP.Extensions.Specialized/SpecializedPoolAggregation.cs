@@ -42,6 +42,24 @@ internal static class SpecializedPoolAggregation
             stats.MaxLeaseTimeMs = Math.Max(stats.MaxLeaseTimeMs, t.MaxLeaseTimeMs);
             stats.MinWaitTimeMs = Math.Min(stats.MinWaitTimeMs, t.MinWaitTimeMs);
             stats.MinLeaseTimeMs = Math.Min(stats.MinLeaseTimeMs, t.MinLeaseTimeMs);
+
+            // G-1 operational members. The three ratios need no merge — they are computed from the
+            // counters above, which are already summed. The rest are merged on the reading that keeps the
+            // aggregate honest: the pool's age is its earliest origin, its last activity is the latest of
+            // any tier's, and its peak is the highest any tier reached (a tier's peak is never higher than
+            // the whole pool's, but the base pool alone can be lower than a tier's if the base was idle).
+            stats.MetricsEnabled |= t.MetricsEnabled;
+            stats.PeakActiveObjects = Math.Max(stats.PeakActiveObjects, t.PeakActiveObjects);
+            if (t.StartedAt != default && (stats.StartedAt == default || t.StartedAt < stats.StartedAt))
+            {
+                stats.StartedAt = t.StartedAt;
+            }
+
+            if (t.LastActivityTime.HasValue &&
+                (!stats.LastActivityTime.HasValue || t.LastActivityTime.Value > stats.LastActivityTime.Value))
+            {
+                stats.LastActivityTime = t.LastActivityTime;
+            }
         }
 
         return stats;

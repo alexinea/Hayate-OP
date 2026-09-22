@@ -163,11 +163,94 @@ public class HayatePoolStats
     internal long WaitTimeSum { get; set; }
     internal long LeaseTimeSum { get; set; }
 
+    /// <summary>
+    /// Whether the operational members below are being collected. It mirrors
+    /// <see cref="AllocationTrackingEnabled"/>: the engine writes <see cref="PeakActiveObjects"/>,
+    /// <see cref="StartedAt"/> and <see cref="LastActivityTime"/> only while
+    /// <see cref="HayatePoolOptions.EnableMetrics"/> is on, and the three ratios are derived from
+    /// counters that the same switch gates. When it is <c>false</c> every member below reads 0,
+    /// <c>null</c> or <c>default</c> — the same "the gate is closed" reading the cumulative counters
+    /// already give. The flag exists so that reading cannot be mistaken for a measurement: without it
+    /// <see cref="ReuseEfficiency"/> would report a perfect 1.0 on the default configuration, where
+    /// <see cref="TotalAcquired"/> keeps counting but <see cref="TotalMissed"/> does not.
+    /// </summary>
+    public bool MetricsEnabled { get; set; }
+
+    /// <summary>
+    /// The highest number of objects that were out on loan at the same time, as observed when the
+    /// statistics were read. <see cref="IHayateObjectPool.GetStats"/> and <c>TakeSnapshot</c> are the
+    /// only places the engine derives the borrowed count: the shard deliberately keeps no paired borrow
+    /// counter (see <c>HayateObjectPool.Shard.cs</c> — a rejected return destroys the object without going
+    /// through the shard's add path, so an increment and a decrement cannot be paired one to one), and
+    /// walking the shards on the borrow path would put a per-shard lock and a registry probe on the path
+    /// <see cref="HayatePoolOptions.EnableMetrics"/> exists to keep cheap. The value is therefore sampled
+    /// at read time: it never decreases, but a burst that starts and ends between two reads is only seen
+    /// if it is still in flight when one of them runs. 0 unless <see cref="MetricsEnabled"/>.
+    /// </summary>
+    public int PeakActiveObjects { get; set; }
+
+    /// <summary>
+    /// When the pool was constructed, in UTC. <see cref="DateTimeOffset.MinValue"/> unless
+    /// <see cref="MetricsEnabled"/> — capturing it is what makes <see cref="UptimeSeconds"/> and
+    /// <see cref="AcquiresPerSecond"/> meaningful.
+    /// </summary>
+    public DateTimeOffset StartedAt { get; set; }
+
+    /// <summary>
+    /// Seconds elapsed since <see cref="StartedAt"/>, or 0 when the pool is not tracking. Computed on
+    /// read rather than stored, so a caller holding the object sees the pool's real age; the subtraction
+    /// is clamped at 0 so a wall-clock adjustment backwards cannot report a negative age.
+    /// </summary>
+    public double UptimeSeconds
+        => StartedAt == default ? 0 : Math.Max(0, (DateTimeOffset.UtcNow - StartedAt).TotalSeconds);
+
+    /// <summary>
+    /// When a borrow or a return last completed on this pool, in UTC, or <c>null</c> when nothing has
+    /// happened yet or the pool is not tracking. Null rather than a sentinel timestamp, so "never active"
+    /// cannot be read as "active in year 1".
+    /// </summary>
+    public DateTimeOffset? LastActivityTime { get; set; }
+
+    /// <summary>
+    /// The share of borrows that were served from the pool instead of having to create an object:
+    /// <c>(TotalAcquired - TotalMissed) / TotalAcquired</c>. Clamped into [0, 1] because
+    /// <see cref="TotalMissed"/> also counts a borrow the reject policy refused, and such a borrow never
+    /// becomes a <see cref="TotalAcquired"/> — the difference can therefore go negative on a pool that
+    /// rejects under load. 0 when metrics are off or nothing has been borrowed.
+    /// </summary>
+    public double ReuseEfficiency
+        => MetricsEnabled && TotalAcquired > 0
+            ? Clamp01((double)(TotalAcquired - TotalMissed) / TotalAcquired)
+            : 0;
+
+    /// <summary>
+    /// Objects created per borrow: <c>TotalCreated / TotalAcquired</c>, i.e. how much the pool is still
+    /// growing. Counts every creation, including pre-warm and auto-scaling, not only the ones a borrow
+    /// asked for (those are <see cref="TotalMissed"/>). 0 when metrics are off or nothing has been
+    /// borrowed.
+    /// </summary>
+    public double CreatesPerAcquire
+        => MetricsEnabled && TotalAcquired > 0 ? (double)TotalCreated / TotalAcquired : 0;
+
+    /// <summary>
+    /// Borrows per second over <see cref="UptimeSeconds"/>. 0 when metrics are off, nothing has been
+    /// borrowed, or the pool is younger than the wall clock's resolution.
+    /// </summary>
+    public double AcquiresPerSecond
+        => MetricsEnabled && UptimeSeconds > 0 ? TotalAcquired / UptimeSeconds : 0;
+
+    /// <summary>Clamps a ratio into [0, 1]; the counters it is derived from are cumulative and can disagree.</summary>
+    private static double Clamp01(double value) => value < 0 ? 0 : value > 1 ? 1 : value;
+
     public override string ToString()
     {
         // Handle the sentinel value of double.MaxValue used for "minimum" before any sample.
         var actualMinWaitTime = MinWaitTimeMs == double.MaxValue ? 0 : MinWaitTimeMs;
         var actualMinLeaseTime = MinLeaseTimeMs == double.MaxValue ? 0 : MinLeaseTimeMs;
+
+        // Same idea for the operational members: an unset timestamp prints as "-" rather than as year 1.
+        var actualStartedAt = StartedAt == default ? "-" : StartedAt.ToString("O");
+        var actualLastActivity = LastActivityTime?.ToString("O") ?? "-";
 
         // Build a structured, category-grouped string for readability.
         var statsString = $@"
@@ -200,6 +283,15 @@ public class HayatePoolStats
   MaxLeaseTime: {MaxLeaseTimeMs:F2}
   MinLeaseTime: {actualMinLeaseTime:F2}
   LeaseTimeCount: {LeaseTimeCount}
+[Operational (gated by EnableMetrics)]
+  MetricsEnabled: {MetricsEnabled}
+  PeakActiveObjects: {PeakActiveObjects}
+  StartedAt: {actualStartedAt}
+  UptimeSeconds: {UptimeSeconds:F1}
+  LastActivityTime: {actualLastActivity}
+  ReuseEfficiency: {ReuseEfficiency:P1}
+  CreatesPerAcquire: {CreatesPerAcquire:F4}
+  AcquiresPerSecond: {AcquiresPerSecond:F2}
 ======================================";
 
         // Normalize newlines to the platform-native sequence (works on both Windows and Linux).

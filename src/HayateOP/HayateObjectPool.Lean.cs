@@ -835,7 +835,10 @@ public partial class HayatePoolBasic<T>
     /// <summary>
     /// Lean-mode statistics. Instantaneous state is measured from the buffer; the cumulative
     /// counters stay at 0 because maintaining them would require an atomic write on every
-    /// borrow and return — precisely the overhead the fast path exists to remove.
+    /// borrow and return — precisely the overhead the fast path exists to remove. The G-1
+    /// operational members are listed explicitly at their zero values for the same reason: the
+    /// lean profile closes the master diagnostic switch, which closes metrics with it, so nothing
+    /// here is ever maintained and the stats object must say so rather than leave a blank.
     /// </summary>
     private HayatePoolStats GetLeanStats()
     {
@@ -855,7 +858,11 @@ public partial class HayatePoolBasic<T>
             LeakSuspectedCount = 0,
             AllocationTrackingEnabled = false,
             MinWaitTimeMs = 0,
-            MinLeaseTimeMs = 0
+            MinLeaseTimeMs = 0,
+            MetricsEnabled = false,
+            PeakActiveObjects = 0,
+            StartedAt = default,
+            LastActivityTime = null
         };
     }
 

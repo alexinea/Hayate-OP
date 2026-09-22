@@ -164,6 +164,16 @@ public class SpecializedPoolConvenienceApiTests
             "GetStats should cover builders parked in capacity tiers.");
         Assert.True(pool.TakeSnapshot().PooledCount >= 1,
             "TakeSnapshot should cover builders parked in capacity tiers.");
+
+        // G-1: the aggregation sums the counters and merges the operational members, so it must not
+        // invent a measurement none of the parts took. These builders run with the metrics switch off,
+        // and the aggregate has to say so rather than report a fabricated peak or age.
+        var stats = pool.GetStats();
+        Assert.False(stats.MetricsEnabled);
+        Assert.Equal(0, stats.PeakActiveObjects);
+        Assert.Equal(default(DateTimeOffset), stats.StartedAt);
+        Assert.Null(stats.LastActivityTime);
+        Assert.Equal(0, stats.ReuseEfficiency);
     }
 
     // ── StringBuilderPool: seeded borrows ───────────────────────────────

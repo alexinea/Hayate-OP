@@ -32,6 +32,11 @@ its own column because it sits above every row.
 | `LeakDetectedCount` | `TakeSnapshot()` leak scan | `EnableLeakDetection` | none — follows its own switch |
 | `LeakSuspectedCount` | `TakeSnapshot()` leak scan (leak detection off) | none — it is the "leak detection is off" branch | none |
 | `AcquireAllocatedBytes` / `ReleaseAllocatedBytes` / `*AllocationSamples` | borrow and return | `EnableAllocationTracking` | via `EnableAllocationTracking` |
+| `PeakActiveObjects` (G-1) | `GetStats()` and `TakeSnapshot()`, from the borrowed count those two already derive | `EnableMetrics` | via `EnableMetrics` |
+| `StartedAt` (G-1) | constructor | `EnableMetrics` | via `EnableMetrics` |
+| `LastActivityTime` (G-1) | borrow hit, create-on-demand hand-out, async borrow hit, and every return branch | `EnableMetrics` — `TouchActivity()` carries its own check | via `EnableMetrics` |
+| `MetricsEnabled` (G-1) | `GetStats()` / `GetLeanStats()` | none — it *is* the `EnableMetrics` value, published so the readings below can be told apart from measurements | via `EnableMetrics` |
+| `ReuseEfficiency` / `CreatesPerAcquire` / `AcquiresPerSecond` (G-1) | derived on read from the counters above | `EnableMetrics` | via `EnableMetrics` |
 
 Two consequences worth stating plainly:
 
@@ -43,6 +48,12 @@ Two consequences worth stating plainly:
   `TotalReleased` / `TotalMissed` (and, for Prometheus, `TotalAcquired`) straight from the statistics
   object, so a host that runs with metrics off sees three of those four series pinned at 0 while the
   fourth keeps moving.
+* **The G-1 operational members answer that ambiguity with a flag instead of a footnote.** They are all
+  metrics-gated, so with the switch off they read 0, `null` or `default` exactly as an idle pool would.
+  `MetricsEnabled` travels with them so a reader can tell the two apart — and it is not a courtesy but a
+  requirement, because `ReuseEfficiency` is derived from one gated counter (`TotalMissed`) and one
+  ungated one (`TotalAcquired`): without the flag it would report a perfect `1.0` on the default
+  configuration.
 
 ## 2. The one counter that stays unconditional, and why
 
@@ -128,11 +139,28 @@ It may be left unconditional only if it is a **contract** that callers and tests
 off, and it must then be listed in the table in §1 and asserted in `MetricsGatingTests`, so the
 exception cannot accumulate silently.
 
+**A derived member follows the gate of the counters it divides.** The G-1 ratios are the first case of
+this and they show why it is not automatic: a ratio can mix a gated counter with an ungated one, and
+then the gate is no longer implied by its inputs. The rule that follows is that such a member must
+either carry the gate itself or publish the flag it depends on — the G-1 members do both, because
+`ReuseEfficiency` needs the gate to be correct and a reader needs the flag to tell a closed gate from
+an idle pool.
+
+The same reasoning applies to **state that is not a counter**: `StartedAt`, `LastActivityTime` and
+`PeakActiveObjects` are timestamps and a high-water mark, and each had to be gated at its own write
+site rather than at a counter's. A gated member with no write site at all — the lean profile's
+statistics — must be listed explicitly at its "not measured" reading, or the value it falls back to
+becomes the answer.
+
 `MetricsGatingTests` pins the whole arrangement: with metrics off `TotalAcquired` advances while
 `TotalCreated`, `TotalReleased` and `TotalMissed` stay at 0; with metrics on all four advance; with
 diagnostics off all four stay at 0 and no per-operation trace reaches the logger; and the
 leak-detection and allocation-tracking counters follow their own gates rather than the metrics
-switch.
+switch. It also pins the operational members on both sides of the switch, including a second read
+after the returns — the return path is where the activity stamp is written on every branch, so a
+read taken only after the borrows cannot hold that gate to account.
+`PoolStatsOperationalMetricsTests` covers the rest of G-1: the derivations on a hand-built statistics
+object, the zero-denominator rule, and the peak's high-water behaviour and its two sampling sites.
 
 ## 5. Corrections applied
 

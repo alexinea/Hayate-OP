@@ -66,7 +66,7 @@ Two caveats that matter when reading any absolute number here:
 | `EnableLeakDetection` | Two predicted branches when `LeakTraceCaptureMode.Off` | The scan itself runs in `TakeSnapshot()`, not here (§ diagnostic paths) |
 | `LeakTraceCaptureMode` | `Off` nothing; `Sampled` one `Interlocked.Increment` plus a modulo every N borrows; `EveryAcquire` **one call-stack capture per borrow** | The dominant cost of the whole leak-detection surface: tens of microseconds and 10-40 KB per borrow for `EveryAcquire` |
 | `EnableDiagnostics` (**master**) | When off, removes the `TotalAcquired` atomic add, the whole `EnableMetrics` block and the per-borrow debug trace — one branch otherwise | The only switch that stops `TotalAcquired`, which `EnableMetrics` deliberately leaves running. Implied by `EnableLean` |
-| `EnableMetrics` | A min/max CAS-loop update, an `IHayateMetrics.RecordObjectAcquired` call and a debug log entry | Shares the already-running stopwatch for the wait time. Requires `EnableDiagnostics` |
+| `EnableMetrics` | A min/max CAS-loop update, an `Interlocked.Exchange` stamping `LastActivityTime`, an `IHayateMetrics.RecordObjectAcquired` call and a debug log entry | Shares the already-running stopwatch for the wait time. Requires `EnableDiagnostics` |
 | `EnableAllocationTracking` | Two `GC.GetAllocatedBytesForCurrentThread()` calls (one before, one after) plus a counter pair | Unavailable on `net48` / `netstandard2.0`, where the counters stay 0. Requires `EnableDiagnostics` |
 | `WarnAtRatio` / `CriticalAtRatio` | When either is non-zero, `CheckCapacityAlarm` runs on every borrow **and** every return and walks every shard to compute the utilization ratio | The walk takes one `SpinLock` per shard (`_shards.Sum(s => s.Count)`), so this is the most expensive optional switch per operation. At the default 0 it is one branch |
 | `EnableCircuitBreaker` | One predicted branch when off (and in lean mode, which forces it off); one volatile read when on and the pool is available; while the breaker is open the borrow throws before touching any shard, wait gate or policy | The probe side is a timer that exists only while the pool is unavailable — see the background workers table |
@@ -89,7 +89,7 @@ it stores the pooled value directly instead of a wrapper.
 | `EnableLean` | Replaces the general engine entirely | No registry probe, no free-list lock |
 | `ValidateOnReturn` | One `Validate` call per return, plus `Destroy` on a failed verdict | Also requires `EnableValidation` |
 | `EnableDiagnostics` (**master**) | When off, removes the whole `EnableMetrics` block and the per-return debug trace — one branch otherwise | Implied by `EnableLean` |
-| `EnableMetrics` | A min/max CAS-loop update for the lease time, the `TotalReleased` counter and an `IHayateMetrics.RecordObjectReleased` call | Requires `EnableDiagnostics` |
+| `EnableMetrics` | A min/max CAS-loop update for the lease time, the `TotalReleased` counter, an `Interlocked.Exchange` stamping `LastActivityTime` and an `IHayateMetrics.RecordObjectReleased` call | Requires `EnableDiagnostics`. The stamp sits at the top of `CompleteReturn`, so it is written on every return branch — parked, dropped by the soft ceiling, rejected by the policy — and on the failure path, because a return that was attempted is still activity |
 | `EnableAllocationTracking` | Two allocation queries plus a counter pair | Requires `EnableDiagnostics` |
 | `WarnAtRatio` / `CriticalAtRatio` | Same shard-walking utilisation probe as on the borrow path | — |
 | `EnableAutoScaling` | A watermark check after a rejected return | Only when `MinPoolSize > 0` and the pool fell below it |
@@ -116,9 +116,23 @@ A pool with all of them disabled creates **no timer at all**.
 
 | Member | Cost |
 | :--- | :--- |
-| `TakeSnapshot()` | O(n) walk of every registered object; additionally walks the leak-detection branch (threshold check and `LeakDetectedCount` increment, plus trace formatting) when `EnableLeakDetection` is on |
-| `GetStats()` | O(shards) for the counts; reads the cumulative and timing fields atomically |
+| `TakeSnapshot()` | O(n) walk of every registered object; additionally walks the leak-detection branch (threshold check and `LeakDetectedCount` increment, plus trace formatting) when `EnableLeakDetection` is on; when metrics are on it also folds the borrowed count it already derives into `PeakActiveObjects` |
+| `GetStats()` | O(shards) for the counts; reads the cumulative and timing fields atomically; when metrics are on it also folds the borrowed count it already derives into `PeakActiveObjects` |
 | `Evict(reason)` | Walks the idle list of every shard; unavailable on the lean path, which keeps no per-object timestamps |
+
+`PeakActiveObjects` (G-1) is the second member in the diagnostic-path group whose cost is a
+consequence of a design choice rather than of a switch, and the choice is the same one the
+capacity alarm made in the other direction. The engine keeps **no paired borrow counter**: the
+shard's `TryTake` physically unlinks the object before handing it out, so an "objects currently
+out on loan" count does not exist anywhere and both `GetStats()` and `TakeSnapshot()` derive it as
+`TrackedObjectCount - Σ shard.Count` — a walk that takes one `SpinLock` per shard. Sampling the
+peak at those two read sites therefore costs one extra compare on a path that has already paid
+that walk, whereas counting it on the borrow path would require the walk *per borrow* — precisely
+the cost that made the capacity alarm the most expensive optional switch in the borrow table.
+The trade-off is stated rather than hidden: the value is a high-water mark over the moments the
+pool was read, so a burst that starts and ends between two reads is recorded only if it is still
+in flight when one of them runs. A caller who needs the peak of a burst must read inside it, or
+raise the alarm ratios and let `CheckCapacityAlarm` do the per-operation walk instead.
 
 ## 3. Trimming by scenario
 
@@ -150,6 +164,16 @@ work short of the lean path itself. Switching it off normalizes `EnableMetrics` 
 each other but both imply the master switch. The audit — including why `TotalAcquired` is
 deliberately left unconditional under `EnableMetrics`, and what the master switch does and
 does not touch — is in [`docs/metrics-gating.md`](metrics-gating.md).
+
+The G-1 operational members (reuse efficiency, creation rate, throughput, peak concurrency,
+uptime, last activity) are on the `EnableMetrics` side of that split, and they are what makes
+the switch's cost visible in both directions: with metrics off, the borrow and return paths lose
+the activity stamp along with the counter writes, and the statistics object reports every one of
+them at its "not measured" reading together with a `MetricsEnabled` flag that says so. Two of the
+six are not counters at all — `StartedAt` is stamped once in the constructor and
+`PeakActiveObjects` is sampled on the read paths described above — so trimming metrics removes
+work from the paths *and* removes the readings, rather than leaving a caller to infer the state
+from a zero.
 
 ## See also
 

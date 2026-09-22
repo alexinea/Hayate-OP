@@ -63,6 +63,15 @@ namespace DotNetCore.HayateOP.Tests
                 Assert.Equal(0, stats.TotalMissed);
                 Assert.Equal(0, stats.WaitTimeCount);
                 Assert.Equal(0, stats.LeaseTimeCount);
+
+                // G-1: the operational members follow the same switch. ReuseEfficiency would read a perfect
+                // 1.0 here if it were derived from the counters alone, which is why the gate is part of the
+                // reading rather than something the caller is expected to remember.
+                Assert.False(stats.MetricsEnabled);
+                Assert.Equal(0, stats.PeakActiveObjects);
+                Assert.Equal(default(DateTimeOffset), stats.StartedAt);
+                Assert.Null(stats.LastActivityTime);
+                Assert.Equal(0, stats.ReuseEfficiency);
             }
         }
 
@@ -91,6 +100,11 @@ namespace DotNetCore.HayateOP.Tests
                 Assert.Equal(0, stats.TotalMissed);
                 Assert.Equal(3, stats.WaitTimeCount);
                 Assert.Equal(3, stats.LeaseTimeCount);
+
+                // G-1: the operational members are live under the same switch.
+                Assert.True(stats.MetricsEnabled);
+                Assert.NotEqual(default(DateTimeOffset), stats.StartedAt);
+                Assert.NotNull(stats.LastActivityTime);
             }
         }
 
@@ -228,6 +242,13 @@ namespace DotNetCore.HayateOP.Tests
                 Assert.False(stats.AllocationTrackingEnabled);
                 Assert.Equal(0, stats.AcquireAllocationSamples);
                 Assert.Equal(0, stats.ReleaseAllocationSamples);
+
+                // G-1: the master switch closes the operational members with everything else, and here the
+                // gate really is doing work -- three objects were borrowed and returned through this read.
+                Assert.False(stats.MetricsEnabled);
+                Assert.Equal(0, stats.PeakActiveObjects);
+                Assert.Equal(default(DateTimeOffset), stats.StartedAt);
+                Assert.Null(stats.LastActivityTime);
 
                 // The pool still works — only its bookkeeping is gone. Both of these are read from the live
                 // shard structures rather than from a counter, which is exactly why they keep moving.

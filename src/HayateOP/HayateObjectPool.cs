@@ -253,6 +253,16 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private long _acquireAllocationSamples;
     private long _releaseAllocationSamples;
 
+    // G-1 operational metrics. All three are maintained only while metrics are on, so a pool with the
+    // switch off carries neither a write nor a branch for them.
+    // The peak is not counted on the borrow path: the borrowed count is derived where it is already
+    // computed (GetStats / TakeSnapshot), which keeps a per-shard lock and a registry probe off the
+    // borrow path — the cost the capacity alarm is documented to pay and that this switch must not
+    // inherit. 0 UTC ticks mean "never captured" / "no activity yet".
+    private int _peakActiveObjects;
+    private long _startedAtUtcTicks;
+    private long _lastActivityUtcTicks;
+
     // Pool-level availability circuit breaker (off by default → constant branch, JIT-eliminable).
     // The enable switch and the failure threshold are snapshotted at construction like every other feature
     // switch, so ReloadConfig cannot turn the breaker on or off on a live pool. While the breaker is open,
@@ -339,6 +349,14 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _enableLifetimeRotationOnBorrow = _options.EnableLifetimeRotationOnBorrow;
         _enableDiagnostics = _options.EnableDiagnostics;
         _enableMetrics = _options.EnableMetrics;
+
+        // G-1: the operational metrics' time origin. Captured only while metrics are on, so a pool with
+        // the switch off reports no start time, no uptime and no throughput rather than an age measured
+        // from a moment it never recorded.
+        if (_enableMetrics)
+        {
+            _startedAtUtcTicks = DateTime.UtcNow.Ticks;
+        }
 
         // Derived tick bounds for the borrow path (see the field declarations). Recomputed here and by
         // ReloadConfig, never on the hot path.
@@ -958,6 +976,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         // Record wait-time statistics
                         var waitTime = (long)sw.Elapsed.TotalMilliseconds;
                         UpdateWaitTimeStats(waitTime);
+                        // G-1: this borrow is the pool's latest activity.
+                        TouchActivity();
                         // Covered by the _enableMetrics gate (borrow-path leak-trace point)
                         if (_enableMetrics)
                         {
@@ -1174,6 +1194,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     w.LeaseCount++;
 
                     if (_enableDiagnostics) Interlocked.Increment(ref _totalAcquired);
+
+                    // G-1: the asynchronous borrow loop has no metrics block of its own (it records no
+                    // wait time), so the activity stamp carries its own gate.
+                    TouchActivity();
 
                     // Capacity-alarm probe (returns immediately internally when disabled)
                     CheckCapacityAlarm();
@@ -1400,6 +1424,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     private void CompleteReturn(HayateObject<T> w, T item, bool accepted)
     {
+        // G-1: stamped for every branch below — a return that is parked, dropped by the soft ceiling or
+        // destroyed by a rejected verdict is equally "the pool was active just now".
+        TouchActivity();
+
         w.LastReleasedAt = Stopwatch.GetTimestamp();
         w.LeaseTimeMs = (long)((w.LastReleasedAt - w.LastBorrowedAt) * 1000.0 / Stopwatch.Frequency);
 
@@ -1487,6 +1515,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private void HandleReturnFailure(HayateObject<T> w, T item, Exception ex)
     {
         _logger.LogError(ex, "Error during object return validation. Disposing. Type: {Type}", typeof(T).Name);
+        // G-1: a return that threw is still a return attempt, so it counts as activity.
+        TouchActivity();
         Destroy(w);
 
         if (_enableMetrics)
@@ -2026,6 +2056,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         if (_enableMetrics)
         {
             UpdateWaitTimeStats(waitTimeMs);
+            // G-1: a create-on-miss / cold-boot hand-out is activity too (shared by the sync and async paths).
+            TouchActivity();
             _metrics.RecordObjectAcquired(_name, w.Value, waitTimeMs);
         }
     }
@@ -2282,6 +2314,34 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         {
             _logger.LogError(ex, "Error during object destruction. Type: {Type}", typeof(T).Name);
         }
+    }
+
+    /// <summary>
+    /// G-1: records the highest number of concurrently borrowed objects seen so far. Called only from the
+    /// two places that already derive the borrowed count (<see cref="GetStats"/> and
+    /// <see cref="TakeSnapshot"/>) — see the field declaration for why it is not counted on the borrow
+    /// path. A high-water mark: a read can raise it, never lower it.
+    /// </summary>
+    private void UpdatePeakActiveObjects(int borrowed)
+    {
+        var observed = Volatile.Read(ref _peakActiveObjects);
+        while (borrowed > observed)
+        {
+            var previous = Interlocked.CompareExchange(ref _peakActiveObjects, borrowed, observed);
+            if (previous == observed) return;
+            observed = previous;
+        }
+    }
+
+    /// <summary>
+    /// G-1: stamps "something happened on this pool just now" for
+    /// <see cref="HayatePoolStats.LastActivityTime"/>. Maintained only while metrics are on, so a pool with
+    /// the switch off pays one predictable branch (JIT-inlined and folded away for a constant false).
+    /// </summary>
+    private void TouchActivity()
+    {
+        if (!_enableMetrics) return;
+        Interlocked.Exchange(ref _lastActivityUtcTicks, DateTime.UtcNow.Ticks);
     }
 
     private void UpdateWaitTimeStats(long waitTimeMs)
@@ -2868,6 +2928,15 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         long leaseMax = Volatile.Read(ref _leaseTimeMaxMs);
         long leaseMin = Volatile.Read(ref _leaseTimeMinMs);
 
+        // G-1: the borrowed count is derived here already (the same "live objects - idle objects" basis
+        // TakeSnapshot and the capacity alarm use), so recording the peak costs nothing beyond one branch.
+        // Gated by the metrics switch, which is also what makes the operational members meaningful.
+        if (_enableMetrics)
+        {
+            var active = totalObjects - totalIdle;
+            UpdatePeakActiveObjects(active < 0 ? 0 : active);
+        }
+
         return new HayatePoolStats
         {
             PooledCount = _shards.Sum(s => s.Count),
@@ -2894,7 +2963,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             MaxWaitTimeMs = waitMax,
             MaxLeaseTimeMs = leaseMax,
             MinWaitTimeMs = waitMin == long.MaxValue ? 0 : waitMin,
-            MinLeaseTimeMs = leaseMin == long.MaxValue ? 0 : leaseMin
+            MinLeaseTimeMs = leaseMin == long.MaxValue ? 0 : leaseMin,
+            MetricsEnabled = _enableMetrics,
+            PeakActiveObjects = Volatile.Read(ref _peakActiveObjects),
+            StartedAt = _startedAtUtcTicks == 0 ? default : new DateTimeOffset(_startedAtUtcTicks, TimeSpan.Zero),
+            LastActivityTime = _lastActivityUtcTicks == 0 ? null : new DateTimeOffset(_lastActivityUtcTicks, TimeSpan.Zero)
         };
     }
 
@@ -2973,6 +3046,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         // the extremely short transient of an eviction "claimed but not yet destroyed" is counted, but it is bounded by Destroy's fast execution and negligible.
         var borrowedCount = TrackedObjectCount - pooledCount;
         if (borrowedCount < 0) borrowedCount = 0;
+
+        // G-1: the same derived count, so the peak is recorded here too — a snapshot read is as good a
+        // sampling point as a GetStats read.
+        if (_enableMetrics) UpdatePeakActiveObjects(borrowedCount);
 
         return new HayatePoolSnapshot
         {

@@ -170,6 +170,51 @@ Breaking changes are described in full — with migration guidance — in
   run on net48 in CI as well — building an asset is not proof that it loads, and what a .NET Framework
   consumer actually hits is binding redirects and mixed assembly versions.
 
+- **Ratio-class operational metrics on `HayatePoolStats`** (G-1; additive, one behaviour change for
+  existing readers): the statistics object could describe how much work a pool had done but not how
+  well it was doing it. It gains six members — `ReuseEfficiency` (the share of borrows served from the
+  pool rather than by a creation), `CreatesPerAcquire`, `AcquiresPerSecond`, `PeakActiveObjects`,
+  `StartedAt` / `UptimeSeconds` and `LastActivityTime` — plus `MetricsEnabled`. These are the
+  ratio-class counterparts of the four average-class members that were already there
+  (`AverageWaitTimeMs`, `AverageLeaseTimeMs`, `AverageAcquireAllocatedBytes`,
+  `AverageReleaseAllocatedBytes`), which are unchanged, as are all twenty-eight pre-existing fields:
+  the new members are appended to the class, so no existing property changes type or meaning. The one
+  place an existing reader does notice the addition is `ToString()`, whose rendering gains an
+  `[Operational (gated by EnableMetrics)]` section — and an unset timestamp there prints as `-`
+  rather than as year 1, the same treatment `MinWaitTimeMs` has always had.
+  They are derived on read, so a caller holding a stats object sees the pool's current state rather
+  than the state at the moment of the read; every denominator is guarded, so a pool that has not been
+  borrowed from reports `0` rather than `NaN` or `Infinity`, and `ReuseEfficiency` is clamped into
+  `[0, 1]` because `TotalMissed` also counts a borrow the reject policy refused — a borrow that never
+  becomes a `TotalAcquired`, so the difference can go negative on a pool that rejects under load.
+  **The behaviour change:** these members are maintained only while `EnableMetrics` is on, so an
+  existing reader that runs with the default configuration (metrics off) now sees them at `0`,
+  `null` or `default` rather than at a value. That is deliberate and it is the reason `MetricsEnabled`
+  exists: `TotalAcquired` is written unconditionally while `TotalMissed` is not, so an ungated
+  `ReuseEfficiency` would report a **perfect 1.0** on a pool that has never been measured — the one
+  reading that looks like a measurement and is not. The flag lets a reader tell "the gate is closed"
+  from "the pool is idle", which a bare zero cannot; a caller who wants the numbers turns
+  `WithEnableMetrics(true)` on. Two of the six are tracked rather than derived, and both are gated at
+  their own write site: `StartedAt` is stamped once in the constructor, and `LastActivityTime` on
+  every borrow and every return branch (including a return the soft ceiling dropped or the policy
+  rejected, because an attempted return is still activity). `PeakActiveObjects` is a high-water mark
+  **sampled by `GetStats()` and `TakeSnapshot()`** rather than counted on the borrow path: the engine
+  keeps no paired borrow counter — the shard's `TryTake` physically unlinks the object before handing
+  it out, so the borrowed count is derived as `TrackedObjectCount - Σ shard.Count` at both read sites
+  already — and counting it per borrow would put that walk, with one `SpinLock` per shard, on the
+  borrow path that `EnableMetrics` exists to keep cheap. The trade-off is stated rather than hidden: a
+  burst that starts and ends between two reads is recorded only if it is still in flight when one of
+  them runs. The cost when the switch is off is one predicted branch per borrow and per return, on a
+  `readonly` field the JIT folds away for a constant `false`; the lean profile, which closes the
+  master diagnostic switch, reports every one of the new members at its "not measured" reading
+  explicitly rather than leaving it to a default. `HayateUnboundedPool<T>` has no switches, so its
+  ratios are live from the start and it reports `MetricsEnabled = true`; it does not track borrowed
+  objects at all, so its peak stays 0 rather than inventing a number from a count the model does not
+  keep. The `Specialized` aggregation sums the counters and merges the operational members — earliest
+  origin, latest activity, highest peak — so a tiered pool's statistics stay a view of the whole pool.
+  The audit of what the switch covers is in [`docs/metrics-gating.md`](docs/metrics-gating.md); where
+  the cost lands is in [`docs/hot-path-costs.md`](docs/hot-path-costs.md).
+
 ### Changed
 
 - **An open circuit breaker is no longer reported as a healthy pool** (B4; behaviour change, not

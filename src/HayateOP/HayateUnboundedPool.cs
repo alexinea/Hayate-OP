@@ -75,6 +75,12 @@ public class HayateUnboundedPool<T> : IHayateObjectPool<T>
     private long _totalReleased;
     private long _totalDestroyed;
 
+    // G-1 operational metrics. This model has no feature switches — every counter here is written on
+    // every operation — so the two timestamps are written unconditionally too, and the ratios derived
+    // from those counters are meaningful without asking for a switch first.
+    private readonly DateTimeOffset _startedAt;
+    private long _lastActivityUtcTicks;
+
     /// <summary>
     /// Builds an unbounded pool that keeps at most <see cref="DefaultMaxIdle"/> idle objects and
     /// creates new ones with their parameterless constructor.
@@ -126,6 +132,7 @@ public class HayateUnboundedPool<T> : IHayateObjectPool<T>
         _name = typeof(T).Name;
         _resetOnReturn = typeof(IHayateResettable).IsAssignableFrom(typeof(T));
         _validateOnReturn = typeof(IHayateValidatable).IsAssignableFrom(typeof(T));
+        _startedAt = DateTimeOffset.UtcNow;
     }
 
     /// <summary>
@@ -165,6 +172,7 @@ public class HayateUnboundedPool<T> : IHayateObjectPool<T>
         }
 
         Interlocked.Increment(ref _totalAcquired);
+        Interlocked.Exchange(ref _lastActivityUtcTicks, DateTime.UtcNow.Ticks);
         return item;
     }
 
@@ -216,6 +224,7 @@ public class HayateUnboundedPool<T> : IHayateObjectPool<T>
         // The return action itself is counted first: parking and destroying are both outcomes of
         // it, so TotalReleased + parked stays comparable with TotalAcquired.
         Interlocked.Increment(ref _totalReleased);
+        Interlocked.Exchange(ref _lastActivityUtcTicks, DateTime.UtcNow.Ticks);
 
         if (_validateOnReturn && item is IHayateValidatable validatable && !validatable.IsValid())
         {
@@ -262,6 +271,16 @@ public class HayateUnboundedPool<T> : IHayateObjectPool<T>
             TotalAcquired = Interlocked.Read(ref _totalAcquired),
             TotalReleased = Interlocked.Read(ref _totalReleased),
             TotalDestroyed = Interlocked.Read(ref _totalDestroyed),
+            // This model has no switches to gate the counters behind, so the ratio-class members are
+            // live. PeakActiveObjects stays 0 because the ownership model tracks no borrowed object at
+            // all — the same reason TakeSnapshot reports BorrowedCount as 0 — and a peak derived from a
+            // count the pool does not keep would be a fabricated number.
+            MetricsEnabled = true,
+            PeakActiveObjects = 0,
+            StartedAt = _startedAt,
+            LastActivityTime = _lastActivityUtcTicks == 0
+                ? null
+                : new DateTimeOffset(Interlocked.Read(ref _lastActivityUtcTicks), TimeSpan.Zero)
         };
     }
 

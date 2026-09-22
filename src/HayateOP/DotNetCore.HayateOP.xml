@@ -1199,6 +1199,21 @@
             caller opted into even when the policy did not.
             </summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.UpdatePeakActiveObjects(System.Int32)">
+            <summary>
+            G-1: records the highest number of concurrently borrowed objects seen so far. Called only from the
+            two places that already derive the borrowed count (<see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.GetStats"/> and
+            <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.TakeSnapshot"/>) — see the field declaration for why it is not counted on the borrow
+            path. A high-water mark: a read can raise it, never lower it.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TouchActivity">
+            <summary>
+            G-1: stamps "something happened on this pool just now" for
+            <see cref="P:DotNetCore.HayateOP.HayatePoolStats.LastActivityTime"/>. Maintained only while metrics are on, so a pool with
+            the switch off pays one predictable branch (JIT-inlined and folded away for a constant false).
+            </summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.SelectStartShardIndex">
             <summary>
             Computes the starting shard index for this borrow.
@@ -1546,7 +1561,10 @@
             <summary>
             Lean-mode statistics. Instantaneous state is measured from the buffer; the cumulative
             counters stay at 0 because maintaining them would require an atomic write on every
-            borrow and return — precisely the overhead the fast path exists to remove.
+            borrow and return — precisely the overhead the fast path exists to remove. The G-1
+            operational members are listed explicitly at their zero values for the same reason: the
+            lean profile closes the master diagnostic switch, which closes metrics with it, so nothing
+            here is ever maintained and the stats object must say so rather than leave a blank.
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.GetLeanSnapshot">
@@ -4983,6 +5001,79 @@
             <summary>
             The number of lease-time records.
             </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.MetricsEnabled">
+            <summary>
+            Whether the operational members below are being collected. It mirrors
+            <see cref="P:DotNetCore.HayateOP.HayatePoolStats.AllocationTrackingEnabled"/>: the engine writes <see cref="P:DotNetCore.HayateOP.HayatePoolStats.PeakActiveObjects"/>,
+            <see cref="P:DotNetCore.HayateOP.HayatePoolStats.StartedAt"/> and <see cref="P:DotNetCore.HayateOP.HayatePoolStats.LastActivityTime"/> only while
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableMetrics"/> is on, and the three ratios are derived from
+            counters that the same switch gates. When it is <c>false</c> every member below reads 0,
+            <c>null</c> or <c>default</c> — the same "the gate is closed" reading the cumulative counters
+            already give. The flag exists so that reading cannot be mistaken for a measurement: without it
+            <see cref="P:DotNetCore.HayateOP.HayatePoolStats.ReuseEfficiency"/> would report a perfect 1.0 on the default configuration, where
+            <see cref="P:DotNetCore.HayateOP.HayatePoolStats.TotalAcquired"/> keeps counting but <see cref="P:DotNetCore.HayateOP.HayatePoolStats.TotalMissed"/> does not.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.PeakActiveObjects">
+            <summary>
+            The highest number of objects that were out on loan at the same time, as observed when the
+            statistics were read. <see cref="M:DotNetCore.HayateOP.IHayateObjectPool.GetStats"/> and <c>TakeSnapshot</c> are the
+            only places the engine derives the borrowed count: the shard deliberately keeps no paired borrow
+            counter (see <c>HayateObjectPool.Shard.cs</c> — a rejected return destroys the object without going
+            through the shard's add path, so an increment and a decrement cannot be paired one to one), and
+            walking the shards on the borrow path would put a per-shard lock and a registry probe on the path
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableMetrics"/> exists to keep cheap. The value is therefore sampled
+            at read time: it never decreases, but a burst that starts and ends between two reads is only seen
+            if it is still in flight when one of them runs. 0 unless <see cref="P:DotNetCore.HayateOP.HayatePoolStats.MetricsEnabled"/>.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.StartedAt">
+            <summary>
+            When the pool was constructed, in UTC. <see cref="F:System.DateTimeOffset.MinValue"/> unless
+            <see cref="P:DotNetCore.HayateOP.HayatePoolStats.MetricsEnabled"/> — capturing it is what makes <see cref="P:DotNetCore.HayateOP.HayatePoolStats.UptimeSeconds"/> and
+            <see cref="P:DotNetCore.HayateOP.HayatePoolStats.AcquiresPerSecond"/> meaningful.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.UptimeSeconds">
+            <summary>
+            Seconds elapsed since <see cref="P:DotNetCore.HayateOP.HayatePoolStats.StartedAt"/>, or 0 when the pool is not tracking. Computed on
+            read rather than stored, so a caller holding the object sees the pool's real age; the subtraction
+            is clamped at 0 so a wall-clock adjustment backwards cannot report a negative age.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.LastActivityTime">
+            <summary>
+            When a borrow or a return last completed on this pool, in UTC, or <c>null</c> when nothing has
+            happened yet or the pool is not tracking. Null rather than a sentinel timestamp, so "never active"
+            cannot be read as "active in year 1".
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.ReuseEfficiency">
+            <summary>
+            The share of borrows that were served from the pool instead of having to create an object:
+            <c>(TotalAcquired - TotalMissed) / TotalAcquired</c>. Clamped into [0, 1] because
+            <see cref="P:DotNetCore.HayateOP.HayatePoolStats.TotalMissed"/> also counts a borrow the reject policy refused, and such a borrow never
+            becomes a <see cref="P:DotNetCore.HayateOP.HayatePoolStats.TotalAcquired"/> — the difference can therefore go negative on a pool that
+            rejects under load. 0 when metrics are off or nothing has been borrowed.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.CreatesPerAcquire">
+            <summary>
+            Objects created per borrow: <c>TotalCreated / TotalAcquired</c>, i.e. how much the pool is still
+            growing. Counts every creation, including pre-warm and auto-scaling, not only the ones a borrow
+            asked for (those are <see cref="P:DotNetCore.HayateOP.HayatePoolStats.TotalMissed"/>). 0 when metrics are off or nothing has been
+            borrowed.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.AcquiresPerSecond">
+            <summary>
+            Borrows per second over <see cref="P:DotNetCore.HayateOP.HayatePoolStats.UptimeSeconds"/>. 0 when metrics are off, nothing has been
+            borrowed, or the pool is younger than the wall clock's resolution.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolStats.Clamp01(System.Double)">
+            <summary>Clamps a ratio into [0, 1]; the counters it is derived from are cumulative and can disagree.</summary>
         </member>
         <member name="T:DotNetCore.HayateOP.HayatePreparationPool`1">
              <summary>
