@@ -12,9 +12,16 @@ namespace HayateOP.Tests.DI;
 /// <remarks>
 /// <para>
 /// These cases compile to nothing on a Release build, because <c>DefaultHayateLogger</c> itself does:
-/// everything below the <c>#if DEBUG</c> is the four <c>Console.WriteLine</c> bodies. CI runs Release,
-/// so this is the one file in the suite that CI does not execute — run it with a Debug build
-/// (<c>dotnet build -c Debug</c> then the produced executable) or it verifies nothing.
+/// everything below the <c>#if DEBUG</c> is the four <c>Console.WriteLine</c> bodies. The Release jobs
+/// therefore cannot exercise them at all; CI's <c>test-debug</c> job builds this suite in Debug and runs
+/// the produced executable, which is the only place these cases run. Locally, run it the same way
+/// (<c>dotnet build -c Debug</c> then the executable) or it verifies nothing.
+/// </para>
+/// <para>
+/// These cases capture the process-wide <c>Console.Out</c>, so they are only sound if nothing else writes
+/// to <c>Console</c> while the buffer is installed — and in a Debug build every other class that creates a
+/// pool writes to it. That is why this assembly disables test parallelization wholesale; see
+/// <c>AssemblyInfo.cs</c> next to this file for the failure it prevents.
 /// </para>
 /// <para>
 /// What it pins: the rendered text is produced by a single substitution pass. The logger used to hand the
@@ -23,10 +30,13 @@ namespace HayateOP.Tests.DI;
 /// the value as a template and threw <c>FormatException</c> from inside a log call.
 /// </para>
 /// </remarks>
+// Inert while this assembly disables parallelization (AssemblyInfo.cs), kept so the intent survives if it
+// is ever re-enabled: Console.SetOut is process-wide, so nothing else may write to Console while we capture.
 [Collection("Console")]
 public class DefaultHayateLoggerRenderingTests
 {
-    // Console.SetOut is process-wide, so these must not run alongside anything else that captures it.
+    // A class's cases already run sequentially, so this only guards against a future change that runs them
+    // in parallel; the assembly-level fence, not this lock, is what keeps other classes out of the window.
     private static readonly object Gate = new();
 
     private static string Render(Action<IHayateLogger> write)
