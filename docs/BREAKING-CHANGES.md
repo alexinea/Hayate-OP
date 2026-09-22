@@ -4,6 +4,51 @@ Migration guidance for every breaking change, newest first, plus the behavioural
 frequently surprise adopters. For a per-version summary of all changes see
 [`../CHANGELOG.md`](../CHANGELOG.md).
 
+## 3.0 — Lifetime semantics named (no breaking API change)
+
+3.0 states the meaning `MaxLifeTime` always had, in full, and leaves the enforcement of the borrowed
+half exactly where 2.9 put it: behind an opt-in switch that is off by default. Nothing in this section
+asks an existing application to change code, and no default behaviour moves.
+
+- **`MaxLifeTime` is documented as the maximum lifetime of a pooled object from the moment it is
+  created — idle or borrowed** (β-1). The documented scope used to be the idle half only, which read as
+  though a borrowed object could never age. The value, its default (10 minutes) and the pool's behaviour
+  are all unchanged: what changed is that the meaning is now written down in full, on the option's XML
+  documentation and in the README, as the same sentence. Which half the pool enforces is a choice, and
+  the choice is the switch below.
+- **The borrowed half stays opt-in, and off by default** (β-2). `EnableLifetimeRotationOnBorrow` — added
+  in 2.9 and unchanged in 3.0 — is still `false` by default, so **the default behaviour does not change**:
+  only idle objects are retired for age, and an object held by the application for longer than
+  `MaxLifeTime` is never treated as expired. That is the behaviour of every release before 2.9, and it is
+  what 3.0 keeps.
+
+### Migration
+
+There is nothing to migrate. An application that compiled and ran against 2.9 compiles and behaves the
+same against 3.0: this section records a naming decision, not a change.
+
+If you do want the borrowed half enforced — the case where a server-side `max_connection_lifetime` or an
+intermediary's idle timeout can invalidate a connection the pool still believes is good — turn the switch
+on explicitly:
+
+```csharp
+var pool = new HayatePoolBuilder<MyConnection>()
+    .WithMaxLifeTime(TimeSpan.FromMinutes(30))
+    .WithEnableLifetimeRotationOnBorrow()   // opt-in; still off by default in 3.0
+    .Build();
+```
+
+Evaluate long-held objects first. With the switch on, a borrow that finds an idle object past
+`MaxLifeTime` destroys it and hands out a replacement, so a borrow / hold / release / borrow cycle that
+used to get the same instance back now gets a fresh one, and any state your policy keeps on the instance
+is rebuilt. An object that is currently borrowed is not affected: the rotation happens on the borrow path
+and never takes an object away from its borrower.
+
+Two constraints come with the switch, and 3.0 changes neither. It cannot be combined with `EnableLean` —
+the lean fast path keeps no per-object timestamps, so the combination fails validation rather than being
+silently ignored. And making it the default would change behaviour for every existing pool, so that would
+need its own major release and its own migration guide.
+
 ## 2.9 — Asynchronous contracts and logging (no breaking API change)
 
 2.9's additions — the asynchronous creation contract (`IHayateAsyncObjectPolicy<T>`), its
