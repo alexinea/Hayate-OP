@@ -416,7 +416,7 @@ public class HayatePoolOptions
     public bool EnableEviction { get; set; } = true;
 
     /// <summary>
-    /// Maximum object lifetime, measured from the moment the pooled object was created.<br />
+    /// The maximum lifetime of a pooled object from the moment it is created — idle or borrowed.<br />
     /// Default value: <c>TimeSpan.FromMinutes(10)</c>.
     /// </summary>
     /// <remarks>
@@ -425,12 +425,13 @@ public class HayatePoolOptions
     /// Boundary: should be greater than <see cref="TimeSpan.Zero"/>.<br />
     /// Recommended range: 5~60 minutes.<br />
     /// <br />
-    /// Scope: the lifetime is evaluated against <b>idle</b> objects by the eviction run and by the
-    /// manual <c>Evict</c> call. Evaluating it against an object that is currently borrowed is the
-    /// opt-in <see cref="EnableLifetimeRotationOnBorrow"/>; while that switch is off — the default —
-    /// an object held by the application for longer than this value is never treated as expired,
-    /// which is the pre-2.9 behaviour. With it on, this value also becomes a ceiling on what the
-    /// borrow path may hand out.
+    /// Which half of that meaning the pool enforces is a choice: the borrowed half is gated by
+    /// <see cref="EnableLifetimeRotationOnBorrow"/>, which is off by default, so the default is the
+    /// backward-compatible idle-side semantics — the eviction run and the manual <c>Evict</c> call
+    /// evaluate this value against <b>idle</b> objects only, and an object held by the application for
+    /// longer than this value is never treated as expired, which is the behaviour of every release
+    /// before 2.9. With the switch on, this value also becomes a ceiling on what the borrow path may
+    /// hand out.
     /// </remarks>
     public TimeSpan MaxLifeTime { get; set; } = TimeSpan.FromMinutes(HayateConstant.DEFAULT_MAX_LIFE_TIME_MINUTES);
 
@@ -441,7 +442,9 @@ public class HayatePoolOptions
     /// </summary>
     /// <remarks>
     /// Purpose: make <see cref="MaxLifeTime"/> a ceiling on what may be handed out, not merely a limit
-    /// on idle objects. Without it an object borrowed and held by the application for longer than
+    /// on idle objects. With it off — the default — <see cref="MaxLifeTime"/> keeps the
+    /// backward-compatible idle-side semantics, which is the behaviour of every release before 2.9.
+    /// Without it an object borrowed and held by the application for longer than
     /// <see cref="MaxLifeTime"/> is never recycled, so a server-side connection lifetime or an
     /// intermediary's idle timeout can invalidate the object without the pool knowing — the scenario
     /// HikariCP's <c>maxLifetime</c> and SQLAlchemy's <c>pool_recycle</c> exist for.<br />
