@@ -12,7 +12,7 @@
     "calibration caveat is lifted: `failMeanPercent` (and the allocation gate) now enforce.",
     "Only entries with gated = true participate in the pass/fail gate; reference rows are",
     "reported for context. The Concurrent-100 suite is recorded but never gated (variance).",
-    "PG4 overrides restored by hand after this capture: the `update_baseline` emit path (`build_baseline_json`) does not carry per-target thresholds, so the three sub-100 ns lean rows (`Acquire+Release | Hayate Lean`, `Release | Hayate Lean`, `AcquireAsync+Release | Hayate Lean`) were re-stamped with warn 30 / fail 60. Without them those rows fall back to the global 15/30 and fail on ordinary run-to-run noise; a future capture must re-apply them, or the emit path must start carrying them."
+    "PG4 overrides restored by hand after this capture: the `update_baseline` emit path (`build_baseline_json`) does not carry per-target thresholds, so the three sub-100 ns lean rows (`Acquire+Release | Hayate Lean`, `Release | Hayate Lean`, `AcquireAsync+Release | Hayate Lean`) were re-stamped with warn 30 / fail 60. Without them those rows fall back to the global 15/30 and fail on ordinary run-to-run noise. The emit path carries them forward as of the fix that followed this capture (`INHERITED_TARGET_KEYS` in `scripts/bench-compare.py`), so a re-capture keeps them without intervention; this note is the record of the last capture that needed the manual step."
   ],
   "thresholds": {
     "warnMeanPercent": 15.0,

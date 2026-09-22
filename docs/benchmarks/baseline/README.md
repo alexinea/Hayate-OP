@@ -23,7 +23,9 @@ workflow (`.github/workflows/perf-regression.yml`) through `scripts/bench-compar
    - allocation growth `>= allocFailBytes` → failure
 4. A target may carry `warnMeanPercentOverride` / `failMeanPercentOverride`, which replace
    the global thresholds for that benchmark alone (PG4's convergence outcome: the sub-100 ns
-   lean rows are measured across a ~1.9× run-to-run range locally, so they run 30/60).
+   lean rows are measured across a ~1.9× run-to-run range locally, so they run 30/60). A
+   benchmark report cannot express them, so `--emit-baseline-file` inherits them from the
+   baseline it replaces, matched by method name.
 5. Reference rows (`MEOP`, plain `new`) are reported for context and never gated.
 6. Results are written to the job summary; the full BenchmarkDotNet report is uploaded
    as a workflow artifact.
@@ -40,27 +42,34 @@ The workflow reads `baseline.json`'s `calibration` flag to pick its mode:
 The calibration flag is therefore the switch: committing a CI-native baseline removes it
 and hardens the gate in the same commit. No workflow change is needed.
 
-The current baseline was captured on a GitHub-hosted runner (2026-09-21), so the gate has
-been enforcing since. The first capture ran before the `update_baseline` emit path carried
-per-target thresholds, and the three sub-100 ns lean rows had to have their 30/60 overrides
-re-stamped by hand — see the note below before replacing this file.
+The gate has been enforcing since the first CI-native capture (2026-09-21); the current file is
+the 2026-09-22 re-capture. That first capture predated the emit path carrying per-target
+thresholds, so the three sub-100 ns lean rows had to have their 30/60 overrides re-stamped by
+hand after it. The emit path inherits them now — see the note in the runbook below.
 
 ## Capturing the CI-native baseline (runbook)
 
 1. On GitHub: **Actions → Performance regression → Run workflow → `update_baseline` = true.**
    The job runs the hot-path benchmarks on the runner and writes a complete, committable
    `baseline.json` (schema, thresholds, `calibration: false`, capture metadata) to the
-   **`ci-baseline`** artifact.
+   **`ci-baseline`** artifact. The per-target thresholds are inherited from the `baseline.json`
+   the capture replaces, so the artifact carries them too.
 2. Download the artifact, replace `docs/benchmarks/baseline/baseline.json` with it, and commit.
 3. The next workflow run reports `calibration=false` and enforces the gate.
 
-> **Re-apply the PG4 overrides after every re-capture.** `--emit-baseline-file` builds the
-> file through `build_baseline_json()`, which does not emit `warnMeanPercentOverride` /
-> `failMeanPercentOverride`. The three sub-100 ns lean rows (`Acquire+Release | Hayate Lean`,
-> `Release | Hayate Lean`, `AcquireAsync+Release | Hayate Lean`) therefore come back without
-> them and silently fall back to the global 15/30 — on rows whose own run-to-run spread
-> exceeds that, so ordinary noise would fail the gate. Re-stamp warn 30 / fail 60 before
-> committing, or teach the emit path to carry the thresholds forward.
+> **The emit path carries the per-target thresholds forward.** `--emit-baseline-file` builds the
+> file through `build_baseline_json()`, which reads the baseline named by `--baseline` (the
+> committed one by default) and copies `warnMeanPercentOverride` / `failMeanPercentOverride`
+> onto the emitted entry with the same method name. A re-capture therefore keeps the three
+> sub-100 ns lean rows at 30/60 instead of reverting them to the global 15/30 — a fallback whose
+> own run-to-run spread those rows exceed, so ordinary noise would fail the gate. Two caveats:
+>
+> - **Capture with the committed `baseline.json` in place.** If `--baseline` does not resolve, the
+>   emit path prints a `::warning::` and writes a file without the overrides. Re-stamp them by
+>   hand before committing — that is what `Acquire+Release | Hayate Lean`, `Release | Hayate Lean`
+>   and `AcquireAsync+Release | Hayate Lean` need (warn 30 / fail 60).
+> - **A renamed benchmark counts as a new row.** Inheritance is by method name, so a row that is
+>   renamed comes back without its overrides; rename and re-capture in the same change.
 
 Local captures stay useful for spot checks, but never commit a local capture as the gate
 baseline — that is exactly the cross-environment comparison the calibration flag guards
@@ -90,4 +99,6 @@ category is run in CI) because its run-to-run variance exceeds the thresholds; t
 lean rows carry 30/60 overrides per the PG4 noise measurements. The first CI-native capture
 (2026-09-21) confirmed the delivered picture — all three asynchronous rows came in below the
 previous local figures — but it does not yet carry enough repeats to justify tightening the
-overrides; keep 30/60 until CI variance data allows it.
+overrides; keep 30/60 until CI variance data allows it. The 2026-09-22 re-capture keeps 30/60
+for the same reason: its own `Release | Hayate Lean` came in 14% above the previous capture,
+inside the range those overrides exist to absorb and a point under the global warning bar.

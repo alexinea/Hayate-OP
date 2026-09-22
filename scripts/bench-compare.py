@@ -24,7 +24,9 @@ for context.
 Per-target overrides (PG4 calibration outcome): a target may carry optional
 ``warnMeanPercentOverride`` / ``failMeanPercentOverride`` values that replace the global
 thresholds for that benchmark alone. Use them for rows whose measured run-to-run variance
-exceeds the global threshold (e.g. the sub-100 ns lean rows).
+exceeds the global threshold (e.g. the sub-100 ns lean rows). A benchmark report cannot
+express them, so ``--emit-baseline-file`` inherits them from the baseline it is replacing
+(matched by method name) instead of silently reverting those rows to the global defaults.
 """
 
 from __future__ import annotations
@@ -54,6 +56,14 @@ SIZE_UNITS_TO_BYTES = {
     "MB": 1024.0 * 1024.0,
     "GB": 1024.0 * 1024.0 * 1024.0,
 }
+
+# Per-target keys that carry a hand-tuned decision rather than a measurement. A benchmark
+# report cannot express them, so a fresh capture has to inherit them from the baseline it is
+# replacing; `gated` / `excluded` are deliberately absent because they are derived from the
+# method name in `build_baseline_json`. Dropping these is not cosmetic: the PG4 30/60
+# overrides on the three sub-100 ns lean rows came back as the global 15/30 on every
+# re-capture and failed the gate on ordinary run-to-run noise.
+INHERITED_TARGET_KEYS = ("warnMeanPercentOverride", "failMeanPercentOverride")
 
 _NUMBER_RE = re.compile(r"^([+-]?[0-9][0-9,\.]*)")
 
@@ -154,14 +164,27 @@ def format_delta(actual, reference):
     return "%+.1f%%" % ((actual - reference) / reference * 100.0)
 
 
-def build_baseline_json(report_path: str, results) -> str:
+def build_baseline_json(report_path: str, results, previous=None):
     """Build a complete, committable baseline JSON from a report (Q1: CI-native capture).
 
     The emitted file keeps the full schema the comparator consumes - thresholds, the
     calibration flag (fresh CI captures start enforced), capture metadata and per-target
     percentiles when the report carries them - so it can replace ``baseline.json`` as-is.
+
+    ``previous`` is the baseline being replaced. Every per-target key in
+    ``INHERITED_TARGET_KEYS`` is carried over from the entry with the same method name,
+    because a report cannot express a hand-tuned threshold; without that, re-capturing
+    silently reverts those rows to the global defaults. Returns ``(json_text, inherited)``
+    where ``inherited`` maps each method to the keys it received.
     """
+    inheritable = {}
+    for entry in (previous or {}).get("targets", []):
+        carried = {key: entry[key] for key in INHERITED_TARGET_KEYS if key in entry}
+        if carried:
+            inheritable[normalize_method(entry.get("method", ""))] = carried
+
     targets = []
+    inherited = {}
     for method, data in results.items():
         if data["meanNs"] is None:
             continue
@@ -192,7 +215,31 @@ def build_baseline_json(report_path: str, results) -> str:
         if excluded:
             target["excluded"] = True
             target["exclusionReason"] = "High run-to-run variance; recorded for context only."
+        carried = inheritable.get(method)
+        if carried:
+            target.update(carried)
+            inherited[method] = tuple(carried)
         targets.append(target)
+
+    notes = [
+        "Captured on a GitHub-hosted runner through the perf-regression workflow's",
+        "`update_baseline` input, so the gate compares CI against CI and the cross-environment",
+        "calibration caveat is lifted: `failMeanPercent` (and the allocation gate) now enforce.",
+        "Only entries with gated = true participate in the pass/fail gate; reference rows are",
+        "reported for context. The Concurrent-100 suite is recorded but never gated (variance).",
+    ]
+    if inherited:
+        notes.append(
+            "Per-target thresholds were inherited from the previous baseline by method name:"
+        )
+        notes.append(
+            "a benchmark report cannot express them, so `build_baseline_json` carries %s"
+            % " / ".join(INHERITED_TARGET_KEYS)
+        )
+        notes.append(
+            "forward and a re-capture no longer reverts those rows to the global defaults."
+        )
+        notes.append("Inherited on: %s." % ", ".join(sorted(inherited)))
 
     payload = {
         "schemaVersion": 1,
@@ -202,13 +249,7 @@ def build_baseline_json(report_path: str, results) -> str:
         "runtime": "GitHub Actions runner, .NET 10.0",
         "job": "Short (Warmup 3 / Iteration 10, Server GC + Concurrent GC)",
         "source": report_path.replace("\\", "/"),
-        "notes": [
-            "Captured on a GitHub-hosted runner through the perf-regression workflow's",
-            "`update_baseline` input, so the gate compares CI against CI and the cross-environment",
-            "calibration caveat is lifted: `failMeanPercent` (and the allocation gate) now enforce.",
-            "Only entries with gated = true participate in the pass/fail gate; reference rows are",
-            "reported for context. The Concurrent-100 suite is recorded but never gated (variance).",
-        ],
+        "notes": notes,
         "thresholds": {
             "warnMeanPercent": 15.0,
             "failMeanPercent": 30.0,
@@ -217,7 +258,7 @@ def build_baseline_json(report_path: str, results) -> str:
         },
         "targets": targets,
     }
-    return json.dumps(payload, indent=2, ensure_ascii=False)
+    return json.dumps(payload, indent=2, ensure_ascii=False), inherited
 
 
 def main() -> int:
@@ -238,7 +279,23 @@ def main() -> int:
             print("::error::No BenchmarkDotNet CSV report found.", file=sys.stderr)
             return 2
         results = read_report(report_path)
-        payload = build_baseline_json(report_path, results)
+
+        # A report carries measurements only, so the hand-tuned per-target thresholds have to
+        # come from the baseline this capture replaces - which is what `--baseline` points at.
+        previous = None
+        if os.path.isfile(args.baseline):
+            try:
+                previous = load_baseline(args.baseline)
+            except Exception as exc:  # noqa: BLE001
+                print("::warning::Could not read the previous baseline %s (%s); the emitted "
+                      "baseline carries no inherited per-target thresholds."
+                      % (args.baseline, exc), file=sys.stderr)
+        else:
+            print("::warning::No previous baseline at %s; the emitted baseline carries no "
+                  "inherited per-target thresholds. Re-stamp them before committing."
+                  % args.baseline, file=sys.stderr)
+
+        payload, inherited = build_baseline_json(report_path, results, previous)
         if args.emit_baseline_file:
             parent = os.path.dirname(os.path.abspath(args.emit_baseline_file))
             if parent:
@@ -246,6 +303,8 @@ def main() -> int:
             with io.open(args.emit_baseline_file, "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(payload + "\n")
             print("Baseline written to %s" % args.emit_baseline_file)
+            for method in sorted(inherited):
+                print("  inherited %s on %s" % (" / ".join(inherited[method]), method))
         else:
             print(payload)
         return 0

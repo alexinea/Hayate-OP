@@ -276,6 +276,25 @@ Breaking changes are described in full — with migration guidance — in
   overridden is affected, which is the opposite of what registering one means; the factory overload above
   is unaffected and still wins over an earlier registration, as repeated registrations do.
 
+- **A re-captured performance baseline no longer reverts the per-target thresholds** (CI tooling,
+  `scripts/bench-compare.py`): `build_baseline_json()` wrote the measurements, the schema and the
+  global thresholds, and nothing else — so the PG4 convergence, which is expressed as
+  `warnMeanPercentOverride` / `failMeanPercentOverride` on individual rows, was dropped every time
+  the `update_baseline` workflow emitted a fresh `ci-baseline`. A benchmark report cannot carry
+  those keys, so the three sub-100 ns lean rows came back on the global 15/30 — a threshold their
+  own run-to-run spread exceeds (~1.9× measured locally, 2.4× on the sub-50 ns rows), which would
+  have turned the gate from never blocking into failing on ordinary noise, and the failure would
+  have read as a regression. The emit path now inherits the curated per-target keys from the
+  baseline it is replacing, matched by method name; `--baseline` already points at that file, so
+  the workflow step needs no change. A method absent from the previous baseline is emitted exactly
+  as before, and a capture that cannot read the previous baseline prints a `::warning::` rather
+  than silently writing an un-stamped file. Verified end to end with synthetic reports: after an
+  emit the three rows keep 30/60 while their measurements come from the report, a second-generation
+  emit keeps them too, and the same +40% slowdown on `Acquire+Release | Hayate Lean` lands as a
+  warning (exit 0) against the inherited baseline and as a failure (exit 1) against one emitted
+  without it. The 2026-09-22 capture had been re-stamped by hand before this fix, which is what
+  made the defect worth closing instead of documenting a second time.
+
 ## [2.8.0] - 2026-09-20
 
 Pool-model expansion and specialization release, no breaking API change. Highlights: a
