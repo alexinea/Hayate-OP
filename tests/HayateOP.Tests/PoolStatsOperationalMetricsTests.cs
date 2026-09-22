@@ -399,6 +399,12 @@ public class PoolStatsOperationalMetricsTests
             pool.Release(item);
         }
 
+        // UptimeSeconds reads 0 when this pool was constructed in the same clock tick as this read, and
+        // AcquiresPerSecond is defined as 0 in that case, so the live value only becomes observable once
+        // the tick has advanced. DateTime.UtcNow advances on the system timer (~15.6 ms on Windows, which
+        // the .NET Framework leg of the matrix runs on) while this test finishes in a few milliseconds,
+        // so without the wait the throughput assertion is a coin toss.
+        Thread.Sleep(25);
         var stats = pool.GetStats();
 
         // Four pre-warmed objects served eight borrows and nothing was missed, so every borrow was a
@@ -408,8 +414,10 @@ public class PoolStatsOperationalMetricsTests
         Assert.Equal(0, stats.TotalMissed);
         Assert.Equal(1.0, stats.ReuseEfficiency);
         Assert.Equal(0.5, stats.CreatesPerAcquire);
-        Assert.True(stats.AcquiresPerSecond > 0);
-        Assert.True(stats.UptimeSeconds >= 0);
+        Assert.True(stats.AcquiresPerSecond > 0,
+            $"AcquiresPerSecond={stats.AcquiresPerSecond} UptimeSeconds={stats.UptimeSeconds} StartedAt={stats.StartedAt:O} MetricsEnabled={stats.MetricsEnabled} TotalAcquired={stats.TotalAcquired}");
+        Assert.True(stats.UptimeSeconds >= 0,
+            $"UptimeSeconds={stats.UptimeSeconds} StartedAt={stats.StartedAt:O} MetricsEnabled={stats.MetricsEnabled}");
     }
 
     [Fact(Timeout = 30_000)]
