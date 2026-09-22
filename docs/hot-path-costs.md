@@ -175,11 +175,79 @@ six are not counters at all — `StartedAt` is stamped once in the constructor a
 work from the paths *and* removes the readings, rather than leaving a caller to infer the state
 from a zero.
 
+## 5. When pooling is the wrong tool
+
+Everything above answers "what does each switch cost". This section answers the question that comes
+first: **whether to pool at all**.
+
+The line is a comparison, not a constant. Pooling pays when the object costs more to create than the
+round trip costs to perform:
+
+> pool only if `Create()` &gt; `Acquire + Release`
+
+### The evidence for the negative case
+
+`markjasongalang/TinyObjectPool` is worth reading precisely because it published the measurement that
+argues against its own premise. Its BenchmarkDotNet run pools a `MyObject { public string Name }` —
+an object that costs about 5-6 ns to construct — and the pooled path is **9.3x slower** at 5 objects
+(264.39 ns against 28.78 ns), staying around 10-12x across the 50-5000 range and trading that for
+0 B against 120 B per operation. Decomposed, `Rent()` pays a `SemaphoreSlim.Wait`, a `lock`, a
+`Stack.Pop` and a wrapper allocation — roughly 250 ns of round trip — to avoid a 6 ns allocation.
+
+Those absolute figures come from that project's machine and are **not comparable** with the ladder in
+§1; what transfers is the shape of the argument. A pool that puts a semaphore, a monitor and a
+wrapper on the borrow path charges more for the round trip than the object is worth, and no
+allocation column makes that back.
+
+### Where HayateOP sits
+
+HayateOP's own round trip is far cheaper, which moves the line but does not remove it:
+
+| Configuration | Acquire+Release | Allocated |
+| :--- | ---: | ---: |
+| HayateOP Lean (`WithLean()`) | **28.07 ns** | **0 B** |
+| HayateOP AllOff (general engine, all optional features off) | 298.61 ns | 384 B |
+
+These two rows are the CI baseline (`docs/benchmarks/baseline/baseline.json`, captured 2026-09-22 on
+a GitHub Actions runner, .NET 10.0). They are **not** the run behind §1 — that one is the archived
+2026-09-10 measurement — so the two tables should not be mixed; the rows within each table are
+comparable with each other.
+
+The lean path deliberately avoids everything the negative case above pays for: no per-object wrapper,
+no semaphore on the synchronous borrow path, no reverse lookup on return. That is why it lands in the
+same order of magnitude as the reference pool in §1, and why it is the only configuration in which
+pooling a very cheap object is even arguable. A general-engine round trip of roughly 300 ns means a
+general-engine pool of sub-microsecond objects is a net loss regardless of what the allocation column
+says.
+
+The corollary for the ownership rules in [`docs/ownership.md`](ownership.md): the check that makes
+the general engine catch a foreign or double return is part of what the lean path removes. Choosing
+lean to make pooling cheap enough is therefore also choosing to give up that check — the two
+decisions are the same decision.
+
+### The third option: striped lookup
+
+When the resource can handle concurrency on its own, neither pooling nor `new` is the right answer —
+**striped lookup** is. If what you need is "one lock (or `SemaphoreSlim`, or limiter) per key,
+reused", keep `N` of them in an array and index by `hash(key) % N`. There is no borrow, no return, no
+ownership to transfer and nothing to leak:
+
+* the same key always resolves to the same instance, which is exactly what keyed serialization needs;
+* the lookup can never be exhausted, because entries are never checked out;
+* the correctness argument rests on the resource being shareable — a lock is, a connection is not.
+
+The trade is that two keys can collide on one instance, so a striped lookup is correct only when
+sharing is acceptable. A borrow/return pool is what you want when the resource must be **exclusive**
+for the duration of a lease. Reaching for a pool on a shareable resource buys ownership accounting
+that the workload did not need, and pays for it on every operation.
+
 ## See also
 
 * [`docs/benchmarks/2026-09-10-o1-lean.md`](benchmarks/2026-09-10-o1-lean.md) — the raw
   benchmark run behind §1, including the percentile columns, the variance analysis and
   the reproduction commands.
+* [`docs/ownership.md`](ownership.md) — the return contract, what the engine checks and what the
+  lean path deliberately does not.
 * [`docs/BREAKING-CHANGES.md`](BREAKING-CHANGES.md) — the behavioural notes worth reading
   before trimming (cold boot, `CreateNew` laziness, the ~100 ms blocking wake-up
   granularity).

@@ -217,6 +217,32 @@ Breaking changes are described in full — with migration guidance — in
 
 ### Changed
 
+- **The return contract, the pooling break-even line and `MaxPoolSize = 0` are now stated where they
+  belong** (G-2; documentation): `docs/ownership.md` is a new page for the rule that had no single
+  home — returning an object transfers ownership, and the violations are not equally detectable (a
+  foreign object and a double return while the object is idle are caught and destroyed; touching an
+  object after its return is invisible; a double return after the object has been borrowed again is
+  accepted and leaves two owners of one object, with no exception anywhere). It also states where the
+  rule is not enforced at all: the lean profile keeps no registry, so it accepts and pools a foreign
+  object — the same contract the reference zero-wrapper pool offers, and the deliberate price of
+  removing the reverse lookup from the return path. `docs/hot-path-costs.md` gains §5, the question
+  that comes before every other switch on that page: whether to pool at all. The line is
+  `Create()` > `Acquire + Release`, evidenced by a published pool whose round trip charges a
+  semaphore, a lock and a wrapper to avoid a ~6 ns allocation and lands 9.3x slower, and HayateOP's
+  own two configurations are placed against it (lean 28.07 ns / 0 B; the general engine with every
+  optional feature off 298.61 ns / 384 B — the CI baseline of 2026-09-22). **The `MaxPoolSize`
+  documentation was wrong and is corrected**: it does not merely disable cold-boot creation. The
+  value is divided into per-shard capacity, so `0` gives every shard a ceiling of `0` and a returned
+  object is rejected and destroyed rather than retained. That was measured rather than reasoned:
+  with `MaxPoolSize = 0` a borrow times out with nothing created, while the same object on a
+  `MaxPoolSize = 1` pool is retained and lent out again by reference. `0` therefore neither creates
+  nor retains — at least as strong as the "capacity 0 retains nothing" reading some other pools use,
+  not a different thing — and the remark now says so, warning that some third-party pools read `0`
+  as "no limit". The fourth item is `docs/ai-assistant-guide.md`: a single page for an AI coding
+  assistant, carrying the shape decision (whose first three questions can rule pooling out
+  altogether), the canonical skeleton, five things not to do, and fourteen facts that are easy to
+  get wrong, each checked against the source.
+
 - **An open circuit breaker is no longer reported as a healthy pool** (B4; behaviour change, not
   breaking): `HayateOpHealthCheck<T>` decided healthy-versus-degraded on `AvailableSlots` alone, so a pool
   whose breaker had tripped — a pool that refuses every borrow — was reported `Healthy` as long as it still

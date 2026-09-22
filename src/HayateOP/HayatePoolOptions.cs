@@ -31,6 +31,15 @@ public class HayatePoolOptions
     /// <remarks>
     /// Purpose: caps memory and downstream resource usage.<br />
     /// Special case: too small a cap amplifies waiting and timeouts.<br />
+    /// Special case: <c>0</c> turns the pool off rather than making it unlimited. It disables
+    /// <b>cold-boot creation</b> — the path that serves a borrow on a completely empty pool by creating
+    /// the first object synchronously — and because each shard's capacity is derived from this value, the
+    /// derived capacity is 0 as well, so a returned object is rejected instead of retained and is
+    /// destroyed. Nothing is created and nothing is stored: every borrow then ends in a timeout, a
+    /// rejection or an indefinite wait, according to <see cref="RejectPolicy"/>. This value is accepted
+    /// only together with <see cref="MinPoolSize"/> = 0, since <see cref="IsValid"/> requires the ceiling
+    /// to be at least the floor. Some third-party pools read <c>0</c> as "no limit"; this option means the
+    /// opposite, and the two readings are not interchangeable.<br />
     /// Boundary: should be &gt;= 1 and not less than <see cref="MinPoolSize"/>.<br />
     /// Recommended range: 32~2048.
     /// </remarks>

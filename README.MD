@@ -28,6 +28,12 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 Release notes live in [`CHANGELOG.md`](CHANGELOG.md); breaking changes and behavioural notes are
 documented in [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md).
 
+Two shorter entry points: [`docs/ownership.md`](docs/ownership.md) states the return contract — what
+returning an object transfers, and which misuses the engine actually detects — and
+[`docs/ai-assistant-guide.md`](docs/ai-assistant-guide.md) is a single-page orientation for AI coding
+assistants: the shape decision, the canonical skeleton, the traps, and the facts that are easy to get
+wrong.
+
 ## Installation
 
 ### NuGet Packages
@@ -924,7 +930,10 @@ The short version of how to trim:
 
 The full per-switch reference — including which switches are pure background work, which
 diagnostic members are paid for only when called, and a trim-by-scenario table — is in
-[`docs/hot-path-costs.md`](docs/hot-path-costs.md).
+[`docs/hot-path-costs.md`](docs/hot-path-costs.md). That page's §5 is the one to read *before*
+choosing a pool at all: it states the break-even line (`Create()` must cost more than a round trip),
+shows what a pool that charges a semaphore per borrow looks like when measured, and describes the
+striped-lookup alternative for resources that handle concurrency themselves.
 
 ### Breaking changes
 
@@ -1322,7 +1331,10 @@ responsibility; a user `Dispose` that throws is caught and logged so the drain c
 and a pool that has been disposed is not guarded against further use, so treat it as
 unusable. [`docs/disposal.md`](docs/disposal.md) covers the ownership model, the exact
 behaviour of the drain on both engines, the side-by-side comparison with
-`DisposableObjectPool<T>`, and the two differences from it.
+`DisposableObjectPool<T>`, and the two differences from it. The companion page for the *lease* side of
+ownership — do not touch a returned object, do not return it twice, do not return it to another pool,
+and which of those three the engine actually detects — is
+[`docs/ownership.md`](docs/ownership.md).
 
 ### Disposing with the process (optional)
 
