@@ -19,7 +19,16 @@ namespace DotNetCore.HayateOP;
 /// The two families differ in who owns the pool: <see cref="Simple{T}"/> hands back a pool the caller
 /// owns and disposes, while <see cref="Shared{T}()"/> hands back the one pool
 /// <see cref="HayateSharedPoolRegistry.Default"/> keeps for that element type, which the caller must
-/// leave alone.
+/// leave alone.<br />
+/// <b>These entry points have to choose their reject policy deliberately.</b> The library's default is
+/// <c>BlockTimeout</c>, which waits for a return rather than growing the pool: a pool whose objects are all
+/// lent out does not create another one on the borrow path, however much room <c>MaxPoolSize</c> still
+/// leaves. An entry point whose contract reads as "a pool of N objects" must therefore set
+/// <see cref="HayatePoolRejectPolicy.CreateOnDemand"/> explicitly, so that a miss grows the pool instead of
+/// waiting out the acquire timeout. A zero <c>MinPoolSize</c> makes the difference sharpest: the wait-based
+/// policies only shortcut creation while the pool tracks nothing at all, so after the first borrow the next
+/// borrower waits. <see cref="HayatePoolPresets"/> and <c>ParameterizedHayatePool&lt;TKey, TValue&gt;</c> already do
+/// this; <see cref="HayatePoolRejectPolicy"/> is where the five policies are compared.
 /// </remarks>
 /// <example>
 /// <code>

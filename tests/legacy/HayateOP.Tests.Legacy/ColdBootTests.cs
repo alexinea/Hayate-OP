@@ -6,7 +6,10 @@ namespace DotNetCore.HayateOP.Tests;
 /// Cold-pool (Min=0) bootstrap-on-borrow test.
 /// When the pool is completely empty (no idle and no borrowed), the Block / BlockTimeout policies and the async path create the first object on demand,
 /// eliminating the uncertainty of "waiting for a timeout to replenish" (the ColdStart measurement showed two timings: 2/5 and 5/5 timeouts);
-/// the CreateNew policy keeps the "create only after the full timeout" semantics unchanged.
+/// the CreateNew policy keeps the "create only after the full timeout" semantics unchanged.<br />
+/// Since 3.0 (B6) the file also carries the borrow path's growth and wake-up contract: which policies grow the
+/// pool on a miss and which wait, and how a parked waiter observes an object that was added without a wake-up
+/// signal.
 /// </summary>
 public class ColdBootTests
 {
@@ -261,5 +264,42 @@ public class ColdBootTests
 
         pool.Release(held);
         pool.Release(scaled);
+    }
+
+    [Fact]
+    public void BlockTimeout_SeesAPreWarmedObjectWithoutASignal()
+    {
+        // PreWarm() puts objects into the idle lists without publishing a wake-up signal, so a waiter that is
+        // already parked can only see them through the bounded re-check. This pins that dependency from the
+        // outside: the waiter has to be served promptly - which today means "within a re-check interval", and
+        // after the B6-1 refactor means "the site publishes a signal". If the re-check interval ever grows past
+        // the bound below without the signal being added, this fails.
+        using var pool = new HayatePoolBuilder<TestObject>()
+            .WithPoolName("coldboot-e2-prewarm")
+            .WithEnableAutoScaling(false)
+            .WithEnableMetrics(true)
+            .WithMinSize(0)
+            .WithMaxSize(8)
+            .WithRejectPolicy(HayatePoolRejectPolicy.BlockTimeout)
+            .Build();
+
+        var held = pool.Acquire(TimeSpan.FromMilliseconds(500));   // cold boot; the pool is no longer empty
+        Assert.Equal(1, pool.GetStats().TotalCreated);
+
+        var waiter = Task.Run(() => pool.Acquire(TimeSpan.FromSeconds(3)));
+        Thread.Sleep(300);   // let the waiter park on the gate with nothing to take
+        Assert.Equal(0, pool.TakeSnapshot().PooledCount);
+
+        Assert.Equal(2, pool.PreWarm(2));   // two idle objects appear, and no signal is published for them
+        var sw = Stopwatch.StartNew();
+        var served = waiter.GetAwaiter().GetResult();
+        sw.Stop();
+
+        Assert.NotNull(served);
+        Assert.True(sw.Elapsed < TimeSpan.FromMilliseconds(1500), $"the waiter must not have to wait out the acquire timeout, took {sw.Elapsed.TotalMilliseconds:F0}ms");
+        Assert.Equal(3, pool.GetStats().TotalCreated);   // the waiter reused a pre-warmed object instead of creating one
+
+        pool.Release(held);
+        pool.Release(served);
     }
 }

@@ -113,9 +113,22 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     // waiters use Wait instead of SpinWait busy-waiting, eliminating the 100% CPU idle spin during the wait.
     // The counter means "number of consumable wake-up signals"; on a successful borrow it consumes one signal via Wait(0),
     // preventing stale signals from accumulating and causing waiters to be spuriously woken one by one into a busy loop.
+    //
+    // A waiter can observe a newly available object in exactly two ways: this gate is released, so it wakes at once, or
+    // its bounded re-check comes round (see BlockWaitSliceMs). Only Release() publishes a signal today. The other sites
+    // that put an object into an idle list - the constructor's pre-warm, PreWarm(), ForceScaleUpOneStep() and the
+    // auto-scaling callback - publish nothing, so a waiter that arrives after one of them was served by the re-check and
+    // not by the signal. That is the implicit dependency B6-E2 names, and it is what makes
+    // BlockTimeout_SeesAPreWarmedObjectWithoutASignal and BlockTimeout_GrowsOnlyThroughBackgroundScaling pass at all.
+    // The dependency is invisible while the re-check is a fixed slice, and it breaks the moment the wait becomes a
+    // single uninterruptible SemaphoreSlim.Wait(timeout). B6-1 therefore turns it into a mechanism: every site that
+    // makes an object available must publish a signal, and the re-check stops being load-bearing. Until that lands, a
+    // new site that adds to an idle list has to say how a waiter is supposed to see the object.
     private readonly SemaphoreSlim _blockGate = new(0, int.MaxValue);
 
     // The suspended-wait slice used when no signal arrives. A signal wakes immediately; the slice merely caps the re-check interval when no signal arrives.
+    // Load-bearing: it is the only reason a waiter ever sees an object that was added without a signal (see the invariant
+    // on _blockGate). B6-1 replaces it with a one-shot wait and makes those sites publish a signal instead.
     private const int BlockWaitSliceMs = 100;
 
     // Background tasks.
@@ -509,6 +522,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 {
                     // Register into the target shard. If the shard rejects (capacity is clamped, theoretically unreachable), destroy as fallback,
                     // to avoid orphaned entries that are registered but in no free list.
+                    // No wake-up signal: a waiter sees this object only through the re-check (see the invariant on _blockGate).
                     var w = CreateWrappedObject(shard);
                     if (!shard.Add(w)) Destroy(w);
                     totalPreWarmed++;
@@ -579,6 +593,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             }
             else
             {
+                // No wake-up signal: a waiter sees this object only through the re-check (see the invariant on _blockGate).
                 var w = CreateWrappedObject(shard);
                 if (shard.Add(w))
                 {
@@ -1955,6 +1970,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             {
                 var shard = _shards[i % _shards.Length];
                 // Register into the target shard; under concurrency Add may still be filled first by another thread and rejected, so destroy as fallback to prevent orphaned registry entries.
+                // No wake-up signal: a waiter sees this object only through the re-check (see the invariant on _blockGate).
                 var w = CreateWrappedObject(shard);
                 if (!shard.Add(w)) Destroy(w);
                 added++;
@@ -2816,6 +2832,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 {
                     var shard = _shards[i % _shards.Length];
                     // Register into the target shard; if Add is rejected, destroy as fallback to prevent orphaned registry entries.
+                    // No wake-up signal: a waiter sees this object only through the re-check (see the invariant on _blockGate).
                     var w = CreateWrappedObject(shard);
                     if (!shard.Add(w)) Destroy(w);
                 }
