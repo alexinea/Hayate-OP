@@ -256,6 +256,60 @@ public class LifetimeRotationTests
         Assert.False(pool.GetOptions().EnableLifetimeRotationOnBorrow);
     }
 
+    // ── W-β-4 (3.0) ─────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void DefaultProfile_ReadsAsTheIdleSideSemantics()
+    {
+        // 3.0 named MaxLifeTime as the whole lifetime — idle or borrowed — and kept the borrowed half
+        // behind a switch that is off by default, so the default profile has to read as the pre-2.9
+        // behaviour in full: the age verdict is enforced on the idle side, and on nothing else. U6
+        // already pins "an overdue object is still handed back"; this pins the two halves apart.
+
+        // Half one: borrowed is nobody's business but its borrower's, even while eviction runs.
+        using (var pool = new HayatePoolBuilder<TrackedObject>()
+            .WithMinSize(1)
+            .WithMaxSize(2)
+            .WithEnableEviction(true)
+            .WithEvictionInterval(1000)          // the builder's floor
+            .WithEnableAutoScaling(false)
+            .WithMaxLifeTime(TimeSpan.FromMilliseconds(50))
+            .Build())
+        {
+            Assert.False(pool.GetOptions().EnableLifetimeRotationOnBorrow);
+
+            var held = pool.Acquire();
+            Thread.Sleep(2500);                  // several eviction runs, far past MaxLifeTime
+
+            Assert.False(held.Disposed);
+            Assert.Equal(1, pool.TakeSnapshot().BorrowedCount);
+            Assert.Equal(0, pool.GetStats().LifetimeRotatedCount);
+
+            pool.Release(held);
+        }
+
+        // Half two: the idle side still enforces the verdict, which is what makes the default profile
+        // "the idle-side semantics" rather than "the lifetime is ignored". Eviction is off in this pool
+        // and auto-scaling is off, so nothing else can retire the object and the counts are deterministic.
+        using (var pool = Build(TimeSpan.FromMilliseconds(50), rotation: false))
+        {
+            var first = pool.Acquire();
+            Thread.Sleep(150);                   // held past MaxLifeTime, then released
+            pool.Release(first);
+
+            // The borrow path hands the overdue object back instead of rotating it — same instance, no
+            // rotation counted — which is the pre-2.9 behaviour the naming leaves in place.
+            var second = pool.Acquire();
+            Assert.Same(first, second);
+            Assert.Equal(0, pool.GetStats().LifetimeRotatedCount);
+            pool.Release(second);
+
+            // ...while the idle side does enforce it.
+            Assert.Equal(1, pool.Evict(HayateEvictReason.Expired));
+            Assert.Equal(0, pool.TakeSnapshot().PooledCount);
+        }
+    }
+
     // ── U7 ──────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
