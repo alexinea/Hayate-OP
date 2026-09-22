@@ -347,6 +347,14 @@ public class MetricsGatingTests
         const int Items = 16;
         const int Rounds = 200;
 
+        // One warm-up pass is not enough. The first pass finds an empty pool and runs the cold-boot create
+        // path, so "take an existing object off the free list" is still cold when the measured loop starts
+        // - and the first run of that path allocates once (64 bytes; reproduced on both net6.0 and net8.0),
+        // which lands inside the first measured window. Rounds 1..199 read 0, so it is a cold-start artefact
+        // rather than a per-borrow allocation. Measured on this machine: one pass gives 64,0,0,0,0,0; two
+        // passes and three passes give all zeros. Three leaves headroom.
+        const int WarmupRounds = 3;
+
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName(diagnostics ? "gating-borrow-alloc-on" : "gating-borrow-alloc-off")
             .WithMinSize(Items)
@@ -357,10 +365,13 @@ public class MetricsGatingTests
 
         var held = new TestObject[Items];
 
-        // Warm-up round: establishes the steady state (nothing is created or destroyed from here on)
-        // outside the measured windows.
-        for (var i = 0; i < Items; i++) held[i] = pool.Acquire();
-        for (var i = 0; i < Items; i++) pool.Release(held[i]);
+        // Warm up to a genuine steady state: nothing is created or destroyed from here on, and the free-list
+        // path has already run outside the measured windows.
+        for (var w = 0; w < WarmupRounds; w++)
+        {
+            for (var i = 0; i < Items; i++) held[i] = pool.Acquire();
+            for (var i = 0; i < Items; i++) pool.Release(held[i]);
+        }
 
         // Touch the measuring API once so its own first call cannot land inside a window.
         _ = GC.GetAllocatedBytesForCurrentThread();
