@@ -10,6 +10,27 @@ Breaking changes are described in full — with migration guidance — in
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-09-22
+
+Asynchronous-contract and logging release, no breaking API change. Highlights: the asynchronous
+creation contract (`IHayateAsyncObjectPolicy<T>`, A1) with its disposal counterpart
+(`IHayateAsyncObjectPool<T>`, A2) and the asynchronous return hooks that complete the batch
+(B5), relaxed `new()` constraints on the twelve entry points that can accept a policy or a
+factory (B1), a DI policy factory that resolves through the container (B2), metrics and a
+logger on keyed sub-pools (B3), an object health probe and a circuit-breaker verdict in the
+health check (B4), `net48` assets for the Configuration and HealthCheck packages (B7),
+borrow-side lifetime rotation past `MaxLifeTime` (A3a-α, opt-in and off by default), per-pool
+Microsoft.Extensions.Logging categories (L2), a built-in-logger fallback when no
+`ILoggerFactory` is registered (L3), a `{Config}` template that no longer carries Serilog's
+destructuring operator (L4) and a console logger that no longer re-formats an already
+substituted message (L6). The performance baseline was re-captured on CI after A3a-α, and the
+emit path now carries the per-target thresholds forward so a re-capture no longer drops them.
+Two research follow-ups landed on top of that batch: `HayatePoolStats` gained ratio-class
+operational metrics (G-1, with a `MetricsEnabled` flag that tells a closed metrics gate apart
+from an idle pool), and the return contract, the pooling break-even line, the `MaxPoolSize = 0`
+boundary and an AI-assistant entry point were documented (G-2). The benchmarks also gained a
+concurrent head-to-head reference column (G-3, not gated).
+
 ### Added
 
 - **Asynchronous creation contract** (A1, `net6.0`+): `IHayateAsyncObjectPolicy<T>`, the policy
@@ -1142,7 +1163,8 @@ No breaking change beyond the lease-context rework listed below.
 
 Initial release.
 
-[Unreleased]: https://github.com/alexinea/object-pool/compare/v2.8...HEAD
+[Unreleased]: https://github.com/alexinea/object-pool/compare/v2.9...HEAD
+[2.9.0]: https://github.com/alexinea/object-pool/compare/v2.8...v2.9
 [2.8.0]: https://github.com/alexinea/object-pool/compare/v2.7...v2.8
 [2.7.0]: https://github.com/alexinea/object-pool/compare/v2.6...v2.7
 [2.6.0]: https://github.com/alexinea/object-pool/compare/v2.5...v2.6

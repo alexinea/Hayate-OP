@@ -4,6 +4,55 @@ Migration guidance for every breaking change, newest first, plus the behavioural
 frequently surprise adopters. For a per-version summary of all changes see
 [`../CHANGELOG.md`](../CHANGELOG.md).
 
+## 2.9 — Asynchronous contracts and logging (no breaking API change)
+
+2.9's additions — the asynchronous creation contract (`IHayateAsyncObjectPolicy<T>`), its
+disposal counterpart (`IHayateAsyncObjectPool<T>`), the asynchronous return hooks
+(`OnReleaseAsync` / `OnPassivateAsync` / `OnDestroyAsync`), the DI policy factory, metrics and a
+logger on keyed sub-pools, the object health probe (`IHayateObjectHealthProbe<T>`), `net48`
+assets for the Configuration and HealthCheck packages, borrow-side lifetime rotation past
+`MaxLifeTime` (`WithEnableLifetimeRotationOnBorrow`, opt-in and off by default), the per-pool
+Microsoft.Extensions.Logging factory (`HayateMicrosoftLoggerFactory`), and the relaxed `new()`
+constraints on the twelve entry points that accept a policy or a factory — are purely additive:
+new types, new members, new options and new packages only, with no change to any existing
+member's signature. The asynchronous members are gated to `net6.0` and later, so
+`netstandard2.0` and `net48` consumers keep the fully synchronous pool and gain none of them.
+The eight entry points that take no policy and no factory deliberately keep their `new()`
+constraint: `new T()` is the only construction they can perform, and dropping the constraint
+would turn a compile-time error into a run-time `MissingMethodException`.
+
+Three behavioural changes are worth calling out. None of them breaks a caller that compiled
+against 2.8, and each is a case where the old behaviour was the surprising one:
+
+- **Log categories changed** (L2). A pool hosted through the DependencyInjection or Configuration
+  packages is now logged under a Microsoft.Extensions.Logging category named after the pool — the
+  pool name for a named pool, the element type's short name for an unnamed one — where the
+  category used to be the element type's namespace-qualified display name (`MyApp.MyConnection`
+  becomes `MyConnection`). A sink that filters on the old category has to be re-pointed at the
+  new one; an application that does not filter by category is unaffected. The category rule and
+  the measurements behind it are in [`../CHANGELOG.md`](../CHANGELOG.md) (L2).
+- **A container with no logging provider no longer silences the pool** (L3). The MEL bridge used
+  to hand the pool a logger that discarded everything whenever no `ILoggerFactory` was
+  registered, so a host that had simply not called `AddLogging()` got no diagnostics at all. It
+  now falls back to the built-in logger, which is a no-op on a Release build and writes to the
+  console on a Debug one — so the difference is observable only in Debug, and only in a host that
+  registered no logging provider.
+- **An open circuit breaker is no longer reported as a healthy pool** (B4).
+  `HayateOpHealthCheck<T>` decided healthy-versus-degraded on available slots alone, so a pool
+  whose breaker had tripped still reported `Healthy` while every acquire was being rejected. A
+  tripped breaker now reports `Unhealthy`, and the health payload grows from 6 fields to 14. A
+  monitoring rule that treated "not `Healthy`" as pageable now fires on a condition it previously
+  missed, which is the point of the change.
+
+One addition deserves a note for readers of `HayatePoolStats` rather than for callers. The six
+ratio-class members added by G-1 (`ReuseEfficiency`, `CreatesPerAcquire`, `AcquiresPerSecond`,
+`PeakActiveObjects`, `StartedAt` / `UptimeSeconds`, `LastActivityTime`) are maintained only while
+`EnableMetrics` is on, so with the default configuration (metrics off) they read `0`, `null` or
+`default` rather than a value. That is a property of the new members — no existing member changes
+type or meaning — and `MetricsEnabled` exists to tell "the gate is closed" apart from "the pool is
+idle", which a bare zero cannot. `ToString()` also gains an `[Operational (gated by EnableMetrics)]`
+section. The reasoning and the measurements are in [`../CHANGELOG.md`](../CHANGELOG.md) (G-1).
+
 ## 2.8 — Pool-model expansion and specialization (no breaking API change)
 
 2.8's additions — the unbounded pool model (`HayateUnboundedPool<T>`), the asynchronous
