@@ -9,11 +9,17 @@
 //                                  + Hertzole PowerPools 1.0.0 (the O8->M1+ head-to-head line)
 //                                  + Chopin.Pooling 1.0.2 (the O5->M1+ head-to-head line)
 //                                  + CnCSharp-Dev PoolingLib 1.0.3 (the C-B head-to-head line)
+//                                  + thomhurst Reservoir 1.9.1 (the G-3 head-to-head line)
 //   * async dimension            : MEOP / plain `new` / TinyPools / PowerPools / Chopin.Pooling /
-//                                  PoolingLib expose no async API
+//                                  PoolingLib / Reservoir expose no async API
 //                                  -> N/A (not present in the matrix);
 //                                  MSL.Pool exposes *only* an async API -> N/A in the synchronous suites
-//   * concurrency dimension      : 100-thread Parallel.For borrow/return (throughput + contention)
+//   * concurrency dimension      : 100-thread Parallel.For borrow/return (throughput + contention),
+//                                  plus a 1/4/8/16-worker tier ladder (G-3) whose job is to show how
+//                                  the variance behaves across worker counts - that is what 3.1 reads
+//                                  to decide whether a Concurrent-N row can be gated. Neither the
+//                                  ladder nor the 100-thread rows are in the `hot` category, so the
+//                                  gate (which runs --anyCategories hot) never measures either.
 //
 // Statistics: built-in BenchmarkDotNet columns (Mean / Median / StdDev / Min / Max) plus custom
 //   P50 / P90 / P95 / P99 percentile columns (computed from the per-iteration mean time), because
@@ -163,6 +169,21 @@ public class HayateOpBenchmarks
     // BasePool<T>.Return does not reset the object - only the collection-specialized pools clear
     // their payload - which is level with every other row, none of which resets either.
     private PoolingLib.BasePool<PooledObject> _cpl = null!;
+
+    // thomhurst Reservoir 1.9.1 (G-3, second-batch 33-R-1). This is the two-parameter
+    // ObjectPool<T, TPolicy> path - the library's own documented performance path - rather than the
+    // one-parameter ObjectPool<T>: the latter stores the policy as a reference type and boxes a
+    // struct policy, so using it would measure a deliberately handicapped Reservoir instead of the
+    // one whose published concurrent numbers are the reason this column exists. The policy is
+    // therefore a struct implementing IPooledObjectPolicy<T> (see ReservoirPolicy below). The
+    // capacity argument is MaxPoolSize, the same retention basis every other row uses; the library
+    // has no min-size notion, so like TinyPools and PowerPools it starts empty and reaches steady
+    // state through the warm-up loop in Setup rather than being pre-filled. Rent() creates an object
+    // when nothing is retained instead of blocking or returning null, so this row can never stall,
+    // and Return() resets and discards anything above capacity. The library has no asynchronous API
+    // at all, so it sits in the synchronous and concurrent suites and is N/A in the asynchronous
+    // one, exactly like MEOP, plain `new`, TinyPools, PowerPools, Chopin.Pooling and PoolingLib.
+    private Reservoir.ObjectPool<PooledObject, ReservoirPolicy> _reservoir = null!;
 
     private IHayateObjectPool<PooledObject> _allOff = null!;          // general engine, every optional feature off
     private IHayateObjectPool<PooledObject> _lean = null!;            // lean (wrapper-free) fast path: EnableLean
@@ -321,6 +342,10 @@ public class HayateOpBenchmarks
         // unbounded anti-pattern the CPL comparison report told the O-D storage backend to avoid.
         _cpl = PoolingLib.BasePool<PooledObject>.Pool;
 
+        _reservoir = new Reservoir.ObjectPool<PooledObject, ReservoirPolicy>(
+            new ReservoirPolicy(),
+            MaxPoolSize);
+
         // Warm up (borrow fully, then return) so the steady state never hits the create path.
         for (var i = 0; i < MaxPoolSize; i++) _meop.Return(_meop.Get());
         for (var i = 0; i < MaxPoolSize; i++) _allOff.Release(_allOff.Acquire());
@@ -347,6 +372,12 @@ public class HayateOpBenchmarks
         // path out of the measurement window - is established by BenchmarkDotNet's own warm-up
         // iterations, verified in docs/benchmarks/2026-09-18-cb-poolinglib-line.md.
         for (var i = 0; i < MaxPoolSize; i++) _cpl.Return(_cpl.Get());
+        // Same single-loop idiom again. Reservoir retains what it is handed up to capacity, so this
+        // leaves one idle item rather than MaxPoolSize - the same steady state the TinyPools,
+        // PowerPools, Chopin and PoolingLib rows reach, reached in the same way. It is also the only
+        // warm-up available here: Rent() never blocks and never returns null, so there is no
+        // "borrow fully" variant to prefer.
+        for (var i = 0; i < MaxPoolSize; i++) _reservoir.Return(_reservoir.Rent());
     }
 
     [GlobalCleanup]
@@ -359,6 +390,7 @@ public class HayateOpBenchmarks
         _full.Dispose();
         _msl.Dispose();
         _powerPools.Dispose();
+        _reservoir.Dispose();
         // Chopin.Pooling's GenericObjectPool<T> is not IDisposable either; Close() is its teardown
         // verb (it clears the idle set and stops the evictor, which this row never starts).
         _chopin.Close();
@@ -435,6 +467,23 @@ public class HayateOpBenchmarks
         var obj = _cpl.Get();
         obj.Data++;
         _cpl.Return(obj);
+    }
+
+    // Reservoir is the one column in the matrix whose storage is striped and lock-free with a
+    // per-thread front tier, so its single-threaded row is the "no contention at all" end of the
+    // same row it runs under 1/4/8/16/100 threads below. Rent/Return is its direct counterpart of
+    // Acquire/Release, and the payload mutation matches every other row so the pooled-object cost is
+    // identical across columns. Note that Return() resets through the policy - TryReset is part of
+    // this library's return path rather than an opt-in - which makes this row the only one in the
+    // matrix that pays a user-defined reset on every return; that cost is also present in the
+    // concurrent rows, so the column stays internally consistent.
+    [Benchmark(Description = "Acquire+Release | Reservoir")]
+    [BenchmarkCategory("reference")]
+    public void Reservoir_AcquireRelease()
+    {
+        var obj = _reservoir.Rent();
+        obj.Data++;
+        _reservoir.Return(obj);
     }
 
     [Benchmark(Description = "Acquire+Release | Hayate AllOff")]
@@ -701,6 +750,223 @@ public class HayateOpBenchmarks
             obj.Data++;
             _cpl.Return(obj);
         });
+    }
+
+    // Reservoir is the reason the concurrency dimension exists at all: it is the only project in
+    // either research batch that combines a striped lock-free store, a per-thread front tier and
+    // published concurrent numbers, and those numbers are the single piece of evidence that HayateOP
+    // may actually lose under contention. Its row here is the 100-worker end of the ladder that
+    // Suite 5 measures at 1/4/8/16.
+    [Benchmark(Description = "Concurrent-100 | Reservoir")]
+    [BenchmarkCategory("concurrent")]
+    public void Reservoir_Concurrent100()
+    {
+        Parallel.For(0, ThreadCount, _ =>
+        {
+            var obj = _reservoir.Rent();
+            obj.Data++;
+            _reservoir.Return(obj);
+        });
+    }
+
+    // Total borrow/return pairs each tier performs, split evenly across the tier's workers. It has to
+    // be a constant so OperationsPerInvoke can name it, and it has to be large: the first version of
+    // this ladder ran Parallel.For(0, threads, ...) - one borrow/return per loop iteration - and at
+    // one worker a single pair measured 771.8 ns against a real single-threaded cost near 10 ns, so
+    // Parallel.For's own scheduling was ~98% of the row and the "concurrent" number was measuring the
+    // harness, not the pool. Spreading a fixed 100k pairs across the tier amortises that to well
+    // under a nanosecond per operation, which is what makes these rows read as pool-under-contention
+    // rather than Parallel.For-under-contention.
+    private const int TierTotalOps = 100_000;
+
+    // One ParallelOptions per tier, built once. Allocating it inside the measured body would add an
+    // allocation per operation to every row in Suite 5 and bury the pooled-object cost the matrix
+    // exists to compare, so the instances are hoisted and selected by tier. ParallelOptions is a
+    // plain configuration holder and is safe to reuse across Parallel.For calls.
+    private static readonly ParallelOptions TierOptions1 = new() { MaxDegreeOfParallelism = 1 };
+    private static readonly ParallelOptions TierOptions4 = new() { MaxDegreeOfParallelism = 4 };
+    private static readonly ParallelOptions TierOptions8 = new() { MaxDegreeOfParallelism = 8 };
+    private static readonly ParallelOptions TierOptions16 = new() { MaxDegreeOfParallelism = 16 };
+
+    private static ParallelOptions OptionsFor(int threads) => threads switch
+    {
+        1 => TierOptions1,
+        4 => TierOptions4,
+        8 => TierOptions8,
+        16 => TierOptions16,
+        _ => TierOptions16,
+    };
+
+    // ── Suite 5: tiered concurrent borrow/return (Concurrent-1/4/8/16) ──────────────────────
+    //
+    // G-3. This is the ladder 3.1 needs in order to decide whether a Concurrent-N row is stable
+    // enough to gate: the decision turns on how the relative standard deviation behaves across
+    // worker counts, and that cannot be read off a single 100-worker row. Every row here is
+    // non-gated by construction - the gate runs --anyCategories hot and none of these are in the hot
+    // category - so adding the ladder changes no gate number and needs no baseline re-capture.
+    //
+    // Three deliberate departures from Suite 4, all recorded because they make these rows comparable
+    // with each other but not with the Concurrent-100 rows above:
+    //   * Each tier performs the same TierTotalOps pairs, split evenly across its workers, instead of
+    //     doing one pair per loop iteration the way Suite 4 does. This is the one that matters: with
+    //     one pair per iteration, a single worker measured 771.8 ns for a pair that costs about 10 ns
+    //     single-threaded, i.e. the row was ~98% Parallel.For scheduling. Amortised over 100k pairs
+    //     that overhead falls well under a nanosecond per operation, so the row reads as the pool
+    //     under N-way contention rather than as the harness under N-way contention.
+    //   * MaxDegreeOfParallelism is pinned to the tier, so "Concurrent-4" means four workers actually
+    //     contending rather than "the thread pool chose some number for a four-iteration loop".
+    //   * The ParallelOptions instance is built once per tier instead of inside the measured body,
+    //     because allocating it per operation would add an allocation to every row and bury the
+    //     pooled-object cost the matrix exists to compare.
+    // OperationsPerInvoke is set to TierTotalOps so the reported Mean is per borrow/return pair and
+    // is therefore directly comparable with the single-threaded Suite 1 rows - the one thing this
+    // ladder does share with the rest of the matrix.
+    //
+    // The descriptions read "Concurrent-N | ..." rather than naming a tier because BenchmarkDotNet
+    // uses Description verbatim: it has no placeholder for an [Arguments] value, so "{threads}"
+    // would be printed literally (verified on a dry run). The tier is carried by the generated
+    // `threads` column instead, which is where the ladder is read from.
+    //
+    // ⚠️ Trap for whoever gates this ladder, recorded because it fails silently. The gate keys rows
+    // by the CSV "Method" column - scripts/bench-compare.py:145 runs it through normalize_method,
+    // which only strips quotes - and that column carries whatever BDN renders, i.e. the Description
+    // when one is set. Two consequences:
+    //   1. These rows can never be gated as they stand: bench-compare.py:192-193 computes
+    //      gated = "Hayate" in method and "Concurrent" not in method, so anything whose rendered
+    //      name contains "Concurrent" is marked excluded. That is a second, independent guarantee
+    //      alongside "CI only runs --anyCategories hot".
+    //   2. All four tiers of a row share one rendered name ("Concurrent-N | ..."), so if they were
+    //      ever gated they would collide in that dict and the last one would silently win. Gating a
+    //      Concurrent-N row therefore requires unique rendered names first - which means either one
+    //      method per tier with the tier spelled out in the Description, or dropping the Description
+    //      so BDN falls back to the method name plus its arguments column.
+
+    [Benchmark(Description = "Concurrent-N | MEOP", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    [Arguments(1)]
+    [Arguments(4)]
+    [Arguments(8)]
+    [Arguments(16)]
+    public void Meop_ConcurrentTier(int threads)
+    {
+        var perWorker = TierTotalOps / threads;
+        Parallel.For(0, threads, OptionsFor(threads), _ =>
+        {
+            for (var i = 0; i < perWorker; i++)
+            {
+                var obj = _meop.Get();
+                obj.Data++;
+                _meop.Return(obj);
+            }
+        });
+    }
+
+    [Benchmark(Description = "Concurrent-N | Hayate AllOff", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    [Arguments(1)]
+    [Arguments(4)]
+    [Arguments(8)]
+    [Arguments(16)]
+    public void Hayate_AllOff_ConcurrentTier(int threads)
+    {
+        var perWorker = TierTotalOps / threads;
+        Parallel.For(0, threads, OptionsFor(threads), _ =>
+        {
+            for (var i = 0; i < perWorker; i++)
+            {
+                var obj = _allOff.Acquire();
+                obj.Data++;
+                _allOff.Release(obj);
+            }
+        });
+    }
+
+    [Benchmark(Description = "Concurrent-N | Hayate Lean", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    [Arguments(1)]
+    [Arguments(4)]
+    [Arguments(8)]
+    [Arguments(16)]
+    public void Hayate_Lean_ConcurrentTier(int threads)
+    {
+        var perWorker = TierTotalOps / threads;
+        Parallel.For(0, threads, OptionsFor(threads), _ =>
+        {
+            for (var i = 0; i < perWorker; i++)
+            {
+                var obj = _lean.Acquire();
+                obj.Data++;
+                _lean.Release(obj);
+            }
+        });
+    }
+
+    [Benchmark(Description = "Concurrent-N | Hayate Sharded4", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    [Arguments(1)]
+    [Arguments(4)]
+    [Arguments(8)]
+    [Arguments(16)]
+    public void Hayate_Sharded_ConcurrentTier(int threads)
+    {
+        var perWorker = TierTotalOps / threads;
+        Parallel.For(0, threads, OptionsFor(threads), _ =>
+        {
+            for (var i = 0; i < perWorker; i++)
+            {
+                var obj = _sharded4.Acquire();
+                obj.Data++;
+                _sharded4.Release(obj);
+            }
+        });
+    }
+
+    [Benchmark(Description = "Concurrent-N | Reservoir", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    [Arguments(1)]
+    [Arguments(4)]
+    [Arguments(8)]
+    [Arguments(16)]
+    public void Reservoir_ConcurrentTier(int threads)
+    {
+        var perWorker = TierTotalOps / threads;
+        Parallel.For(0, threads, OptionsFor(threads), _ =>
+        {
+            for (var i = 0; i < perWorker; i++)
+            {
+                var obj = _reservoir.Rent();
+                obj.Data++;
+                _reservoir.Return(obj);
+            }
+        });
+    }
+
+    // ── Reservoir (thomhurst) policy ─────────────────────────
+
+    /// <summary>
+    /// Struct policy handed to the thomhurst pool. It has to be a struct, and it has to reach the
+    /// pool through <c>ObjectPool&lt;T, TPolicy&gt;</c>: <c>ObjectPool&lt;T&gt;</c> stores the policy as a
+    /// reference type, so a struct policy handed to that path is boxed once and its calls stay
+    /// type-erased - which would measure a deliberately handicapped Reservoir rather than the one
+    /// whose published concurrent numbers are the reason this column exists. The payload contract is
+    /// the same as every other row's - create a <see cref="PooledObject"/>, reset it on return - so
+    /// the pooled-object cost is identical across columns. <c>Destroy</c> is empty because nothing
+    /// about the payload needs releasing, which is the same reason every other row's policy has no
+    /// teardown work either.
+    /// </summary>
+    private struct ReservoirPolicy : Reservoir.IPooledObjectPolicy<PooledObject>
+    {
+        public PooledObject Create() => new PooledObject();
+
+        public bool TryReset(PooledObject obj)
+        {
+            obj.Reset();
+            return true;
+        }
+
+        public void Destroy(PooledObject obj)
+        {
+        }
     }
 
     // ── MSL.Pool (marklauter) adapters ───────────────────────

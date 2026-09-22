@@ -37,6 +37,17 @@
 		     modern target, so there is no asset-target fallback and no NU1701 - hence no NoWarn,
 		     unlike the TinyPools reference. Verified in obj/project.assets.json after restore. -->
 		<PackageReference Include="PoolingLib" Version="1.0.3" />
+		<!-- G-3 (second batch 33-R-1): thomhurst Reservoir head-to-head reference column. This is the
+		     only project in either research batch that combines production-grade engineering, a
+		     reproducible benchmark suite and a genuinely concurrent architecture, and its published
+		     concurrent numbers are the one piece of evidence that HayateOP may actually be slower
+		     under contention - which is why it earns a column rather than a footnote. The package
+		     ships netstandard2.0 / net8.0 / net10.0 assets with zero dependencies, so net10.0
+		     resolves its own asset directly: no asset-target fallback and no NU1701, hence no
+		     NoWarn, like the PowerPools and Chopin references and unlike TinyPools. Benchmark-only:
+		     the core package's zero-dependency design is deliberate, so this reference must never
+		     reach a shipped package. -->
+		<PackageReference Include="Reservoir" Version="1.9.1" />
 	</ItemGroup>
 
 </Project>
