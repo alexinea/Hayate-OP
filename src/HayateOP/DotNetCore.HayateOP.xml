@@ -1124,8 +1124,14 @@
             Cold boot. When the pool is completely empty (no idle and no borrowed) and the capacity limit &gt; 0,
             synchronously create the first object and borrow it directly (atomic de-duplication; concurrent first borrows create only one),
             eliminating the uncertainty of a Min=0 empty pool "waiting for a timeout to replenish" (empirically two failure timings).
-            Called only by the Block / BlockTimeout policies and the async wait path — CreateNew keeps the "create after the full timeout" semantics,
-            while Abort keeps the direct-reject semantics.
+            This is the only point at which a waiting policy grows the pool instead of waiting: the Block / BlockTimeout
+            cases below call it, the async wait path calls its asynchronous twin, and the create-on-demand policies
+            delegate to it first (see <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryCreateOnDemand(System.Int64)"/>). The "completely empty" precondition is therefore
+            load-bearing — <c>MaxPoolSize</c> is a ceiling for these policies, not a growth target, so a miss on a pool
+            that already tracks objects never grows the pool. What can still add objects while a caller waits is the
+            background scaler, on its own period, plus the one-step forced scale-up the timeout paths run just before
+            giving up. CreateNew deliberately keeps the "create after the full timeout" semantics, while Abort keeps the
+            direct-reject semantics.
             </summary>
             <returns>Object borrowed via cold boot; returns <c>null</c> when this call did not claim the boot (pool non-empty / at capacity / another thread is creating), and the caller should continue normal waiting.</returns>
         </member>

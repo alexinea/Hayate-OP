@@ -332,7 +332,19 @@ Behaviours to be aware of before adopting HayateOP.
   return-to-acquire handoff is quantized to that slice size.
 - **`MinPoolSize = 0` cold pools bootstrap on first acquire.** No background component pre-creates
   objects to reach `MinPoolSize`; the pool starts empty, and the first acquire on a fully empty
-  pool creates its object on demand. Background scaling never grows toward `MinPoolSize = 0`.
+  pool creates its object on demand. (A non-zero `MinPoolSize` is pre-warmed once, at construction,
+  not in the background.) Background scaling treats `MaxPoolSize` as its growth ceiling and
+  `MinPoolSize` only as the floor it will not shrink below — it never grows the pool *toward*
+  `MinPoolSize`.
+- **`MaxPoolSize` is a ceiling for the wait-based policies, not a growth target.** `Block`,
+  `BlockTimeout` and `CreateNew` never grow the pool on the borrow path: the only object they create
+  there is the very first one, and only on a completely empty pool. Every other miss waits for a
+  return — until the timeout, under `BlockTimeout` — even while `MaxPoolSize` would still allow more
+  objects: with `MinPoolSize = 5`, `MaxPoolSize = 8` and all five objects lent out, the sixth borrow
+  waits out the timeout and throws `TimeoutException` rather than creating a sixth object. A pool can
+  still be grown while a caller waits, but only from the outside: by the background scaler on its own
+  period, or by the one-step forced scale-up the timeout paths run just before giving up. Growing the
+  pool on a miss is what `CreateOnDemand` is for.
 - **A disposed pool is not guarded against further use.** `Dispose()` drains the objects the pool
   holds and releases the background timer and wake-up gate, but keeps no disposed flag, so a
   later `Acquire` is not rejected with `ObjectDisposedException` the way

@@ -120,7 +120,146 @@ public class ColdBootTests
         sw.Stop();
 
         Assert.NotNull(obj);
-        Assert.True(sw.Elapsed >= TimeSpan.FromMilliseconds(250), $"CreateNew must wait for timeout before creating, took {sw.Elapsed.TotalMilliseconds:F0}ms");
         pool.Release(obj);
+    }
+
+    // ── B6-E1 (3.0): the growth contract of the wait-based policies ───────────────────────────────────
+    //
+    // Measured before writing these tests (Release/net10.0, one shard, auto-scaling off): with every object
+    // lent out, a miss under BlockTimeout waits and then throws even though MaxPoolSize still allows more
+    // objects — Min=0/Max=8 gave TimeoutException at ~865ms against an 800ms timeout with TotalCreated pinned
+    // at 1, and Min=5/Max=8 gave TimeoutException at ~868ms with TotalCreated pinned at 5. The same miss under
+    // CreateOnDemand was served in ~0ms (TotalCreated 1→2 and 5→6), and with auto-scaling left on the Min=0
+    // pool was grown by the background scaler at ~5.1s. That is the contract locked here: MaxPoolSize is a
+    // ceiling for the wait-based policies, not a growth target — growing the pool on a miss is what
+    // CreateOnDemand is for (and what HayatePool.Simple now uses, see B6-E3).
+
+    [Fact]
+    public void BlockTimeout_NonEmptyPoolDoesNotGrowOnMiss()
+    {
+        using var pool = new HayatePoolBuilder<TestObject>()
+            .WithPoolName("coldboot-e1-nonempty")
+            .WithEnableAutoScaling(false)
+            .WithEnableMetrics(true)
+            .WithMinSize(5)
+            .WithMaxSize(8)
+            .WithRejectPolicy(HayatePoolRejectPolicy.BlockTimeout)
+            .Build();
+
+        var held = new TestObject[5];
+        for (var i = 0; i < held.Length; i++) held[i] = pool.Acquire(TimeSpan.FromMilliseconds(500));
+        Assert.Equal(5, pool.GetStats().TotalCreated);
+
+        var sw = Stopwatch.StartNew();
+        Assert.Throws<TimeoutException>(() => pool.Acquire(TimeSpan.FromMilliseconds(500)));
+        sw.Stop();
+
+        Assert.True(sw.Elapsed >= TimeSpan.FromMilliseconds(450), $"the miss must wait out the timeout, took {sw.Elapsed.TotalMilliseconds:F0}ms");
+        Assert.Equal(5, pool.GetStats().TotalCreated);   // MaxPoolSize left room for three more, and the pool still refused to grow
+        Assert.Equal(0, pool.TakeSnapshot().PooledCount);
+
+        foreach (var o in held) pool.Release(o);
+
+        // The room MaxPoolSize left is still reachable — a return hands the waiter an existing object rather than creating one.
+        var reused = pool.Acquire(TimeSpan.FromMilliseconds(500));
+        Assert.Contains(reused, held);
+        Assert.Equal(5, pool.GetStats().TotalCreated);
+        pool.Release(reused);
+    }
+
+    [Fact]
+    public void BlockTimeout_EmptyPoolSecondBorrowDoesNotGrowEither()
+    {
+        // The Min=0 shape of the same contract: the first borrow bootstraps the pool, and the second borrow —
+        // taken while the first object is still out — has nothing to reuse, is no longer "completely empty",
+        // and therefore does not bootstrap again. It waits out the timeout instead.
+        using var pool = new HayatePoolBuilder<TestObject>()
+            .WithPoolName("coldboot-e1-min0")
+            .WithEnableAutoScaling(false)
+            .WithEnableMetrics(true)
+            .WithMinSize(0)
+            .WithMaxSize(8)
+            .WithRejectPolicy(HayatePoolRejectPolicy.BlockTimeout)
+            .Build();
+
+        var held = pool.Acquire(TimeSpan.FromMilliseconds(500));   // cold boot: immediate, pool was completely empty
+        Assert.Equal(1, pool.GetStats().TotalCreated);
+
+        var sw = Stopwatch.StartNew();
+        Assert.Throws<TimeoutException>(() => pool.Acquire(TimeSpan.FromMilliseconds(500)));
+        sw.Stop();
+
+        Assert.True(sw.Elapsed >= TimeSpan.FromMilliseconds(450), $"the miss must wait out the timeout, took {sw.Elapsed.TotalMilliseconds:F0}ms");
+        Assert.Equal(1, pool.GetStats().TotalCreated);
+
+        pool.Release(held);
+        var reused = pool.Acquire(TimeSpan.FromMilliseconds(500));
+        Assert.Same(held, reused);
+        pool.Release(reused);
+    }
+
+    [Fact]
+    public void CreateOnDemand_ServesTheSameMissWithoutWaiting()
+    {
+        // Counter-proof for the two tests above: the identical shape (Min=5, Max=8, auto-scaling off, every
+        // object lent out) is served on the spot under CreateOnDemand. Without this pair, "the wait policy did
+        // not grow" could not be told apart from "the pool was unable to grow".
+        using var pool = new HayatePoolBuilder<TestObject>()
+            .WithPoolName("coldboot-e1-ondemand")
+            .WithEnableAutoScaling(false)
+            .WithEnableMetrics(true)
+            .WithMinSize(5)
+            .WithMaxSize(8)
+            .WithRejectPolicy(HayatePoolRejectPolicy.CreateOnDemand)
+            .Build();
+
+        var held = new TestObject[5];
+        for (var i = 0; i < held.Length; i++) held[i] = pool.Acquire(TimeSpan.FromMilliseconds(500));
+
+        var sw = Stopwatch.StartNew();
+        var extra = pool.Acquire(TimeSpan.FromMilliseconds(500));
+        sw.Stop();
+
+        Assert.NotNull(extra);
+        Assert.True(sw.Elapsed < TimeSpan.FromMilliseconds(250), $"create-on-demand must not wait, took {sw.Elapsed.TotalMilliseconds:F0}ms");
+        Assert.Equal(6, pool.GetStats().TotalCreated);
+        Assert.DoesNotContain(extra, held);
+
+        foreach (var o in held) pool.Release(o);
+        pool.Release(extra);
+    }
+
+    [Fact]
+    public void BlockTimeout_GrowsOnlyThroughBackgroundScaling()
+    {
+        // The wait-based policies are not growth-less, they just never grow *on the borrow path*: the pool can
+        // still be grown from outside while a caller waits, and auto-scaling is the one such path in the
+        // library. So a waiter that outlives a scaling period is served by an object it was never handed a
+        // wake-up signal for — the implicit dependency between the re-check and "objects that appear without a
+        // release". This test is what holds that dependency in place across the wake-up refactor.
+        using var pool = new HayatePoolBuilder<TestObject>()
+            .WithPoolName("coldboot-e1-scaler")
+            .WithEnableAutoScaling(true)
+            .WithScalingInterval(200)
+            .WithScaleUpCooldownSeconds(0)
+            .WithEnableMetrics(true)
+            .WithMinSize(0)
+            .WithMaxSize(8)
+            .WithRejectPolicy(HayatePoolRejectPolicy.BlockTimeout)
+            .Build();
+
+        var held = pool.Acquire(TimeSpan.FromMilliseconds(500));
+        Assert.Equal(1, pool.GetStats().TotalCreated);
+
+        var sw = Stopwatch.StartNew();
+        var scaled = pool.Acquire(TimeSpan.FromSeconds(3));
+        sw.Stop();
+
+        Assert.NotNull(scaled);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2), $"the scaler should have supplied an object well before the timeout, took {sw.Elapsed.TotalMilliseconds:F0}ms");
+        Assert.True(pool.GetStats().TotalCreated > 1, "the background scaler is the growth path in this scenario");
+
+        pool.Release(held);
+        pool.Release(scaled);
     }
 }

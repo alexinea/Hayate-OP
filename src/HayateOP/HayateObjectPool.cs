@@ -1015,7 +1015,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                 case HayatePoolRejectPolicy.Block:
                     {
-                        // Cold boot: when the pool is completely empty, create the first object on demand, deterministically eliminating the first-borrow hang
+                        // Cold boot: when the pool is completely empty, create the first object on demand, deterministically eliminating the first-borrow hang.
+                        // That "completely empty" precondition is the whole growth contract of this policy: a miss on a pool that already tracks objects
+                        // waits instead of growing, even while MaxPoolSize would still allow more. The wait is not a deadlock — the background scaler
+                        // may add objects on its own period while we wait — but this policy never grows the pool on the borrow path itself. Pinned by
+                        // ColdBootTests (BlockTimeout_NonEmptyPoolDoesNotGrowOnMiss).
                         var coldBoot = TryColdBootAcquire((long)sw.Elapsed.TotalMilliseconds);
                         if (coldBoot is not null) return coldBoot;
 
@@ -1028,7 +1032,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                 case HayatePoolRejectPolicy.BlockTimeout:
                     {
-                        // Cold boot: when the pool is completely empty, create the first object on demand, deterministically eliminating the first-borrow timeout
+                        // Cold boot: when the pool is completely empty, create the first object on demand, deterministically eliminating the first-borrow timeout.
+                        // Same growth contract as the Block case: a miss on a non-empty pool waits (here bounded by the timeout) rather than growing, so a
+                        // pool whose objects are all lent out reaches MaxPoolSize only through the background scaler — and a caller that gives up first sees a
+                        // TimeoutException even though the pool has room. Pinned by ColdBootTests (BlockTimeout_NonEmptyPoolDoesNotGrowOnMiss).
                         var coldBoot = TryColdBootAcquire((long)elapsed.TotalMilliseconds);
                         if (coldBoot is not null) return coldBoot;
 
@@ -1051,7 +1058,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         // Create-on-demand: while the pool can still grow, a miss is served by creating an
                         // object right away instead of making the caller wait out the timeout for a return
                         // that may never come. At capacity the request falls through to the wait-then-create
-                        // timing below, which is what CreateNew does in every case.
+                        // timing below, which is what CreateNew does in every case. CreateNew skips both fast
+                        // paths on purpose — no cold boot and no create-on-miss — and always waits the timeout
+                        // out first (see HayatePoolRejectPolicy.CreateNew).
                         if (_options.RejectPolicy == HayatePoolRejectPolicy.CreateOnDemand)
                         {
                             var onDemand = TryCreateOnDemand((long)sw.Elapsed.TotalMilliseconds);
@@ -1970,8 +1979,14 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// Cold boot. When the pool is completely empty (no idle and no borrowed) and the capacity limit &gt; 0,
     /// synchronously create the first object and borrow it directly (atomic de-duplication; concurrent first borrows create only one),
     /// eliminating the uncertainty of a Min=0 empty pool "waiting for a timeout to replenish" (empirically two failure timings).
-    /// Called only by the Block / BlockTimeout policies and the async wait path — CreateNew keeps the "create after the full timeout" semantics,
-    /// while Abort keeps the direct-reject semantics.
+    /// This is the only point at which a waiting policy grows the pool instead of waiting: the Block / BlockTimeout
+    /// cases below call it, the async wait path calls its asynchronous twin, and the create-on-demand policies
+    /// delegate to it first (see <see cref="TryCreateOnDemand"/>). The "completely empty" precondition is therefore
+    /// load-bearing — <c>MaxPoolSize</c> is a ceiling for these policies, not a growth target, so a miss on a pool
+    /// that already tracks objects never grows the pool. What can still add objects while a caller waits is the
+    /// background scaler, on its own period, plus the one-step forced scale-up the timeout paths run just before
+    /// giving up. CreateNew deliberately keeps the "create after the full timeout" semantics, while Abort keeps the
+    /// direct-reject semantics.
     /// </summary>
     /// <returns>Object borrowed via cold boot; returns <c>null</c> when this call did not claim the boot (pool non-empty / at capacity / another thread is creating), and the caller should continue normal waiting.</returns>
     private T? TryColdBootAcquire(long waitTimeMs)
