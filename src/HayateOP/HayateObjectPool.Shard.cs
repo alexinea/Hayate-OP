@@ -1,3 +1,4 @@
+using DotNetCore.HayateOP.Common;
 using DotNetCore.HayateOP.Logging;
 using System;
 using System.Collections.Concurrent;
@@ -9,7 +10,12 @@ namespace DotNetCore.HayateOP;
 
 public partial class HayatePoolBasic<T>
 {
-    internal class Shard
+    // The shard is the pool's stripe: one instance per shard, each with its own SpinLock, free list and
+    // counters, and the pool allocates them back to back in a single loop (see HayatePoolBasic<T>._shards).
+    // The cache-line padding below is what keeps two threads working on neighbouring shards out of each
+    // other's cache line - the leading half in the base class, the trailing half in the field at the
+    // bottom of this class. Layout only: no member, default value or behaviour changes.
+    internal class Shard : CacheLinePadded
     {
         private readonly IHayateLogger _logger;
 
@@ -592,5 +598,13 @@ public partial class HayatePoolBasic<T>
                 return false;
             }
         }
+
+        // Trailing half of the cache-line padding (see CacheLinePadded). It is declared here, by the most
+        // derived class, because that is the only place the runtime is willing to put it: the leading half
+        // is a field of the non-generic base, and a generic type - which this nested class is - is refused
+        // explicit layout. Declaring it is the whole point; nothing ever reads or writes it.
+#pragma warning disable CS0169, CS0649 // The field is there to occupy space, never to be read or written.
+        private readonly CacheLinePad _trailingPad;
+#pragma warning restore CS0169, CS0649
     }
 }
