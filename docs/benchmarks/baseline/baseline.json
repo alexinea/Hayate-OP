@@ -76,7 +76,9 @@
       "p50Ns": 365.8,
       "p90Ns": 381.0,
       "p95Ns": 381.0,
-      "p99Ns": 381.0
+      "p99Ns": 381.0,
+      "allocGateExempt": true,
+      "allocGateExemptReason": "Host-specific byte count: 0 B on the CI runner, 416 B on a workstation (3/3 runs)."
     },
     {
       "method": "Release | Hayate AllOff",
@@ -123,6 +125,8 @@
       "p90Ns": 72.3,
       "p95Ns": 73.3,
       "p99Ns": 73.3,
+      "allocGateExempt": true,
+      "allocGateExemptReason": "Order-dependent byte count: the same binary reads 0 B / 113 B / 439 B depending on which benchmarks ran earlier in the process.",
       "warnMeanPercentOverride": 30.0,
       "failMeanPercentOverride": 60.0
     },
@@ -135,7 +139,9 @@
       "p50Ns": 280.3,
       "p90Ns": 283.8,
       "p95Ns": 287.8,
-      "p99Ns": 287.8
+      "p99Ns": 287.8,
+      "allocGateExempt": true,
+      "allocGateExemptReason": "Order- and host-dependent byte count: 392 B alone, 928 B after the full hot suite, 0 B on CI."
     }
   ]
 }

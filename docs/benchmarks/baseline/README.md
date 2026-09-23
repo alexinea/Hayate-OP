@@ -26,8 +26,16 @@ workflow (`.github/workflows/perf-regression.yml`) through `scripts/bench-compar
    lean rows are measured across a ~1.9× run-to-run range locally, so they run 30/60). A
    benchmark report cannot express them, so `--emit-baseline-file` inherits them from the
    baseline it replaces, matched by method name.
-5. Reference rows (`MEOP`, plain `new`) are reported for context and never gated.
-6. Results are written to the job summary; the full BenchmarkDotNet report is uploaded
+5. A target may carry `allocGateExempt: true` when its allocated byte count is not
+   reproducible across runs or hosts. The allocation delta is then reported as an advisory
+   notice instead of a pass/fail signal; the **mean-time gate still applies** to that row.
+   `ALLOC_GATE_EXEMPT_METHODS` in `scripts/bench-compare.py` is the single source of truth
+   (each entry carries the measurement that justifies it) and `allocGateExemptReason` is
+   written into `baseline.json` for readers. Like `gated` / `excluded`, the flag is derived
+   from the method name, so a re-capture cannot drop it. Three rows carry it — see
+   [Allocation gate exemptions](#allocation-gate-exemptions).
+6. Reference rows (`MEOP`, plain `new`) are reported for context and never gated.
+7. Results are written to the job summary; the full BenchmarkDotNet report is uploaded
    as a workflow artifact.
 
 ## Gate mode: calibration vs enforcing
@@ -69,7 +77,31 @@ hand after it. The emit path inherits them now — see the note in the runbook b
 >   hand before committing — that is what `Acquire+Release | Hayate Lean`, `Release | Hayate Lean`
 >   and `AcquireAsync+Release | Hayate Lean` need (warn 30 / fail 60).
 > - **A renamed benchmark counts as a new row.** Inheritance is by method name, so a row that is
->   renamed comes back without its overrides; rename and re-capture in the same change.
+>   renamed comes back without its overrides; rename and re-capture in the same change. The
+>   allocation-gate exemption below is matched by method name too, so a rename drops it as well
+>   — and `ALLOC_GATE_EXEMPT_METHODS` has to be updated alongside.
+
+## Allocation gate exemptions
+
+Three rows measure an allocated byte count that is not a property of the code, so the
+allocation gate cannot be a pass/fail signal for them. Reproduced on 2026-09-23 while
+preparing the 3.0 re-capture:
+
+| Row | Observation |
+| :--- | :--- |
+| `Acquire+Release \| Hayate Full` | 0 B on the CI runner, **416 B** on a workstation in 3 out of 3 runs. |
+| `AcquireAsync+Release \| Hayate Lean` | **0 B / 113 B / 439 B** for the same binary, depending on which benchmarks ran earlier in the process. The committed baseline reads 0 B and the 2026-09-23 CI run reads 113 B — CI against CI, so the spread is not merely cross-environment. |
+| `AcquireAsync+Release \| Hayate Full` | 392 B when run alone, **928 B** after the full `hot` suite, 0 B on CI. The committed baseline (captured on CI) reads 392 B while a later CI run reads 0 B. |
+
+Both async rows allocate through continuations, and their byte count tracks which benchmarks
+ran earlier in the same process rather than the code under test; the synchronous `Full` row's
+absolute byte count is host-specific. The precise mechanism (BenchmarkDotNet's per-benchmark
+allocation accounting versus pool state left behind by earlier benchmarks) is not pinned down,
+so the exemption records the observation, not a causal claim.
+
+Exempting these rows costs only the allocation signal on them. Their mean-time gate still
+enforces — verified by a counter-run in which a +40% mean on an exempt row still fails the job
+— and the allocation delta still appears in the job summary, as a notice.
 
 Local captures stay useful for spot checks, but never commit a local capture as the gate
 baseline — that is exactly the cross-environment comparison the calibration flag guards
@@ -93,6 +125,7 @@ python scripts/bench-compare.py --emit-baseline-file candidate.json   # never co
 | `failMeanPercentOverride` | – | per-target failure threshold (replaces the global for that row) |
 | `allocWarnBytes` | 0 | allocated-bytes growth that raises a warning |
 | `allocFailBytes` | 64 | allocated-bytes growth that fails the gate |
+| `allocGateExempt` | – | per-target: the row's allocation delta is advisory only, never a gate |
 
 Thresholds live in `baseline.json`. The `concurrent` category is never gated (only the `hot`
 category is run in CI) because its run-to-run variance exceeds the thresholds; the sub-100 ns

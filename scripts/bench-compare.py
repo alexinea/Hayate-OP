@@ -27,6 +27,12 @@ thresholds for that benchmark alone. Use them for rows whose measured run-to-run
 exceeds the global threshold (e.g. the sub-100 ns lean rows). A benchmark report cannot
 express them, so ``--emit-baseline-file`` inherits them from the baseline it is replacing
 (matched by method name) instead of silently reverting those rows to the global defaults.
+
+Allocation gate exemptions: a few rows measure an allocated byte count that is not
+reproducible across runs or hosts (``ALLOC_GATE_EXEMPT_METHODS`` records each one and why).
+For those rows the allocation delta is reported as an advisory notice rather than a
+pass/fail signal, while the mean-time gate stays in force. The exemption is derived from the
+method name - the same way ``gated`` / ``excluded`` are - so a re-capture cannot drop it.
 """
 
 from __future__ import annotations
@@ -64,6 +70,26 @@ SIZE_UNITS_TO_BYTES = {
 # overrides on the three sub-100 ns lean rows came back as the global 15/30 on every
 # re-capture and failed the gate on ordinary run-to-run noise.
 INHERITED_TARGET_KEYS = ("warnMeanPercentOverride", "failMeanPercentOverride")
+
+# Rows whose allocated byte count is a measurement artefact rather than a property of the
+# code, so the allocation gate cannot be a pass/fail signal for them. Reproduced on
+# 2026-09-23 while preparing the 3.0 re-capture: the same binary reads 0 B / 113 B / 439 B on
+# `AcquireAsync+Release | Hayate Lean` depending on which benchmarks ran before it in the
+# process, `AcquireAsync+Release | Hayate Full` reads 392 B alone and 928 B after the full hot
+# suite, and `Acquire+Release | Hayate Full` reads 0 B on the CI runner but 416 B on a
+# workstation in 3 out of 3 runs. The mean-time gate stays in force for these rows; only the
+# allocation delta is downgraded to an advisory notice. Keep this list short and
+# evidence-backed - it records a measurement caveat, it is not a way to silence a regression.
+ALLOC_GATE_EXEMPT_METHODS = {
+    "Acquire+Release | Hayate Full":
+        "Host-specific byte count: 0 B on the CI runner, 416 B on a workstation (3/3 runs).",
+    "AcquireAsync+Release | Hayate Lean":
+        "Order-dependent byte count: the same binary reads 0 B / 113 B / 439 B depending on "
+        "which benchmarks ran earlier in the process.",
+    "AcquireAsync+Release | Hayate Full":
+        "Order- and host-dependent byte count: 392 B alone, 928 B after the full hot suite, "
+        "0 B on CI.",
+}
 
 _NUMBER_RE = re.compile(r"^([+-]?[0-9][0-9,\.]*)")
 
@@ -185,6 +211,7 @@ def build_baseline_json(report_path: str, results, previous=None):
 
     targets = []
     inherited = {}
+    exempted = []
     for method, data in results.items():
         if data["meanNs"] is None:
             continue
@@ -215,6 +242,11 @@ def build_baseline_json(report_path: str, results, previous=None):
         if excluded:
             target["excluded"] = True
             target["exclusionReason"] = "High run-to-run variance; recorded for context only."
+        exempt_reason = ALLOC_GATE_EXEMPT_METHODS.get(method)
+        if exempt_reason:
+            target["allocGateExempt"] = True
+            target["allocGateExemptReason"] = exempt_reason
+            exempted.append(method)
         carried = inheritable.get(method)
         if carried:
             target.update(carried)
@@ -240,6 +272,15 @@ def build_baseline_json(report_path: str, results, previous=None):
             "forward and a re-capture no longer reverts those rows to the global defaults."
         )
         notes.append("Inherited on: %s." % ", ".join(sorted(inherited)))
+
+    if exempted:
+        notes.append(
+            "The allocation gate is exempt on rows whose allocated byte count is not"
+        )
+        notes.append(
+            "reproducible across runs or hosts (the mean-time gate still applies): %s."
+            % ", ".join(sorted(exempted))
+        )
 
     payload = {
         "schemaVersion": 1,
@@ -401,7 +442,9 @@ def main() -> int:
                     method, _fmt_bytes(base_alloc), _fmt_bytes(alloc), _fmt_bytes(delta_bytes))
                 # The allocation gate runs on CI-native baselines; while the baseline is
                 # cross-environment, allocation deltas are advisory only.
-                if delta_bytes >= alloc_fail and not calibration:
+                if target.get("allocGateExempt"):
+                    notices.append(message + " (allocation gate exempt: not reproducible)")
+                elif delta_bytes >= alloc_fail and not calibration:
                     status = "**FAIL**"
                     failures.append(message + " (>= alloc fail threshold)")
                 elif delta_bytes >= alloc_warn and not calibration:
