@@ -1,34 +1,17 @@
 <Project>
 
-    <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
-        <!-- net48 兼容（S2）：M.E 8.x 包族含 net48 资产（评估已实证） -->
-        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
-        <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
-    </ItemGroup>
+    <!-- 版本单一来源（L9）：全部第三方版本见 asset/props/dependency.versions.props，
+         本文件不再出现版本字面量。 -->
+    <Import Project="..\..\asset\props\dependency.versions.props" />
 
-    <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
-        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.3" />
-        <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.3" />
-    </ItemGroup>
-
-    <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
-        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.13" />
-        <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.13" />
-    </ItemGroup>
-
-    <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
-        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
-        <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
-    </ItemGroup>
-
-    <ItemGroup Condition="'$(TargetFramework)' == 'net7.0'">
-        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="7.0.0" />
-        <PackageReference Include="Microsoft.Extensions.Logging" Version="7.0.0" />
-    </ItemGroup>
-
-    <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
-        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="6.0.0" />
-        <PackageReference Include="Microsoft.Extensions.Logging" Version="6.0.1" />
+    <!-- net48 兼容（S2）：M.E 8.x 包族含 net48 资产（评估已实证）。
+         日志线取同代际口径（L9）：本包的 `Microsoft.Extensions.Logging` 与 Configuration 包的
+         `Microsoft.Extensions.Logging.Abstractions` 在同一 TFM 上**同代际**（8.0.x / 7.0.x / 6.0.x /
+         9.0.x / 10.0.x）。两者补丁号不同是上游发布节奏所致——全包从未发布 6.0.4 / 7.0.1 / 8.0.3，
+         详见 versions 文件。 -->
+    <ItemGroup Condition=" '$(TargetFramework)' != '' ">
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="$(HayateMediAbstractionsVersion)" />
+        <PackageReference Include="Microsoft.Extensions.Logging" Version="$(HayateMelLoggingVersion)" />
     </ItemGroup>
 
 </Project>

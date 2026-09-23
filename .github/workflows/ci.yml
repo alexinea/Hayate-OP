@@ -30,6 +30,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # L9: every dependency version the packages ship is declared once, in
+      # asset/props/dependency.versions.props, and the logging line has to stay on one generation
+      # per target framework. Both are pure XML facts, so this needs no restore and fails before the
+      # build starts. A convention nobody runs drifts -- the same argument common.props makes for
+      # TreatWarningsAsErrors.
+      - name: Check dependency versions
+        run: python scripts/check-dependency-versions.py
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:

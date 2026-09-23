@@ -1,10 +1,12 @@
 <Project>
 
+    <Import Project="..\..\asset\props\dependency.versions.props" />
+
     <!-- net48 资产依赖（Z1）：System.Memory 为特化包首个 net48-only NuGet 依赖（核心库不受影响），
          为 HayateValueStringBuilder 的 Span<char> 缓冲面提供 net48 支持；net6+ 走 BCL 内建，不引用本包。
-         引用模式沿用 DI 包 dependency.props 先例。 -->
+         引用模式沿用 DI 包 dependency.props 先例。版本单一来源见 asset/props/dependency.versions.props（L9）。 -->
     <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
-        <PackageReference Include="System.Memory" Version="4.5.5" />
+        <PackageReference Include="System.Memory" Version="$(HayateSystemMemoryVersion)" />
     </ItemGroup>
 
 </Project>

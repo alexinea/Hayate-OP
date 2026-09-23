@@ -1,0 +1,134 @@
+<Project>
+
+    <!--
+        依赖版本单一来源（L9 / 3.0）
+
+        本文件是**随包发布**的第三方依赖版本的唯一声明处。此前同一个版本字面量在各包的
+        `dependency.props` / `references.props` 里按 TFM 各写一遍（DI 包 12 处、Configuration 包
+        24 处、HealthCheck 包 6 处……），改一个 TFM 要动 6 个地方，且没有任何机制保证 DI 包与
+        Configuration 包在同一 TFM 上落在同一代际。
+
+        现在：本文件按 TFM 给出变量，各 `dependency.props` 只引用变量，**不再出现版本字面量**。
+
+        ══ 关于「DI 包的 `Microsoft.Extensions.Logging` 与 Configuration 包的
+           `Microsoft.Extensions.Logging.Abstractions` 版本对齐」（L9 原文）══
+
+        该措辞**按字面不可达，已实测证伪**。两个包并不同步发布补丁；nuget.org 平铺容器实测
+        （2026-09-23，`api.nuget.org/v3-flatcontainer/<id>/index.json`）：
+
+            Microsoft.Extensions.Logging               6.0.0, 6.0.1 | 7.0.0 | 8.0.0, 8.0.1
+            Microsoft.Extensions.Logging.Abstractions  6.0.0 … 6.0.4 | 7.0.0, 7.0.1 | 8.0.0 … 8.0.3
+
+        ⇒ 全包**从未发布** 6.0.4 / 7.0.1 / 8.0.3，故 6.x / 7.x / 8.x 三代上「两者版本号相同」
+        不可能成立；只有 9.x / 10.x 两代两边都存在同一补丁（本仓已同为 9.0.13 / 10.0.3）。
+
+        可达且真正有意义的对齐 = **同代际（major.minor 相同）**，且各自取本代际内可得的最高补丁。
+        6/7/8 三代本仓两包**均已在本代际最高补丁**（Logging 8.0.1 / 7.0.0 / 6.0.1，
+        Abstractions 8.0.3 / 7.0.1 / 6.0.4）⇒ **对齐已成立，本项不引入任何版本变更**。
+        本项因此只做「单一来源 + 把该不变量变成可执行检查」（`_l9_band_check.py`）。
+
+        ══ 口径边界 ══
+        含：`src/` 下随包发布的依赖版本（决定 nupkg 的依赖组）。
+        不含：`tests/`（`IsPackable=false`，各测试项目自持开发工具链版本）与构建期包
+        （`asset/props/sourcelink.env.props` 的 SourceLink 包）。
+    -->
+
+    <!-- ═══════════ 日志线（MEL） ═══════════ -->
+
+    <!-- DI 包 `Microsoft.Extensions.Logging`：6/7/8 三代取本代际最高补丁。 -->
+    <PropertyGroup>
+        <HayateMelLoggingVersion Condition=" '$(TargetFramework)' == 'net48' ">8.0.1</HayateMelLoggingVersion>
+        <HayateMelLoggingVersion Condition=" '$(TargetFramework)' == 'net6.0' ">6.0.1</HayateMelLoggingVersion>
+        <HayateMelLoggingVersion Condition=" '$(TargetFramework)' == 'net7.0' ">7.0.0</HayateMelLoggingVersion>
+        <HayateMelLoggingVersion Condition=" '$(TargetFramework)' == 'net8.0' ">8.0.1</HayateMelLoggingVersion>
+        <HayateMelLoggingVersion Condition=" '$(TargetFramework)' == 'net9.0' ">9.0.13</HayateMelLoggingVersion>
+        <HayateMelLoggingVersion Condition=" '$(TargetFramework)' == 'net10.0' ">10.0.3</HayateMelLoggingVersion>
+    </PropertyGroup>
+
+    <!-- Configuration 包 `Microsoft.Extensions.Logging.Abstractions`：日志线的**锚**。 -->
+    <PropertyGroup>
+        <HayateMelLoggingAbstractionsVersion Condition=" '$(TargetFramework)' == 'net48' ">8.0.3</HayateMelLoggingAbstractionsVersion>
+        <HayateMelLoggingAbstractionsVersion Condition=" '$(TargetFramework)' == 'net6.0' ">6.0.4</HayateMelLoggingAbstractionsVersion>
+        <HayateMelLoggingAbstractionsVersion Condition=" '$(TargetFramework)' == 'net7.0' ">7.0.1</HayateMelLoggingAbstractionsVersion>
+        <HayateMelLoggingAbstractionsVersion Condition=" '$(TargetFramework)' == 'net8.0' ">8.0.3</HayateMelLoggingAbstractionsVersion>
+        <HayateMelLoggingAbstractionsVersion Condition=" '$(TargetFramework)' == 'net9.0' ">9.0.13</HayateMelLoggingAbstractionsVersion>
+        <HayateMelLoggingAbstractionsVersion Condition=" '$(TargetFramework)' == 'net10.0' ">10.0.3</HayateMelLoggingAbstractionsVersion>
+    </PropertyGroup>
+
+    <!-- ═══════════ DI 线 ═══════════ -->
+    <PropertyGroup>
+        <HayateMediAbstractionsVersion Condition=" '$(TargetFramework)' == 'net48' ">8.0.2</HayateMediAbstractionsVersion>
+        <HayateMediAbstractionsVersion Condition=" '$(TargetFramework)' == 'net6.0' ">6.0.0</HayateMediAbstractionsVersion>
+        <HayateMediAbstractionsVersion Condition=" '$(TargetFramework)' == 'net7.0' ">7.0.0</HayateMediAbstractionsVersion>
+        <HayateMediAbstractionsVersion Condition=" '$(TargetFramework)' == 'net8.0' ">8.0.2</HayateMediAbstractionsVersion>
+        <HayateMediAbstractionsVersion Condition=" '$(TargetFramework)' == 'net9.0' ">9.0.13</HayateMediAbstractionsVersion>
+        <HayateMediAbstractionsVersion Condition=" '$(TargetFramework)' == 'net10.0' ">10.0.3</HayateMediAbstractionsVersion>
+    </PropertyGroup>
+
+    <!-- ═══════════ Configuration 族 ═══════════ -->
+    <PropertyGroup>
+        <HayateConfigurationVersion Condition=" '$(TargetFramework)' == 'net48' ">8.0.0</HayateConfigurationVersion>
+        <HayateConfigurationVersion Condition=" '$(TargetFramework)' == 'net6.0' ">6.0.2</HayateConfigurationVersion>
+        <HayateConfigurationVersion Condition=" '$(TargetFramework)' == 'net7.0' ">7.0.0</HayateConfigurationVersion>
+        <HayateConfigurationVersion Condition=" '$(TargetFramework)' == 'net8.0' ">8.0.0</HayateConfigurationVersion>
+        <HayateConfigurationVersion Condition=" '$(TargetFramework)' == 'net9.0' ">9.0.13</HayateConfigurationVersion>
+        <HayateConfigurationVersion Condition=" '$(TargetFramework)' == 'net10.0' ">10.0.3</HayateConfigurationVersion>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <HayateConfigurationBinderVersion Condition=" '$(TargetFramework)' == 'net48' ">8.0.2</HayateConfigurationBinderVersion>
+        <HayateConfigurationBinderVersion Condition=" '$(TargetFramework)' == 'net6.0' ">6.0.1</HayateConfigurationBinderVersion>
+        <HayateConfigurationBinderVersion Condition=" '$(TargetFramework)' == 'net7.0' ">7.0.4</HayateConfigurationBinderVersion>
+        <HayateConfigurationBinderVersion Condition=" '$(TargetFramework)' == 'net8.0' ">8.0.2</HayateConfigurationBinderVersion>
+        <HayateConfigurationBinderVersion Condition=" '$(TargetFramework)' == 'net9.0' ">9.0.13</HayateConfigurationBinderVersion>
+        <HayateConfigurationBinderVersion Condition=" '$(TargetFramework)' == 'net10.0' ">10.0.3</HayateConfigurationBinderVersion>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <HayateOptionsConfigurationExtensionsVersion Condition=" '$(TargetFramework)' == 'net48' ">8.0.0</HayateOptionsConfigurationExtensionsVersion>
+        <HayateOptionsConfigurationExtensionsVersion Condition=" '$(TargetFramework)' == 'net6.0' ">6.0.1</HayateOptionsConfigurationExtensionsVersion>
+        <HayateOptionsConfigurationExtensionsVersion Condition=" '$(TargetFramework)' == 'net7.0' ">7.0.0</HayateOptionsConfigurationExtensionsVersion>
+        <HayateOptionsConfigurationExtensionsVersion Condition=" '$(TargetFramework)' == 'net8.0' ">8.0.0</HayateOptionsConfigurationExtensionsVersion>
+        <HayateOptionsConfigurationExtensionsVersion Condition=" '$(TargetFramework)' == 'net9.0' ">9.0.13</HayateOptionsConfigurationExtensionsVersion>
+        <HayateOptionsConfigurationExtensionsVersion Condition=" '$(TargetFramework)' == 'net10.0' ">10.0.3</HayateOptionsConfigurationExtensionsVersion>
+    </PropertyGroup>
+
+    <!-- ═══════════ HealthCheck ═══════════ -->
+    <!-- 口径与其它包不同：跟**运行时波段**（6.0.36 / 7.0.20 / 8.0.24）而非 MEL 补丁节奏走。 -->
+    <PropertyGroup>
+        <HayateHealthChecksVersion Condition=" '$(TargetFramework)' == 'net48' ">8.0.0</HayateHealthChecksVersion>
+        <HayateHealthChecksVersion Condition=" '$(TargetFramework)' == 'net6.0' ">6.0.36</HayateHealthChecksVersion>
+        <HayateHealthChecksVersion Condition=" '$(TargetFramework)' == 'net7.0' ">7.0.20</HayateHealthChecksVersion>
+        <HayateHealthChecksVersion Condition=" '$(TargetFramework)' == 'net8.0' ">8.0.24</HayateHealthChecksVersion>
+        <HayateHealthChecksVersion Condition=" '$(TargetFramework)' == 'net9.0' ">9.0.13</HayateHealthChecksVersion>
+        <HayateHealthChecksVersion Condition=" '$(TargetFramework)' == 'net10.0' ">10.0.3</HayateHealthChecksVersion>
+    </PropertyGroup>
+
+    <!-- ═══════════ Endpoints ═══════════ -->
+    <PropertyGroup>
+        <HayateAspNetCoreOpenApiVersion Condition=" '$(TargetFramework)' == 'net7.0' ">7.0.20</HayateAspNetCoreOpenApiVersion>
+        <HayateAspNetCoreOpenApiVersion Condition=" '$(TargetFramework)' == 'net8.0' ">8.0.24</HayateAspNetCoreOpenApiVersion>
+        <HayateAspNetCoreOpenApiVersion Condition=" '$(TargetFramework)' == 'net9.0' ">9.0.13</HayateAspNetCoreOpenApiVersion>
+        <HayateAspNetCoreOpenApiVersion Condition=" '$(TargetFramework)' == 'net10.0' ">10.0.3</HayateAspNetCoreOpenApiVersion>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <HayateSwashbuckleVersion Condition=" '$(TargetFramework)' == 'net6.0' ">6.5.0</HayateSwashbuckleVersion>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <HayateMicrosoftOpenApiVersion Condition=" '$(TargetFramework)' == 'net10.0' ">2.7.6</HayateMicrosoftOpenApiVersion>
+    </PropertyGroup>
+
+    <!-- ═══════════ Specialized ═══════════ -->
+    <PropertyGroup>
+        <HayateSystemMemoryVersion Condition=" '$(TargetFramework)' == 'net48' ">4.5.5</HayateSystemMemoryVersion>
+    </PropertyGroup>
+
+    <!-- ═══════════ ObjectPoolCompat ═══════════ -->
+    <!-- 不随 TFM 变化。本机 NuGet 缓存已有 10.0.3（镜像 nuget.alexinea.com 当前不可用，勿升级版本号）。 -->
+    <PropertyGroup>
+        <HayateObjectPoolVersion>10.0.3</HayateObjectPoolVersion>
+    </PropertyGroup>
+
+</Project>

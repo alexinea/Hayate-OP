@@ -1,32 +1,36 @@
 <Project>
 
+    <Import Project="..\..\asset\props\dependency.versions.props" />
+
     <ItemGroup>
       <ProjectReference Include="..\HayateOP.Extensions.DependencyInjection\HayateOP.Extensions.DependencyInjection.csproj" />
       <ProjectReference Include="..\HayateOP\HayateOP.csproj" />
     </ItemGroup>
 
+    <!-- 本包按 TFM 引**不同包**（net6.0 用 Swashbuckle，net7.0+ 用 AspNetCore.OpenApi）⇒ 保留
+         逐 TFM 的 ItemGroup 结构，只把版本换成变量（L9）。 -->
     <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
-		<PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.3" />
+		<PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="$(HayateAspNetCoreOpenApiVersion)" />
 		<!-- A6（2.2 安全升级）：显式固定传递依赖 Microsoft.OpenApi ≥ 2.7.5，
 		     修复 GHSA-v5pm-xwqc-g5wc（CVE-2026-49451 循环 $ref 栈溢出 DoS，CVSS 7.5） -->
-		<PackageReference Include="Microsoft.OpenApi" Version="2.7.6" />
+		<PackageReference Include="Microsoft.OpenApi" Version="$(HayateMicrosoftOpenApiVersion)" />
 	</ItemGroup>
 
     <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
-        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.13" />
+        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="$(HayateAspNetCoreOpenApiVersion)" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
-        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.24" />
+        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="$(HayateAspNetCoreOpenApiVersion)" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(TargetFramework)' == 'net7.0'">
-        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="7.0.20" />
+        <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="$(HayateAspNetCoreOpenApiVersion)" />
     </ItemGroup>
 
     <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
-        <PackageReference Include="Swashbuckle.AspNetCore.Annotations" Version="6.5.0" />
-        <PackageReference Include="Swashbuckle.AspNetCore.SwaggerGen" Version="6.5.0" />
+        <PackageReference Include="Swashbuckle.AspNetCore.Annotations" Version="$(HayateSwashbuckleVersion)" />
+        <PackageReference Include="Swashbuckle.AspNetCore.SwaggerGen" Version="$(HayateSwashbuckleVersion)" />
     </ItemGroup>
     
 </Project>

@@ -1,48 +1,16 @@
 <Project>
 
-	<!-- net48 覆盖（B7 / W-B7-2）：M.E 8.x 包族含 netstandard2.0 / net462 资产（DI 包 net48 已实证），
-		 故 net48 取 8.x 一支，与 net8.0 同版本；硬约束是「core 与其它扩展包的依赖面不变」，
-		 本段只对本包 net48 生效。 -->
-	<ItemGroup Condition="'$(TargetFramework)' == 'net48'">
-		<PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.2" />
-		<PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
-	</ItemGroup>
+    <Import Project="..\..\asset\props\dependency.versions.props" />
 
-	<ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
-		<PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.3" />
-		<PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.3" />
-		<PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.3" />
-		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.3" />
-	</ItemGroup>
-
-	<ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
-		<PackageReference Include="Microsoft.Extensions.Configuration" Version="9.0.13" />
-		<PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.13" />
-		<PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="9.0.13" />
-		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.13" />
-	</ItemGroup>
-
-	<ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
-		<PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.2" />
-		<PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
-	</ItemGroup>
-
-	<ItemGroup Condition="'$(TargetFramework)' == 'net7.0'">
-		<PackageReference Include="Microsoft.Extensions.Configuration" Version="7.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="7.0.4" />
-		<PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="7.0.0" />
-		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="7.0.1" />
-	</ItemGroup>
-
-	<ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
-		<PackageReference Include="Microsoft.Extensions.Configuration" Version="6.0.2" />
-		<PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="6.0.1" />
-		<PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="6.0.1" />
-		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.4" />
-	</ItemGroup>
+    <!-- net48 覆盖（B7 / W-B7-2）：M.E 8.x 包族含 netstandard2.0 / net462 资产（DI 包 net48 已实证），
+         故 net48 取 8.x 一支，与 net8.0 同版本；硬约束是「core 与其它扩展包的依赖面不变」，
+         本段只对本包 net48 生效。
+         本包的 `Microsoft.Extensions.Logging.Abstractions` 是日志线的**锚**（L9）。 -->
+    <ItemGroup Condition=" '$(TargetFramework)' != '' ">
+        <PackageReference Include="Microsoft.Extensions.Configuration" Version="$(HayateConfigurationVersion)" />
+        <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="$(HayateConfigurationBinderVersion)" />
+        <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="$(HayateOptionsConfigurationExtensionsVersion)" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="$(HayateMelLoggingAbstractionsVersion)" />
+    </ItemGroup>
 
 </Project>
