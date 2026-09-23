@@ -69,7 +69,11 @@ wrong.
 > **.NET Standard 2.0 support (added in 2.5)** ships for the **core package only** (`DotNetCore.HayateOP`),
 > targeting Unity / Xamarin / older .NET hosts that cannot consume `net6.0`+ or `net48` assets. On
 > `netstandard2.0` / `net48`, allocation tracking reports `0` (no `GC.GetAllocatedBytesForCurrentThread`)
-> and `Math.Clamp` falls back to an equivalent `Max/Min` composition.
+> and `Math.Clamp` falls back to an equivalent `Max/Min` composition. The asset was reviewed and
+> **retained for 3.0**: the core library contains no `netstandard2.0`-only conditional block (its two
+> `NETSTANDARD` gates are shared with `net48`, and the remaining 41 are `net6.0+` feature gates or
+> `DEBUG`), so the target costs one compile leg and nothing else, while dropping it would remove a
+> package asset — a breaking change with no matching benefit.
 > **Unity / IL2CPP guidance**: the core package is a single `netstandard2.0` assembly with no external
 > dependencies, which is the shape Unity's IL2CPP AOT pipeline consumes directly — the core borrow /
 > return path uses no reflection, no `Expression` compilation and no dynamic code generation. For AOT
