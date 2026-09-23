@@ -124,4 +124,4 @@ finally
 * [`docs/hot-path-costs.md`](hot-path-costs.md) — what eviction and the other background
   features cost, including the destroy path they share with `Clear()`.
 * [`docs/BREAKING-CHANGES.md`](BREAKING-CHANGES.md) — the behavioural notes for
-  `CreateNew`, blocking wake-up granularity and `MinPoolSize = 0` cold pools.
+  `CreateNew`, lean mode's blocking wake-up granularity and `MinPoolSize = 0` cold pools.

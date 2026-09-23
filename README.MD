@@ -17,7 +17,7 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 - **Leak Detection**: Tracks and reports potential object leaks; stack-trace capture is opt-in (`Off` / `Sampled` / `EveryAcquire`) since 2.1.
 - **Abandoned Recovery**: Optional reclamation of borrowed objects never returned past `RemoveAbandonedTimeout` (CHOPIN `AbandonedConfig` semantics; destructive, off by default).
 - **Metrics & Monitoring**: Comprehensive statistics and snapshot capabilities, plus an `EnableDiagnostics` master switch that takes the whole bookkeeping surface (counters, timing stats, metrics sink, per-operation trace) off the borrow and return paths in one call.
-- **Multiple Reject Policies**: `Abort`, `Block`, `BlockTimeout`, and `CreateNew`.
+- **Multiple Reject Policies**: `Abort`, `Block`, `BlockTimeout`, `CreateNew`, and `CreateOnDemand`.
 - **Dependency Injection Integration**: Seamless integration with `Microsoft.Extensions.DependencyInjection`.
 - **ASP.NET Core Endpoints**: Built-in management endpoints for monitoring and configuration.
 - **Health Checks**: ASP.NET Core health check integration to monitor pool status in production.
@@ -137,8 +137,11 @@ pool.Dispose();
 ### One-call pools
 
 `HayatePool.Simple` builds a pool from nothing more than a size and a factory — no options object, no
-policy class. Objects keep every documented default, and the size you pass is the ceiling, not something
-to fill eagerly: nothing is created until the first borrow.
+policy class. The size you pass is the ceiling, not something to fill eagerly: nothing is created until
+the first borrow, and a miss inside that size creates another object instead of waiting for a return, so
+"a pool of n objects" is what the call gives you. At the size itself the borrow waits for a return and
+then creates one anyway, which is how the create-on-miss policies have always behaved. Everything else
+keeps its documented default.
 
 ```csharp
 using DotNetCore.HayateOP;
@@ -946,7 +949,7 @@ HayateOP follows Semantic Versioning. Breaking changes so far:
 | 2.2 | `Build()` fails fast when custom metrics are registered while metrics are disabled |
 | 2.1 | Leak stack-trace capture decoupled from leak detection and off by default |
 
-Full migration guidance — plus the behavioural notes worth reading before adopting (cold boot, `CreateNew` laziness, ~100 ms blocking wake-up granularity) — lives in [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md). A per-version summary of every change is in [`CHANGELOG.md`](CHANGELOG.md).
+Full migration guidance — plus the behavioural notes worth reading before adopting (cold boot, `CreateNew` laziness, lean mode's ~100 ms blocking wake-up granularity, the one-call factory's grow-on-a-miss policy) — lives in [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md). A per-version summary of every change is in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Monitoring and Diagnostics
 
@@ -1544,7 +1547,7 @@ brings it to 614,864 B (0.500x) and 1,077 µs down to 413 µs.
 ## Known limitations
 
 Behavioural notes to be aware of before adopting HayateOP — cold boot on an empty pool, the lazy
-`CreateNew` policy, ~100 ms blocking wake-up granularity, and `ApplyFeatureSwitches` capacity
+`CreateNew` policy, lean mode's ~100 ms blocking wake-up granularity, and `ApplyFeatureSwitches` capacity
 semantics — are collected in
 [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md#behavioural-notes-non-breaking).
 

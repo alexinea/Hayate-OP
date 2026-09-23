@@ -72,7 +72,7 @@ Two caveats that matter when reading any absolute number here:
 | `EnableCircuitBreaker` | One predicted branch when off (and in lean mode, which forces it off); one volatile read when on and the pool is available; while the breaker is open the borrow throws before touching any shard, wait gate or policy | The probe side is a timer that exists only while the pool is unavailable — see the background workers table |
 | `WaitForWarmup` | One branch when off; when on, borrows block on the warm-up signal until pre-warm finishes | The block is one-time per pool |
 | `MinPoolSize` / `MaxPoolSize` | No per-operation cost | Sizing only; `MinPoolSize` is paid once during pre-warm |
-| `RejectPolicy` | Consulted only after a miss | Behavioural, not a cost knob: `Block` / `BlockTimeout` wake on a ~100 ms slice, `CreateOnDemand` turns a miss into a synchronous creation |
+| `RejectPolicy` | Consulted only after a miss | Behavioural, not a cost knob: `Block` / `BlockTimeout` park on the signal gate and wake when a signal is published, `CreateOnDemand` turns a miss into a synchronous creation. Lean mode is the exception — it still re-checks on a ~100 ms slice |
 | `DefaultAcquireTimeout` | No per-operation cost | Evaluated on the timeout path only |
 
 Per-object metadata is not in the table because it is not a switch. The borrow timestamp,
@@ -249,5 +249,5 @@ that the workload did not need, and pays for it on every operation.
 * [`docs/ownership.md`](ownership.md) — the return contract, what the engine checks and what the
   lean path deliberately does not.
 * [`docs/BREAKING-CHANGES.md`](BREAKING-CHANGES.md) — the behavioural notes worth reading
-  before trimming (cold boot, `CreateNew` laziness, the ~100 ms blocking wake-up
+  before trimming (cold boot, `CreateNew` laziness, lean mode's ~100 ms blocking wake-up
   granularity).
