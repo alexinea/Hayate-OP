@@ -37,16 +37,19 @@ namespace DotNetCore.HayateOP.Tests
                 => Interlocked.Increment(ref _calls);
         }
 
-        private sealed class RecordingLogger : IHayateLogger
+        // 3.0 (L7): IHayateLogger gained LogTrace / LogCritical / IsEnabled / BeginScope. Deriving from
+        // HayateLoggerBase keeps this double to the four levels it actually records; the added members
+        // are inherited and do nothing. See HayateLoggerContractTests for the migration itself.
+        private sealed class RecordingLogger : HayateLoggerBase
         {
             private int _calls;
 
             public int Calls => Volatile.Read(ref _calls);
 
-            public void LogDebug(string message, params object[] args) => Interlocked.Increment(ref _calls);
-            public void LogInformation(string message, params object[] args) => Interlocked.Increment(ref _calls);
-            public void LogWarning(string message, params object[] args) => Interlocked.Increment(ref _calls);
-            public void LogError(Exception ex, string message, params object[] args) => Interlocked.Increment(ref _calls);
+            public override void LogDebug(string message, params object[] args) => Interlocked.Increment(ref _calls);
+            public override void LogInformation(string message, params object[] args) => Interlocked.Increment(ref _calls);
+            public override void LogWarning(string message, params object[] args) => Interlocked.Increment(ref _calls);
+            public override void LogError(Exception ex, string message, params object[] args) => Interlocked.Increment(ref _calls);
         }
 
         [Fact]

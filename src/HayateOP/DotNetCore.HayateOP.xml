@@ -922,6 +922,14 @@
             least 1: a wait can never degenerate into a spin.
             </summary>
         </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.DebugTraceEnabled">
+            <summary>
+            The per-operation debug channel: the diagnostics master switch AND the logger's own filter.
+            <see cref="M:DotNetCore.HayateOP.Logging.IHayateLogger.IsEnabled(DotNetCore.HayateOP.Logging.HayateLogLevel)"/> is a permission check, so asking it before the call is what
+            keeps a logger that would discard the entry from being handed the params array and the boxed
+            arguments in the first place. Both halves are readonly field reads.
+            </summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.#ctor(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0},DotNetCore.HayateOP.HayatePoolOptions,DotNetCore.HayateOP.Scaling.IHayateScalingStrategy,DotNetCore.HayateOP.Metrics.IHayateMetrics,DotNetCore.HayateOP.Logging.IHayateLogger,System.String,DotNetCore.HayateOP.IHayateShutdownHook,DotNetCore.HayateOP.IHayateEvictionPolicy{`0})">
             <exception cref="T:System.ArgumentNullException">Thrown if policy, options, scalingStrategy, metrics, logger, or poolName is null.</exception>
             <exception cref="T:System.InvalidOperationException">Thrown if the configured options are invalid.</exception>
@@ -1614,6 +1622,14 @@
             Lean-mode snapshot. There is no per-object wrapper to describe, so the object-detail and
             leak-trace collections come back empty; the pooled and borrowed counts are derived from the
             buffer and the live reservation counter.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.DebugTraceEnabled">
+            <summary>
+            The per-operation debug channel: the diagnostics master switch AND the logger's own filter.
+            <see cref="M:DotNetCore.HayateOP.Logging.IHayateLogger.IsEnabled(DotNetCore.HayateOP.Logging.HayateLogLevel)"/> is a permission check, so asking it before the call is
+            what keeps a logger that would discard the entry from being handed the params array and the
+            boxed counters in the first place. Both halves are readonly field reads.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TrackedCount">
@@ -6419,6 +6435,14 @@
         <member name="M:DotNetCore.HayateOP.IHayateResettable.Reset">
             <summary>Resets the object to a reusable initial state before it is handed back to a caller.</summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.Logging.DefaultHayateLogger.IsEnabled(DotNetCore.HayateOP.Logging.HayateLogLevel)">
+            <summary>
+            A release build has no console sink: every level is discarded, so every level is disabled.
+            Answering <c>false</c> is what lets the borrow and release paths skip building the message
+            arguments — the entry was going to be dropped either way, and this way it is dropped before the
+            params array and the boxed arguments are allocated.
+            </summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.Logging.DefaultHayateLogger.RenderTemplate(System.String,System.Object[])">
             <summary>
             Replaces the original NormalizeFormatString regex rewrite. Substitutes arguments in placeholder
@@ -6463,6 +6487,213 @@
         </member>
         <member name="M:DotNetCore.HayateOP.Logging.DelegateHayateLoggerFactory.CreateLogger(System.String)">
             <inheritdoc />
+        </member>
+        <member name="T:DotNetCore.HayateOP.Logging.HayateLoggerBase">
+            <summary>
+            An implementation of <see cref="T:DotNetCore.HayateOP.Logging.IHayateLogger"/> in which the members 3.0 added already have bodies,
+            so a class written against 2.x only has to mark the methods it already has as <c>override</c>.
+            </summary>
+            <remarks>
+            <para>
+            This class exists because 3.0 added four members to <see cref="T:DotNetCore.HayateOP.Logging.IHayateLogger"/> and the library cannot
+            add them as default interface methods: the core package targets <c>netstandard2.0</c> and
+            <c>net48</c>, and neither runtime supports them.
+            </para>
+            <para>
+            <b>Migrating an implementation written against 2.x.</b> Change the class clause from
+            <c>: IHayateLogger</c> to <c>: HayateLoggerBase</c>. The four members that version had are
+            <c>abstract</c> here, so the compiler reports each of them as unimplemented and the fix is to mark the
+            existing method <c>override</c> — <b>no member added by 3.0 has to be implemented</b>, which is the
+            point of this class.
+            </para>
+            <para>
+            They are abstract rather than virtual-with-a-body deliberately. A virtual member would let the
+            one-clause change compile, and the class's own methods would then <i>hide</i> the inherited ones
+            instead of overriding them. An interface map is built from the class that declares the implementation,
+            so every call through <see cref="T:DotNetCore.HayateOP.Logging.IHayateLogger"/> would reach the empty base method and the
+            implementation's logging would stop — silently, apart from a CS0114 warning. That shape was measured
+            on 2026-09-23: the migrated class compiled, and recorded nothing. An abstract member cannot be hidden,
+            so the compiler has to be answered instead of the behaviour quietly changing.
+            </para>
+            <para>
+            The members 3.0 added need no attention: <see cref="M:DotNetCore.HayateOP.Logging.HayateLoggerBase.LogTrace(System.String,System.Object[])"/> and <see cref="M:DotNetCore.HayateOP.Logging.HayateLoggerBase.LogCritical(System.Exception,System.String,System.Object[])"/> are
+            dropped, <see cref="M:DotNetCore.HayateOP.Logging.HayateLoggerBase.IsEnabled(DotNetCore.HayateOP.Logging.HayateLogLevel)"/> answers <c>true</c> for every level except
+            <see cref="F:DotNetCore.HayateOP.Logging.HayateLogLevel.None"/>, and <see cref="M:DotNetCore.HayateOP.Logging.HayateLoggerBase.BeginScope(System.String,System.Object[])"/> hands back <see cref="F:DotNetCore.HayateOP.Logging.HayateLoggerBase.NullScope"/>.
+            Answering <c>true</c> by default is deliberate: an implementation that never asked to filter must not
+            start dropping entries because it was rebuilt against 3.0, and the pool only skips building a message
+            when <see cref="M:DotNetCore.HayateOP.Logging.HayateLoggerBase.IsEnabled(DotNetCore.HayateOP.Logging.HayateLogLevel)"/> says the entry would be discarded.
+            </para>
+            </remarks>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Logging.HayateLoggerBase.NullScope">
+            <summary>
+            A scope that does nothing, for an implementation with no scope support of its own.
+            </summary>
+            <remarks>
+            Returned by the default <see cref="M:DotNetCore.HayateOP.Logging.HayateLoggerBase.BeginScope(System.String,System.Object[])"/>; also the value to return from an override that
+            does not implement scopes, since <see cref="M:DotNetCore.HayateOP.Logging.IHayateLogger.BeginScope(System.String,System.Object[])"/> must not return
+            <c>null</c>.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.HayateLoggerBase.LogDebug(System.String,System.Object[])">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.HayateLoggerBase.LogInformation(System.String,System.Object[])">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.HayateLoggerBase.LogWarning(System.String,System.Object[])">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.HayateLoggerBase.LogError(System.Exception,System.String,System.Object[])">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.HayateLoggerBase.LogTrace(System.String,System.Object[])">
+            <inheritdoc />
+            <remarks>Does nothing. An implementation that wants trace entries overrides it.</remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.HayateLoggerBase.LogCritical(System.Exception,System.String,System.Object[])">
+            <inheritdoc />
+            <remarks>Does nothing. An implementation that wants critical entries overrides it.</remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.HayateLoggerBase.IsEnabled(DotNetCore.HayateOP.Logging.HayateLogLevel)">
+            <inheritdoc />
+            <remarks>
+            Defaults to <c>true</c> for every level except <see cref="F:DotNetCore.HayateOP.Logging.HayateLogLevel.None"/>. Override it only
+            to <em>suppress</em> entries: a <c>false</c> answer lets the pool skip building the message
+            arguments for the per-operation debug trace, so an override that answers <c>false</c> while still
+            writing that entry would lose it.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.HayateLoggerBase.BeginScope(System.String,System.Object[])">
+            <inheritdoc />
+        </member>
+        <member name="T:DotNetCore.HayateOP.Logging.HayateLogLevel">
+            <summary>
+            The severity of a log entry, as far as <see cref="T:DotNetCore.HayateOP.Logging.IHayateLogger"/> is concerned.
+            </summary>
+            <remarks>
+            The numeric values are deliberately the ones Microsoft.Extensions.Logging uses for its own
+            <c>LogLevel</c> — Trace 0 through Critical 5, None 6 — so a host that bridges to MEL filters on
+            the ordering it already knows, and the bridge maps a level with a cast instead of a lookup table.
+            <see cref="F:DotNetCore.HayateOP.Logging.HayateLogLevel.None"/> is not a level anything is logged at; it is the value
+            <see cref="M:DotNetCore.HayateOP.Logging.IHayateLogger.IsEnabled(DotNetCore.HayateOP.Logging.HayateLogLevel)"/> answers <c>false</c> for whatever the implementation filters.
+            </remarks>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Logging.HayateLogLevel.Trace">
+            <summary>The most verbose level, for development-time tracing.</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Logging.HayateLogLevel.Debug">
+            <summary>Debugging detail. The pool's per-operation borrow and release trace uses this level.</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Logging.HayateLogLevel.Information">
+            <summary>Normal lifecycle events: construction, pre-warm, scale-up, eviction.</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Logging.HayateLogLevel.Warning">
+            <summary>A condition that is recoverable but worth attention.</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Logging.HayateLogLevel.Error">
+            <summary>An operation failed.</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Logging.HayateLogLevel.Critical">
+            <summary>The pool or the process cannot continue.</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Logging.HayateLogLevel.None">
+            <summary>Not a level: an implementation answers <c>false</c> for this and everything else it filters.</summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Logging.IHayateLogger">
+            <summary>
+            The logging surface a pool writes to.
+            </summary>
+            <remarks>
+            <para>
+            3.0 added <see cref="M:DotNetCore.HayateOP.Logging.IHayateLogger.LogTrace(System.String,System.Object[])"/>, <see cref="M:DotNetCore.HayateOP.Logging.IHayateLogger.LogCritical(System.Exception,System.String,System.Object[])"/>, <see cref="M:DotNetCore.HayateOP.Logging.IHayateLogger.IsEnabled(DotNetCore.HayateOP.Logging.HayateLogLevel)"/> and
+            <see cref="M:DotNetCore.HayateOP.Logging.IHayateLogger.BeginScope(System.String,System.Object[])"/>. Adding members to an interface is a source-breaking change for every
+            implementation outside this repository, and the library cannot soften it with a default interface
+            method: the core package targets <c>netstandard2.0</c> and <c>net48</c>, and neither runtime
+            supports them. An implementation written against 2.x migrates by deriving from
+            <see cref="T:DotNetCore.HayateOP.Logging.HayateLoggerBase"/> instead of implementing this interface directly — see the remarks
+            there for what that costs.
+            </para>
+            <para>
+            <see cref="M:DotNetCore.HayateOP.Logging.IHayateLogger.IsEnabled(DotNetCore.HayateOP.Logging.HayateLogLevel)"/> is a permission check, not a report. A caller may skip building the message
+            and its arguments when it answers <c>false</c>, which is what keeps the per-operation pool trace off
+            the allocation path of a logger that would discard the entry anyway. An implementation that does not
+            filter answers <c>true</c> for every level except <see cref="F:DotNetCore.HayateOP.Logging.HayateLogLevel.None"/>.
+            </para>
+            <para>
+            The pool consults it for the per-operation borrow and release trace only — that is the one place it
+            would otherwise build a message on every operation. Lifecycle entries (construction, pre-warm,
+            scale-up, eviction, capacity alarms) are written unconditionally, so answering <c>false</c> never
+            silences them; they are rare enough that the argument array is not worth a gate.
+            </para>
+            <para>
+            The message and argument convention is the one <c>DefaultHayateLogger</c> established: named
+            placeholders in template order, each mapping to one argument, with an optional format specifier after
+            a colon (<c>"{Count:F2}"</c>). A Microsoft.Extensions.Logging bridge hands the template through
+            unchanged, so MEL keeps the named properties it would have had.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.IHayateLogger.LogTrace(System.String,System.Object[])">
+            <summary>
+            Writes a trace entry.
+            </summary>
+            <param name="message">The message template.</param>
+            <param name="args">One argument per named placeholder, in template order.</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.IHayateLogger.LogDebug(System.String,System.Object[])">
+            <summary>
+            Writes a debug entry. The pool's per-operation borrow and release trace uses this level.
+            </summary>
+            <param name="message">The message template.</param>
+            <param name="args">One argument per named placeholder, in template order.</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.IHayateLogger.LogInformation(System.String,System.Object[])">
+            <summary>
+            Writes an informational entry. Lifecycle events use this level.
+            </summary>
+            <param name="message">The message template.</param>
+            <param name="args">One argument per named placeholder, in template order.</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.IHayateLogger.LogWarning(System.String,System.Object[])">
+            <summary>
+            Writes a warning entry.
+            </summary>
+            <param name="message">The message template.</param>
+            <param name="args">One argument per named placeholder, in template order.</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.IHayateLogger.LogError(System.Exception,System.String,System.Object[])">
+            <summary>
+            Writes an error entry.
+            </summary>
+            <param name="ex">The failure, or <c>null</c> when there is nothing to attach.</param>
+            <param name="message">The message template.</param>
+            <param name="args">One argument per named placeholder, in template order.</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.IHayateLogger.LogCritical(System.Exception,System.String,System.Object[])">
+            <summary>
+            Writes a critical entry: the pool or the process cannot continue.
+            </summary>
+            <param name="ex">The failure, or <c>null</c> when there is nothing to attach.</param>
+            <param name="message">The message template.</param>
+            <param name="args">One argument per named placeholder, in template order.</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.IHayateLogger.IsEnabled(DotNetCore.HayateOP.Logging.HayateLogLevel)">
+            <summary>
+            Answers whether an entry at <paramref name="level"/> would be written.
+            </summary>
+            <param name="level">The level to test.</param>
+            <returns><c>true</c> when an entry at that level would be written, <c>false</c> otherwise --
+            and always <c>false</c> for <see cref="F:DotNetCore.HayateOP.Logging.HayateLogLevel.None"/>.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.IHayateLogger.BeginScope(System.String,System.Object[])">
+            <summary>
+            Opens a scope that groups the entries written until the returned handle is disposed.
+            </summary>
+            <param name="message">The scope description, in the same template form as the log methods.</param>
+            <param name="args">One argument per named placeholder, in template order.</param>
+            <returns>The handle that ends the scope. Must not be <c>null</c>; an implementation without scope
+            support returns <see cref="F:DotNetCore.HayateOP.Logging.HayateLoggerBase.NullScope"/>.</returns>
         </member>
         <member name="T:DotNetCore.HayateOP.Logging.IHayateLoggerFactory">
             <summary>

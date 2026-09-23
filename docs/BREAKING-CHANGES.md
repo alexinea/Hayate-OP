@@ -4,13 +4,13 @@ Migration guidance for every breaking change, newest first, plus the behavioural
 frequently surprise adopters. For a per-version summary of all changes see
 [`../CHANGELOG.md`](../CHANGELOG.md).
 
-## 3.0 — Lifetime semantics named, blocking wake-up made signal-driven, one-call factory grows on a miss
+## 3.0 — Lifetime semantics named, blocking wake-up made signal-driven, one-call factory grows on a miss, logging surface extended
 
 3.0 states the meaning `MaxLifeTime` always had, in full, and leaves the enforcement of the borrowed
 half exactly where 2.9 put it: behind an opt-in switch that is off by default. It also removes the
-100 ms quantisation that blocking borrows used to carry. No public signature changes and no default
-option value moves — but the last three bullets below are an observable behaviour change, so read
-them before adopting: a blocking wait now wakes on the signal, its timeout is a boundary rather than a
+100 ms quantisation that blocking borrows used to carry, and extends `IHayateLogger` — the release's
+one signature change. Three of the bullets below are an observable behaviour change, so read them
+before adopting: a blocking wait now wakes on the signal, its timeout is a boundary rather than a
 floor, and a pool built by the one-call factory grows on a miss.
 
 - **`MaxLifeTime` is documented as the maximum lifetime of a pooled object from the moment it is
@@ -51,13 +51,27 @@ floor, and a pool built by the one-call factory grows on a miss.
   out and then creates, so a pool under sustained overload can end up holding more than `n` objects.
   That wait-then-create is the pre-existing behaviour of the create policies and is shared with the
   presets; `n` is where the wait starts, not where the borrow fails.
+- **`IHayateLogger` gained four members** (L7). `LogTrace`, `LogCritical`, `IsEnabled` and
+  `BeginScope` were added to the interface, so an implementation written outside this repository no
+  longer satisfies it and will not compile until it answers for them. This is the release's one
+  signature change, and the library cannot soften it with a default interface method: the core package
+  targets `netstandard2.0` and `net48`, and neither runtime supports them. A new
+  `HayateLoggerBase` makes the answer cheap — the four members the interface already had are the only
+  ones it declares `abstract`, so the four added members need no code at all. `IsEnabled` also changes
+  what the pool does, not just what an implementer writes: a logger that answers `false` for the debug
+  level no longer has the per-operation borrow and release trace built for it, which is where the
+  `params` array and the boxed arguments used to be allocated. The default answer is `true` for every
+  real level, so an implementation that never asked to filter keeps writing exactly what it wrote
+  before.
 
 ### Migration
 
 Nothing to migrate for the lifetime semantics: an application that compiled and ran against 2.9
 compiles and behaves the same against 3.0 on that count — those two bullets record a naming decision,
-not a change. A pool built by `HayatePool.Simple` is the one place to check: see
-[Migrating a pool built with HayatePool.Simple](#migrating-a-pool-built-with-hayatepoolsimple).
+not a change. Two things are worth checking: a pool built by `HayatePool.Simple` (see
+[Migrating a pool built with HayatePool.Simple](#migrating-a-pool-built-with-hayatepoolsimple)) and an
+`IHayateLogger` implementation of your own (see
+[Migrating an IHayateLogger implementation](#migrating-an-ihayatelogger-implementation)).
 
 If you do want the borrowed half enforced — the case where a server-side `max_connection_lifetime` or an
 intermediary's idle timeout can invalidate a connection the pool still believes is good — turn the switch
@@ -115,6 +129,54 @@ serves up to `n` and, past that, waits and then creates. Three things are worth 
   sees `n` objects created immediately. Any test or dashboard that asserted on `TotalCreated` for such a
   pool needs the new expected value — and note that the one-call factory reports metrics as off, so
   count creations in the factory itself rather than reading `TotalCreated` from its stats.
+
+### Migrating an IHayateLogger implementation
+
+Change the class clause from `: IHayateLogger` to `: HayateLoggerBase`, and mark the four methods you
+already have as `override`:
+
+```csharp
+// 2.x
+public sealed class MyLogger : IHayateLogger
+{
+    public void LogInformation(string message, params object[] args) { /* ... */ }
+    public void LogWarning(string message, params object[] args) { /* ... */ }
+    public void LogError(Exception ex, string message, params object[] args) { /* ... */ }
+    public void LogDebug(string message, params object[] args) { /* ... */ }
+}
+
+// 3.0
+public sealed class MyLogger : HayateLoggerBase
+{
+    public override void LogInformation(string message, params object[] args) { /* ... */ }
+    public override void LogWarning(string message, params object[] args) { /* ... */ }
+    public override void LogError(Exception ex, string message, params object[] args) { /* ... */ }
+    public override void LogDebug(string message, params object[] args) { /* ... */ }
+}
+```
+
+Nothing else is needed. `LogTrace` and `LogCritical` are dropped, `IsEnabled` answers `true` for every
+level except `None`, and `BeginScope` returns a shared no-op scope — that is what `HayateLoggerBase`
+is for, and the four `abstract` members above are the only ones the compiler asks about.
+
+**`override` is not optional.** A method that merely *hides* the inherited one leaves the interface map
+pointing at the base implementation, so the class compiles (with a CS0114 warning) and then records
+nothing at all. That is why `HayateLoggerBase` declares the four 2.x members `abstract` rather than
+giving them empty bodies: an abstract member cannot be hidden, so the compiler has to be answered
+instead of the behaviour quietly changing. Declining the base class and implementing all eight members
+directly is still supported and always will be — it is just four more methods than 2.x had.
+
+Two further notes:
+
+- **`IsEnabled` is a permission check, not a report.** Answering `false` for a level tells the pool not
+  to build that entry, so a logger that filters keeps the `params` array and the boxed arguments from
+  ever being allocated. Only an override that answers `false` *and* still expects the entry to arrive
+  would lose something.
+- **A release build's `DefaultHayateLogger` answers `false` for every level**, so a pool that leaves
+  `EnableDiagnostics` on and takes the default logger no longer builds the per-operation trace. Nothing
+  observable is lost — the release build's default logger discarded every entry before 3.0 too — and
+  the borrow and release paths stop paying for the message arguments. Pass a logger of your own if you
+  want the trace in a release build.
 
 ## 2.9 — Asynchronous contracts and logging (no breaking API change)
 
@@ -398,7 +460,7 @@ Behaviours to be aware of before adopting HayateOP.
   (`Block` / `BlockTimeout` / `CreateNew` / `CreateOnDemand`) still re-check in fixed slices of 100 ms,
   so the observed tail latency of a return-to-acquire handoff is quantized to that slice size. The
   general-purpose engine no longer has that step: since 3.0 its blocking waits are signal-driven (see
-  [3.0](#30--lifetime-semantics-named-blocking-wake-up-made-signal-driven-one-call-factory-grows-on-a-miss)).
+  [3.0](#30--lifetime-semantics-named-blocking-wake-up-made-signal-driven-one-call-factory-grows-on-a-miss-logging-surface-extended)).
 - **`MinPoolSize = 0` cold pools bootstrap on first acquire.** No background component pre-creates
   objects to reach `MinPoolSize`; the pool starts empty, and the first acquire on a fully empty
   pool creates its object on demand. (A non-zero `MinPoolSize` is pre-warmed once, at construction,

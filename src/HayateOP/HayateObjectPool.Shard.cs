@@ -24,6 +24,14 @@ public partial class HayatePoolBasic<T>
         // builds the params array (and boxes the counters) those traces would pass to the logger.
         private readonly bool _enableDiagnostics;
 
+        /// <summary>
+        /// The per-operation debug channel: the diagnostics master switch AND the logger's own filter.
+        /// <see cref="IHayateLogger.IsEnabled"/> is a permission check, so asking it before the call is
+        /// what keeps a logger that would discard the entry from being handed the params array and the
+        /// boxed counters in the first place. Both halves are readonly field reads.
+        /// </summary>
+        private bool DebugTraceEnabled => _enableDiagnostics && _logger.IsEnabled(HayateLogLevel.Debug);
+
         // Free-object linked list, kept in return order: Add appends to the tail, and TryTake removes
         // from whichever end the configured borrow strategy selects — the head for FIFO (the default,
         // and what every release before the switch did) or the tail for LIFO. The list is never
@@ -253,7 +261,7 @@ public partial class HayatePoolBasic<T>
                 _logger.LogWarning("[Shard {Index}] capacity exceeded, object rejected and will be destroyed by caller (shard size: {Size}, max: {Max})",
                     Index, size, currentMax);
             }
-            else if (accepted && _enableDiagnostics)
+            else if (accepted && DebugTraceEnabled)
             {
                 _logger.LogDebug("[Shard {Index}] Object added to shard (current size: {Size})", Index, size);
             }
@@ -289,9 +297,10 @@ public partial class HayatePoolBasic<T>
                 // borrow — the first candidate the abandoned scan (K2) examines.
                 if (_trackBorrowed) w.BorrowedNode = _borrowed.AddLast(w);
 
-                // Suppressed by the diagnostics master switch. Gating it also keeps the trace's params
-                // array — and the interpolation work behind it — out of the owned spin lock.
-                if (_enableDiagnostics)
+                // Suppressed by the diagnostics master switch and by the logger's own filter. Gating it
+                // also keeps the trace's params array — and the interpolation work behind it — out of the
+                // owned spin lock.
+                if (DebugTraceEnabled)
                 {
                     _logger.LogDebug("[Shard {Index}] Object taken from shard (current size: {Size})", Index, _list.Count);
                 }
@@ -383,7 +392,7 @@ public partial class HayatePoolBasic<T>
                 if (taken) _lock.Exit();
             }
 
-            if (claimed && _enableDiagnostics)
+            if (claimed && DebugTraceEnabled)
             {
                 _logger.LogDebug("[Shard {Index}] Borrowed object claimed for abandoned recovery (current borrowed: {Count})", Index, _borrowed.Count);
             }
@@ -460,7 +469,7 @@ public partial class HayatePoolBasic<T>
                 if (taken) _lock.Exit();
             }
 
-            if (claimed && _enableDiagnostics)
+            if (claimed && DebugTraceEnabled)
             {
                 _logger.LogDebug("[Shard {Index}] Object removed from shard (current size: {Size})", Index, size);
             }

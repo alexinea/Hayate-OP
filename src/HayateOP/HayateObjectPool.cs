@@ -206,6 +206,14 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     // so the metrics gate below implies it: every `if (_enableMetrics)` block may rely on diagnostics
     // being on, and only the counter writes that are not metrics-gated need their own check.
     private readonly bool _enableDiagnostics;
+
+    /// <summary>
+    /// The per-operation debug channel: the diagnostics master switch AND the logger's own filter.
+    /// <see cref="IHayateLogger.IsEnabled"/> is a permission check, so asking it before the call is what
+    /// keeps a logger that would discard the entry from being handed the params array and the boxed
+    /// arguments in the first place. Both halves are readonly field reads.
+    /// </summary>
+    private bool DebugTraceEnabled => _enableDiagnostics && _logger.IsEnabled(HayateLogLevel.Debug);
     private readonly bool _enableMetrics;
     private readonly bool _enableGenerationOptimization;
     private readonly bool _enableLeakDetection;
@@ -887,7 +895,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                             // Budget spent (A3a-Q2): hand the aged object out rather than fail a borrow that
                             // has something to give.
-                            if (_enableDiagnostics)
+                            if (DebugTraceEnabled)
                             {
                                 _logger.LogDebug("Borrow handing out an object past MaxLifeTime: the per-borrow rotation budget is spent. Type: {Type}", typeof(T).Name);
                             }
@@ -1019,13 +1027,17 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         {
                             _metrics.RecordObjectAcquired(_name, w.Value, waitTime);
                         }
-                        _logger.LogDebug("Object borrowed from pool. Type: {Type} WaitTime: {WaitTime:F2}ms, shard: {ShardIndex}", typeof(T).Name, waitTime, shard.Index);
+                        if (DebugTraceEnabled)
+                        {
+                            _logger.LogDebug("Object borrowed from pool. Type: {Type} WaitTime: {WaitTime:F2}ms, shard: {ShardIndex}", typeof(T).Name, waitTime, shard.Index);
+                        }
                     }
-                    else if (_enableDiagnostics)
+                    else if (DebugTraceEnabled)
                     {
                         // Metrics off, diagnostics on: keep the trace. Dropping this branch when
                         // diagnostics are off is what removes the per-borrow params array (and the boxed
-                        // shard index) from the borrow path.
+                        // shard index) from the borrow path; the logger's own filter removes the same
+                        // allocation for a logger that discards the entry (the release-build default).
                         _logger.LogDebug("Object borrowed from pool. Type: {Type} shard: {ShardIndex}", typeof(T).Name, shard.Index);
                     }
 
@@ -1215,7 +1227,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                         // Budget spent (A3a-Q2): hand the aged object out rather than fail a borrow that has
                         // something to give.
-                        if (_enableDiagnostics)
+                        if (DebugTraceEnabled)
                         {
                             _logger.LogDebug("Borrow handing out an object past MaxLifeTime: the per-borrow rotation budget is spent. Type: {Type}", typeof(T).Name);
                         }
@@ -1514,7 +1526,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             var idle = IdleObjectCount();
             if (idle >= _softCapacity)
             {
-                if (_enableDiagnostics)
+                if (DebugTraceEnabled)
                 {
                     _logger.LogDebug(
                         "Object dropped on return: soft capacity reached. Type: {Type}, idle: {Idle}, soft capacity: {SoftCapacity}",
@@ -1552,7 +1564,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         CheckCapacityAlarm();
 
-        if (_enableDiagnostics)
+        if (DebugTraceEnabled)
         {
             _logger.LogDebug("Object returned to pool. Type: {Type} LeaseTime: {LeaseTime:F2}ms, shard: {ShardIndex}", typeof(T).Name, w.LeaseTimeMs, shardIndex);
         }
@@ -2332,7 +2344,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             // parked wrapper must never keep a destroyed pooled object alive. UntrackObject has already
             // removed the registry entry above, so nothing reads w.Value after this point.
             w.Value = null!;
-            if (_enableDiagnostics) _logger.LogDebug("Wrapped object destroyed. Type: {Type}", typeof(T).Name);
+            if (DebugTraceEnabled) _logger.LogDebug("Wrapped object destroyed. Type: {Type}", typeof(T).Name);
         }
         catch (Exception ex)
         {
@@ -2361,7 +2373,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         {
             DestroyObject(o);
             UntrackKey(o);
-            if (_enableDiagnostics) _logger.LogDebug("Object destroyed. Type: {Type}", typeof(T).Name);
+            if (DebugTraceEnabled) _logger.LogDebug("Object destroyed. Type: {Type}", typeof(T).Name);
         }
         catch (Exception ex)
         {
@@ -2625,7 +2637,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     {
         Destroy(w);
         Interlocked.Increment(ref _lifetimeRotatedCount);
-        if (_enableDiagnostics)
+        if (DebugTraceEnabled)
         {
             _logger.LogDebug("Object rotated on borrow: outlived MaxLifeTime. Type: {Type}", typeof(T).Name);
         }

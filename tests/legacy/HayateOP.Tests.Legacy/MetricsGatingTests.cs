@@ -25,14 +25,32 @@ namespace DotNetCore.HayateOP.Tests
         /// switch is documented to silence the per-operation trace without touching lifecycle and problem
         /// logs, and this logger is what holds that to a number.
         /// </summary>
-        private sealed class CountingLogger : IHayateLogger
+        // 3.0 (L7): IHayateLogger gained LogTrace / LogCritical / IsEnabled / BeginScope. Deriving from
+        // HayateLoggerBase keeps this double to the four levels it actually records; the added members
+        // are inherited and do nothing. See HayateLoggerContractTests for the migration itself.
+        private sealed class CountingLogger : HayateLoggerBase
         {
             public int DebugCount;
 
-            public void LogInformation(string message, params object[] args) { }
-            public void LogWarning(string message, params object[] args) { }
-            public void LogError(Exception ex, string message, params object[] args) { }
-            public void LogDebug(string message, params object[] args) => Interlocked.Increment(ref DebugCount);
+            public override void LogInformation(string message, params object[] args) { }
+            public override void LogWarning(string message, params object[] args) { }
+            public override void LogError(Exception ex, string message, params object[] args) { }
+            public override void LogDebug(string message, params object[] args) => Interlocked.Increment(ref DebugCount);
+        }
+
+        /// <summary>
+        /// A logger that discards the debug channel by answering <see cref="IHayateLogger.IsEnabled"/> false
+        /// for it, and records nothing. This is the shape a release build's <c>DefaultHayateLogger</c> has,
+        /// but as a double so the allocation arms that use it read the same in either build configuration.
+        /// </summary>
+        private sealed class DebugFilteredLogger : HayateLoggerBase
+        {
+            public override bool IsEnabled(HayateLogLevel level) => level != HayateLogLevel.Debug;
+
+            public override void LogInformation(string message, params object[] args) { }
+            public override void LogWarning(string message, params object[] args) { }
+            public override void LogError(Exception ex, string message, params object[] args) { }
+            public override void LogDebug(string message, params object[] args) { }
         }
 
         [Fact]
@@ -365,9 +383,19 @@ namespace DotNetCore.HayateOP.Tests
             Assert.Equal(0L, off);
 
             // Control: the identical loop allocates as soon as the traces are back on, so the 0 above is the
-            // switch's doing rather than a loop that never reaches the trace.
-            var on = MeasureWarmedBorrowAllocations(diagnostics: true);
-            Assert.True(on > 0);
+            // switch's doing rather than a loop that never reaches the trace. The control arm has to pass a
+            // logger that accepts the entry: 3.0 (L7) put IHayateLogger.IsEnabled in front of the trace, and
+            // a release build's default logger discards every level, so the default would remove the trace for
+            // a second reason and this arm would read 0 too.
+            var on = MeasureWarmedBorrowAllocations(diagnostics: true, logger: new CountingLogger());
+            Assert.True(on > 0, $"the trace must cost the control arm something; measured {on} B");
+
+            // The other half of the same contract: with the switch on and a logger that discards the debug
+            // channel, the hot path is allocation-free again — 2.x built the trace and handed it to a logger
+            // that dropped it. This arm uses a double rather than the default logger so it reads the same in a
+            // debug build, where the default logger writes to the console instead of discarding.
+            var onButFiltered = MeasureWarmedBorrowAllocations(diagnostics: true, logger: new DebugFilteredLogger());
+            Assert.Equal(0L, onButFiltered);
         }
 
         /// <summary>
@@ -375,7 +403,13 @@ namespace DotNetCore.HayateOP.Tests
         /// performed by the borrow phase of each round. The returns run between the windows, so the shard
         /// free-list node they allocate is excluded.
         /// </summary>
-        private static long MeasureWarmedBorrowAllocations(bool diagnostics)
+        /// <param name="diagnostics">The master switch to build the pool with.</param>
+        /// <param name="logger">
+        /// The logger to hand the pool, or <c>null</c> to let it build the default one. The two differ in what
+        /// <see cref="IHayateLogger.IsEnabled"/> answers for the debug level, which 3.0 (L7) put in front of
+        /// the per-operation trace.
+        /// </param>
+        private static long MeasureWarmedBorrowAllocations(bool diagnostics, IHayateLogger? logger = null)
         {
             const int Items = 16;
             const int Rounds = 200;
@@ -388,13 +422,16 @@ namespace DotNetCore.HayateOP.Tests
             // pass gives 64,0,0,0,0,0; two passes and three passes give all zeros. Three leaves headroom.
             const int WarmupRounds = 3;
 
-            using (var pool = new HayatePoolBuilder<TestObject>()
+            var builder = new HayatePoolBuilder<TestObject>()
                 .WithPoolName(diagnostics ? "gating-borrow-alloc-on" : "gating-borrow-alloc-off")
                 .WithMinSize(Items)
                 .WithMaxSize(Items)
                 .WithShardCount(4)
-                .WithEnableDiagnostics(diagnostics)
-                .Build())
+                .WithEnableDiagnostics(diagnostics);
+
+            if (logger is not null) builder = builder.WithLogger(logger);
+
+            using (var pool = builder.Build())
             {
                 var held = new TestObject[Items];
 

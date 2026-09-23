@@ -3,7 +3,7 @@ using System.Text;
 
 namespace DotNetCore.HayateOP.Logging;
 
-internal class DefaultHayateLogger : IHayateLogger
+internal sealed class DefaultHayateLogger : HayateLoggerBase
 {
 #if DEBUG
     static DefaultHayateLogger()
@@ -11,32 +11,40 @@ internal class DefaultHayateLogger : IHayateLogger
         Console.InputEncoding = Encoding.UTF8;
         Console.OutputEncoding = Encoding.UTF8;
     }
-#endif
 
-#if !DEBUG
-        public void LogInformation(string message, params object[] args){ }
+    /// <summary>
+    /// The debug console logger writes every level, so it is enabled for all of them and the pool never
+    /// skips building a message on its behalf.
+    /// </summary>
+    public override bool IsEnabled(HayateLogLevel level) => level != HayateLogLevel.None;
 
-        public void LogWarning(string message, params object[] args){ }
+    public override void LogTrace(string message, params object[] args)
+    {
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.WriteLine($"[TRACE] {DateTime.Now:HH:mm:ss} - {RenderTemplate(message, args)}");
+        Console.ResetColor();
+    }
 
-        public void LogError(Exception ex, string message, params object[] args){ }
+    public override void LogDebug(string message, params object[] args)
+    {
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        Console.WriteLine($"[DEBUG] {DateTime.Now:HH:mm:ss} - {RenderTemplate(message, args)}");
+        Console.ResetColor();
+    }
 
-        public void LogDebug(string message, params object[] args){ }
-#endif
-
-#if DEBUG
-    public void LogInformation(string message, params object[] args)
+    public override void LogInformation(string message, params object[] args)
     {
         Console.WriteLine($"[INFO] {DateTime.Now:HH:mm:ss} - {RenderTemplate(message, args)}");
     }
 
-    public void LogWarning(string message, params object[] args)
+    public override void LogWarning(string message, params object[] args)
     {
         Console.ForegroundColor = ConsoleColor.Yellow;
         Console.WriteLine($"[WARN] {DateTime.Now:HH:mm:ss} - {RenderTemplate(message, args)}");
         Console.ResetColor();
     }
 
-    public void LogError(Exception ex, string message, params object[] args)
+    public override void LogError(Exception ex, string message, params object[] args)
     {
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine($"[ERROR] {DateTime.Now:HH:mm:ss} - {RenderTemplate(message, args)}");
@@ -47,13 +55,31 @@ internal class DefaultHayateLogger : IHayateLogger
         Console.ResetColor();
     }
 
-    public void LogDebug(string message, params object[] args)
+    public override void LogCritical(Exception ex, string message, params object[] args)
     {
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        Console.WriteLine($"[DEBUG] {DateTime.Now:HH:mm:ss} - {RenderTemplate(message, args)}");
+        Console.ForegroundColor = ConsoleColor.Magenta;
+        Console.WriteLine($"[CRITICAL] {DateTime.Now:HH:mm:ss} - {RenderTemplate(message, args)}");
+        if (ex != null)
+        {
+            Console.WriteLine($"[CRITICAL] {DateTime.Now:HH:mm:ss} - Exception: {ex.GetType().Name}\n{ex.StackTrace}");
+        }
         Console.ResetColor();
     }
+#else
+    /// <summary>
+    /// A release build has no console sink: every level is discarded, so every level is disabled.
+    /// Answering <c>false</c> is what lets the borrow and release paths skip building the message
+    /// arguments — the entry was going to be dropped either way, and this way it is dropped before the
+    /// params array and the boxed arguments are allocated.
+    /// </summary>
+    public override bool IsEnabled(HayateLogLevel level) => false;
 
+    // The four members HayateLoggerBase declares abstract; LogTrace, LogCritical and BeginScope are
+    // inherited from it and already do nothing.
+    public override void LogDebug(string message, params object[] args) { }
+    public override void LogInformation(string message, params object[] args) { }
+    public override void LogWarning(string message, params object[] args) { }
+    public override void LogError(Exception ex, string message, params object[] args) { }
 #endif
 
     /// <summary>

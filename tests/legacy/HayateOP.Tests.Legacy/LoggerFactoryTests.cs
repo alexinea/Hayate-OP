@@ -11,14 +11,17 @@ public class LoggerFactoryTests
     private class TestObject { }
 
     /// <summary>In-memory logger that records all log text.</summary>
-    private sealed class RecordingLogger : IHayateLogger
+    // 3.0 (L7): IHayateLogger gained LogTrace / LogCritical / IsEnabled / BeginScope. Deriving from
+    // HayateLoggerBase keeps this double to the four levels it actually records; the added members
+    // are inherited and do nothing. See HayateLoggerContractTests for the migration itself.
+    private sealed class RecordingLogger : HayateLoggerBase
     {
         public List<string> Lines { get; } = new();
 
-        public void LogInformation(string message, params object[] args) => Lines.Add(Render("INFO", message, args));
-        public void LogWarning(string message, params object[] args) => Lines.Add(Render("WARN", message, args));
-        public void LogError(Exception ex, string message, params object[] args) => Lines.Add(Render("ERROR", message, args));
-        public void LogDebug(string message, params object[] args) => Lines.Add(Render("DEBUG", message, args));
+        public override void LogInformation(string message, params object[] args) => Lines.Add(Render("INFO", message, args));
+        public override void LogWarning(string message, params object[] args) => Lines.Add(Render("WARN", message, args));
+        public override void LogError(Exception ex, string message, params object[] args) => Lines.Add(Render("ERROR", message, args));
+        public override void LogDebug(string message, params object[] args) => Lines.Add(Render("DEBUG", message, args));
 
         private static string Render(string level, string message, object[] args)
         {

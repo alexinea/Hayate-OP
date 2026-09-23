@@ -191,6 +191,27 @@
             </summary>
             <param name="logger">The MEL logger, or <c>null</c> to discard everything written to it.</param>
         </member>
+        <member name="M:DotNetCore.HayateOP.Logging.HayateMicrosoftLoggerAdapter.IsEnabled(DotNetCore.HayateOP.Logging.HayateLogLevel)">
+            <summary>
+            Asks the wrapped logger. A <c>null</c> logger is not enabled for anything, which is what makes the
+            pool skip building the message arguments for a host with no logging provider.
+            </summary>
+            <remarks>
+            The two level enums have the same numeric values, so this is a cast rather than a mapping table.
+            Microsoft.Extensions.Logging's own <c>LogDebug</c> and friends already test <c>IsEnabled</c>
+            internally, so answering here cannot change an entry that was previously written: it only moves
+            the decision ahead of the <c>params</c> array.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Logging.HayateMicrosoftLoggerAdapter.BeginScope(System.String,System.Object[])">
+            <summary>
+            Opens a Microsoft.Extensions.Logging scope carrying <paramref name="message"/> as its state.
+            </summary>
+            <param name="message">The scope description.</param>
+            <param name="args">One argument per named placeholder, in template order.</param>
+            <returns>The scope handle; <see cref="F:DotNetCore.HayateOP.Logging.HayateLoggerBase.NullScope"/> when there is no wrapped logger
+            or when it returned <c>null</c>, since <see cref="M:DotNetCore.HayateOP.Logging.IHayateLogger.BeginScope(System.String,System.Object[])"/> must not.</returns>
+        </member>
         <member name="T:DotNetCore.HayateOP.Logging.HayateMicrosoftLoggerAdapter`1">
             <summary>
             Routes HayateOP's log surface onto the Microsoft.Extensions.Logging category of <typeparamref name="T"/>.
