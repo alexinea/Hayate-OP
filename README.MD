@@ -58,6 +58,8 @@ wrong.
 | `DotNetCore.HayateOP.Extensions.DependencyInjection` | .NET Framework 4.8; .NET 6/7/8/9/10 |
 | `DotNetCore.HayateOP.Extensions.Specialized` | .NET Framework 4.8; .NET 6/7/8/9/10 |
 | `DotNetCore.HayateOP.Extensions.Buffers` | .NET Framework 4.8; .NET 6/7/8/9/10 |
+| `DotNetCore.HayateOP.Extensions.Configuration` | .NET Framework 4.8; .NET 6/7/8/9/10 |
+| `DotNetCore.HayateOP.Extensions.HealthCheck` | .NET Framework 4.8; .NET 6/7/8/9/10 |
 | All other `DotNetCore.HayateOP.Extensions.*` packages | .NET 6/7/8/9/10 |
 
 > **.NET Framework 4.8 support (added in 2.4)** targets `net48` for classic ASP.NET 4.x / WPF / WinForms
