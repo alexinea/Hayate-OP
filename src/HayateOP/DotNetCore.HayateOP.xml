@@ -1756,8 +1756,9 @@
             <see cref="F:DotNetCore.HayateOP.HayatePoolRejectPolicy.CreateOnDemand"/> explicitly, so that a miss grows the pool instead of
             waiting out the acquire timeout. A zero <c>MinPoolSize</c> makes the difference sharpest: the wait-based
             policies only shortcut creation while the pool tracks nothing at all, so after the first borrow the next
-            borrower waits. <see cref="T:DotNetCore.HayateOP.HayatePoolPresets"/> and <c>ParameterizedHayatePool&lt;TKey, TValue&gt;</c> already do
-            this; <see cref="T:DotNetCore.HayateOP.HayatePoolRejectPolicy"/> is where the five policies are compared.
+            borrower waits. <see cref="M:DotNetCore.HayateOP.HayatePool.Simple``1(System.Int32,System.Func{``0},System.Action{``0},System.String)"/>, <see cref="T:DotNetCore.HayateOP.HayatePoolPresets"/> and
+            <c>ParameterizedHayatePool&lt;TKey, TValue&gt;</c> all set it;
+            <see cref="T:DotNetCore.HayateOP.HayatePoolRejectPolicy"/> is where the five policies are compared.
             </remarks>
             <example>
             <code>
@@ -1785,8 +1786,10 @@
             <remarks>
             Everything except the two numbers below keeps its documented default, so the result is a
             full-featured pool rather than a stripped-down one: sharding, validation, eviction, auto-scaling and
-            leak detection are on, and the standard <c>BlockTimeout</c> acquire semantics apply. Nothing is
-            pre-created, so the first borrow pays the creation cost exactly once.<br />
+            leak detection are on. Nothing is pre-created, so the first borrow pays the creation cost exactly
+            once, and a borrow that finds every object lent out creates another one up to
+            <paramref name="poolSize"/> instead of waiting for a return (<c>CreateOnDemand</c>); a borrow that
+            finds the size already reached waits for a return first.<br />
             Use the <see cref="T:DotNetCore.HayateOP.HayatePoolBuilder`1"/> when the minimum idle count, the intervals or any single
             feature switch need tuning; see <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.UseLeanProfile"/> for the
             allocation-free pooling mode.

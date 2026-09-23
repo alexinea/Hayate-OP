@@ -27,8 +27,9 @@ namespace DotNetCore.HayateOP;
 /// <see cref="HayatePoolRejectPolicy.CreateOnDemand"/> explicitly, so that a miss grows the pool instead of
 /// waiting out the acquire timeout. A zero <c>MinPoolSize</c> makes the difference sharpest: the wait-based
 /// policies only shortcut creation while the pool tracks nothing at all, so after the first borrow the next
-/// borrower waits. <see cref="HayatePoolPresets"/> and <c>ParameterizedHayatePool&lt;TKey, TValue&gt;</c> already do
-/// this; <see cref="HayatePoolRejectPolicy"/> is where the five policies are compared.
+/// borrower waits. <see cref="Simple{T}"/>, <see cref="HayatePoolPresets"/> and
+/// <c>ParameterizedHayatePool&lt;TKey, TValue&gt;</c> all set it;
+/// <see cref="HayatePoolRejectPolicy"/> is where the five policies are compared.
 /// </remarks>
 /// <example>
 /// <code>
@@ -56,8 +57,10 @@ public static class HayatePool
     /// <remarks>
     /// Everything except the two numbers below keeps its documented default, so the result is a
     /// full-featured pool rather than a stripped-down one: sharding, validation, eviction, auto-scaling and
-    /// leak detection are on, and the standard <c>BlockTimeout</c> acquire semantics apply. Nothing is
-    /// pre-created, so the first borrow pays the creation cost exactly once.<br />
+    /// leak detection are on. Nothing is pre-created, so the first borrow pays the creation cost exactly
+    /// once, and a borrow that finds every object lent out creates another one up to
+    /// <paramref name="poolSize"/> instead of waiting for a return (<c>CreateOnDemand</c>); a borrow that
+    /// finds the size already reached waits for a return first.<br />
     /// Use the <see cref="HayatePoolBuilder{T}"/> when the minimum idle count, the intervals or any single
     /// feature switch need tuning; see <see cref="HayatePoolOptions.UseLeanProfile"/> for the
     /// allocation-free pooling mode.
@@ -84,7 +87,15 @@ public static class HayatePool
             // Lazy creation: an idle pool holds nothing until it is used, and `poolSize` is the ceiling
             // rather than something to fill eagerly.
             MinPoolSize = 0,
-            MaxPoolSize = poolSize
+            MaxPoolSize = poolSize,
+
+            // The zero floor above is only usable with the policy that grows on a miss. The wait-based
+            // policies shortcut creation while the pool tracks nothing at all, so after the first borrow
+            // every further borrower would wait out the acquire timeout for a return instead of being
+            // served by a fresh object - even though `poolSize` still leaves room. That would make
+            // "a pool of poolSize objects" a promise the pool does not keep, which is why the other
+            // "N objects" entry points set this too (see the class remarks).
+            RejectPolicy = HayatePoolRejectPolicy.CreateOnDemand
         };
         options.ApplyFeatureSwitches();
 

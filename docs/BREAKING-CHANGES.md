@@ -4,14 +4,14 @@ Migration guidance for every breaking change, newest first, plus the behavioural
 frequently surprise adopters. For a per-version summary of all changes see
 [`../CHANGELOG.md`](../CHANGELOG.md).
 
-## 3.0 — Lifetime semantics named, blocking wake-up made signal-driven
+## 3.0 — Lifetime semantics named, blocking wake-up made signal-driven, one-call factory grows on a miss
 
 3.0 states the meaning `MaxLifeTime` always had, in full, and leaves the enforcement of the borrowed
 half exactly where 2.9 put it: behind an opt-in switch that is off by default. It also removes the
 100 ms quantisation that blocking borrows used to carry. No public signature changes and no default
-option value moves — but the last two bullets below are an observable behaviour change, so read them
-before adopting: a blocking wait now wakes on the signal, and its timeout is a boundary rather than a
-floor.
+option value moves — but the last three bullets below are an observable behaviour change, so read
+them before adopting: a blocking wait now wakes on the signal, its timeout is a boundary rather than a
+floor, and a pool built by the one-call factory grows on a miss.
 
 - **`MaxLifeTime` is documented as the maximum lifetime of a pooled object from the moment it is
   created — idle or borrowed** (β-1). The documented scope used to be the idle half only, which read as
@@ -40,12 +40,24 @@ floor.
   the exception arrives at the configured timeout plus scheduling noise. The `TimeoutException`
   type, its message and the throw-rather-than-return-null contract are unchanged, and `Block` still
   has no timeout at all: it waits until a signal arrives.
+- **`HayatePool.Simple(n, ...)` grows on a miss instead of timing the second borrow out** (B6). The
+  one-call factory left the reject policy at the library default, `BlockTimeout`, which only
+  shortcuts creation while the pool tracks nothing at all — so a pool built as "4 objects" served its
+  first borrower and then made every other borrower wait out the acquire timeout and throw
+  `TimeoutException`, even though `MaxPoolSize` still left room for three more. It now sets
+  `CreateOnDemand`, the policy the presets and `ParameterizedHayatePool` already set, so a miss inside
+  `n` is served by a fresh object and "a pool of n objects" is what the call gives you. **The ceiling
+  behaves differently too**: at `n` the request no longer throws — `CreateOnDemand` waits the timeout
+  out and then creates, so a pool under sustained overload can end up holding more than `n` objects.
+  That wait-then-create is the pre-existing behaviour of the create policies and is shared with the
+  presets; `n` is where the wait starts, not where the borrow fails.
 
 ### Migration
 
 Nothing to migrate for the lifetime semantics: an application that compiled and ran against 2.9
 compiles and behaves the same against 3.0 on that count — those two bullets record a naming decision,
-not a change.
+not a change. A pool built by `HayatePool.Simple` is the one place to check: see
+[Migrating a pool built with HayatePool.Simple](#migrating-a-pool-built-with-hayatepoolsimple).
 
 If you do want the borrowed half enforced — the case where a server-side `max_connection_lifetime` or an
 intermediary's idle timeout can invalidate a connection the pool still believes is good — turn the switch
@@ -85,6 +97,24 @@ it:
   library now publishes a signal from every path that frees an object or a slot, so the reachable set
   is the same: a pool whose objects are all leaked and never reclaimed parks for good, exactly as it
   did before.
+
+### Migrating a pool built with HayatePool.Simple
+
+A pool built with `HayatePool.Simple(n, ...)` used to serve one borrower and time the rest out; it now
+serves up to `n` and, past that, waits and then creates. Three things are worth a look:
+
+- **A caller that relied on the timeout is the one to change.** If the pool was doubling as a throttle
+  whose overload signal was the `TimeoutException`, build it explicitly instead:
+  `new HayatePoolBuilder<T>().WithMaxSize(n).WithRejectPolicy(HayatePoolRejectPolicy.BlockTimeout)` keeps
+  the reject-on-overload behaviour, and `Abort` rejects without waiting at all.
+- **A caller that wanted `n` objects gets them now, with nothing to do** — and may see more objects
+  created than before, because a miss inside `n` creates instead of waiting. If the factory is expensive
+  or the pooled resource is externally limited, set `MaxPoolSize` to the real bound and check that the
+  wait-then-create past it is acceptable.
+- **Counts of created objects move.** A workload that used to see one object and a wall of timeouts now
+  sees `n` objects created immediately. Any test or dashboard that asserted on `TotalCreated` for such a
+  pool needs the new expected value — and note that the one-call factory reports metrics as off, so
+  count creations in the factory itself rather than reading `TotalCreated` from its stats.
 
 ## 2.9 — Asynchronous contracts and logging (no breaking API change)
 
@@ -368,7 +398,7 @@ Behaviours to be aware of before adopting HayateOP.
   (`Block` / `BlockTimeout` / `CreateNew` / `CreateOnDemand`) still re-check in fixed slices of 100 ms,
   so the observed tail latency of a return-to-acquire handoff is quantized to that slice size. The
   general-purpose engine no longer has that step: since 3.0 its blocking waits are signal-driven (see
-  [3.0](#30--lifetime-semantics-named-blocking-wake-up-made-signal-driven)).
+  [3.0](#30--lifetime-semantics-named-blocking-wake-up-made-signal-driven-one-call-factory-grows-on-a-miss)).
 - **`MinPoolSize = 0` cold pools bootstrap on first acquire.** No background component pre-creates
   objects to reach `MinPoolSize`; the pool starts empty, and the first acquire on a fully empty
   pool creates its object on demand. (A non-zero `MinPoolSize` is pre-warmed once, at construction,

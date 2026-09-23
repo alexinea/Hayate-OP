@@ -216,6 +216,7 @@ namespace DotNetCore.HayateOP.Tests
                 var options = pool.GetOptions();
                 Assert.Equal(4, options.MaxPoolSize);
                 Assert.Equal(0, options.MinPoolSize);
+                Assert.Equal(HayatePoolRejectPolicy.CreateOnDemand, options.RejectPolicy);
 
                 // Nothing exists until the first borrow.
                 Assert.Equal(0, created);
@@ -227,6 +228,50 @@ namespace DotNetCore.HayateOP.Tests
 
                 pool.Release(item);
                 Assert.Equal(1, pool.GetStats().PooledCount);
+            }
+        }
+
+        // ── B6-E3 (3.0): the one-call factory grows on a miss ─────────────────────────────────────────────
+        //
+        // `Simple` used to leave the reject policy at the library default (BlockTimeout), which only shortcuts
+        // creation while the pool tracks nothing at all. Measured before the change: the first borrow
+        // cold-boots and the second waits out the acquire timeout and throws, even though MaxPoolSize still
+        // leaves three places - a pool built as "4 objects" served exactly one borrower. With the policy the
+        // other "N objects" entry points already set, the same four borrows complete immediately instead.
+        //
+        // The ceiling changes too, which the second half pins: at the size the request no longer throws.
+        // CreateOnDemand waits the timeout out and then creates, so the requested size is where the wait
+        // starts, not where the borrow fails.
+        [Fact]
+        public void Simple_ShouldServeUpToTheRequestedSize_InsteadOfTimingOutOnAMiss()
+        {
+            var created = 0;
+            using (var pool = HayatePool.Simple<TestObject>(4, () =>
+            {
+                Interlocked.Increment(ref created);
+                return new TestObject();
+            }))
+            {
+                // Four borrowers with nothing returned in between: a miss inside `poolSize` creates
+                // instead of waiting for a return.
+                var held = new TestObject[4];
+                for (var i = 0; i < held.Length; i++)
+                {
+                    held[i] = pool.Acquire(TimeSpan.FromMilliseconds(500));
+                    Assert.NotNull(held[i]);
+                }
+
+                Assert.Equal(4, created);
+                Assert.Equal(4, pool.GetStats().CurrentSize);
+
+                // At the size the next borrow waits for a return, and is then served by a fresh object
+                // rather than by a TimeoutException.
+                var extra = pool.Acquire(TimeSpan.FromMilliseconds(300));
+                Assert.NotNull(extra);
+                Assert.Equal(5, created);
+                pool.Release(extra);
+
+                foreach (var item in held) pool.Release(item);
             }
         }
 
