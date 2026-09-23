@@ -110,6 +110,7 @@ intuition.
 | The return contract in one place | [`docs/ownership.md`](ownership.md) |
 | Who disposes what | [`docs/disposal.md`](disposal.md) |
 | Async borrow semantics | [`docs/async-policy.md`](async-policy.md) |
+| Why named pools are not built on keyed services, and the 3.0 plan for per-name policies | [`docs/named-pool-policies.md`](named-pool-policies.md) |
 | Behaviour changes between versions | [`docs/BREAKING-CHANGES.md`](BREAKING-CHANGES.md), then `CHANGELOG.md` |
 | A runnable example | the `reports/examples/` case set (repository-only) |
 
