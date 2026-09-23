@@ -146,6 +146,74 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Registers <paramref name="factory"/> as the source of the policy for every pool of
+    /// <typeparamref name="T"/>.
+    /// </summary>
+    /// <param name="services">The Hayate service collection.</param>
+    /// <param name="factory">The factory that resolves a policy from a pool name.</param>
+    /// <typeparam name="T">The pooled object type.</typeparam>
+    /// <returns>The Hayate service collection for chaining.</returns>
+    /// <remarks>
+    /// A factory is how pools of one element type get different policies — "primary uses connection
+    /// string A, replica uses connection string B". Without one, the container resolves
+    /// <see cref="IHayateObjectPolicy{T}"/> by element type alone, so every named pool of
+    /// <typeparamref name="T"/> shares whichever policy that registration produced.<br />
+    /// Registering a factory does not disturb any existing registration: the policy resolved from
+    /// the container is still what every pool uses when no factory is registered, and
+    /// <see cref="IHayateObjectPolicy{T}"/> is untouched either way. The factory is consulted once
+    /// per pool build, on the cold path, and receives the pool's registry name — see
+    /// <see cref="IHayateObjectPolicyFactory{T}"/>.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// services.AddHayatePoolSupport()
+    ///         .AddNamedPool&lt;MyConnection&gt;("primary")
+    ///         .AddNamedPool&lt;MyConnection&gt;("replica")
+    ///         .AddHayatePolicyFactory&lt;MyConnection&gt;(new ConnectionPolicyFactory());
+    /// </code>
+    /// </example>
+    public static IHayateServiceCollection AddHayatePolicyFactory<T>(this IHayateServiceCollection services,
+        IHayateObjectPolicyFactory<T> factory)
+        where T : class
+    {
+        if (factory is null) throw new ArgumentNullException(nameof(factory));
+
+        services.Services.AddSingleton(factory);
+        return services;
+    }
+
+    /// <summary>
+    /// Registers <typeparamref name="TFactory"/> as the source of the policy for every pool of
+    /// <typeparamref name="T"/>, constructed by the container.
+    /// </summary>
+    /// <param name="services">The Hayate service collection.</param>
+    /// <typeparam name="T">The pooled object type.</typeparam>
+    /// <typeparam name="TFactory">
+    /// The factory type; registered as a singleton and constructed by the container, so it may take
+    /// dependencies of its own.
+    /// </typeparam>
+    /// <returns>The Hayate service collection for chaining.</returns>
+    /// <remarks>
+    /// The type form of <see cref="AddHayatePolicyFactory{T}(IHayateServiceCollection, IHayateObjectPolicyFactory{T})"/>,
+    /// for a factory that needs the container to build it. Behaviour is otherwise identical.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// services.AddHayatePoolSupport()
+    ///         .AddNamedPool&lt;MyConnection&gt;("primary")
+    ///         .AddHayatePolicyFactory&lt;MyConnection, ConnectionPolicyFactory&gt;();
+    /// </code>
+    /// </example>
+    public static IHayateServiceCollection AddHayatePolicyFactory<T, TFactory>(
+        this IHayateServiceCollection services)
+        where T : class
+        where TFactory : class, IHayateObjectPolicyFactory<T>
+    {
+        services.Services.AddSingleton<IHayateObjectPolicyFactory<T>, TFactory>();
+        return services;
+    }
+
+    /// <summary>
     /// Registers a <b>named</b> pool of type <typeparamref name="T"/>: an independently configured
     /// pool that coexists with the unnamed pool of the same type and with any other name.
     /// </summary>
@@ -272,7 +340,13 @@ public static class ServiceCollectionExtensions
         where T : class
     {
         var options = sp.GetRequiredService<IOptionsSnapshot<HayatePoolOptions>>().Get(poolName);
-        var policy = sp.GetRequiredService<IHayateObjectPolicy<T>>();
+
+        // B8: a pool-name-aware factory, when one is registered, decides this pool's policy. Without
+        // one the lookup is by element type alone — the path every earlier version took, unchanged.
+        var policyFactory = sp.GetService<IHayateObjectPolicyFactory<T>>();
+        var policy = policyFactory is not null
+            ? policyFactory.Create(poolName)
+            : sp.GetRequiredService<IHayateObjectPolicy<T>>();
         var scalingStrategy = sp.GetRequiredService<IHayateScalingStrategy>();
         var metrics = sp.GetRequiredService<IHayateMetrics>();
         // L3: a container with no ILoggerFactory is not "logging off" — it is a container the host never

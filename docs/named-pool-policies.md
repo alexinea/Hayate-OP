@@ -6,12 +6,19 @@ policy per named pool instead of one policy per element type. It records the **f
 [`async-policy.md`](async-policy.md) was: the shape of a resolution contract is what consumers code
 against, and settling it in the open is cheaper than settling it in a migration note.
 
-**Implementation status: `B8-1` decided — form ①, the additive factory interface. `B8` not yet
-implemented; this page describes the contract it will implement.** Where this page and the code
-disagree, this page is the design and the code is the bug — until a decision here is deliberately
-revised, in which case this page is updated first.
+**Implementation status: implemented.** `B8-1` decided form ① and `B8` built it — the factory
+interface, the `BuildPool<T>` preference and the two `AddHayatePolicyFactory` overloads all ship in
+`src/HayateOP.Extensions.DependencyInjection`, covered by `NamedPoolPolicyFactoryTests` in both test
+generations (future: `net8.0`/`net9.0`/`net10.0`; legacy: `net6.0`/`net7.0`). §1 records the gap as
+it stood **before** `B8` and is kept as the justification for the shape, not as a description of the
+current code. Where this page and the code disagree, this page is the design and the code is the bug
+— until a decision here is deliberately revised, in which case this page is updated first.
 
 ## 1. The gap
+
+> **Pre-`B8` state.** The code below is what `B8` found, quoted as the justification for the shape.
+> The line numbers are the ones `B8` read; after the change, `BuildPool<T>`'s lookup is at
+> `ServiceCollectionExtensions.cs:344` and `AddNamedPool<T>`'s seeding registration is unchanged.
 
 `IHayateObjectPolicy<T>` has no pool-name parameter, in any of its members:
 
@@ -143,7 +150,8 @@ Three properties make this the shape it is:
 - **It is optional at every point.** No factory registered ⇒ the existing lookup runs and nothing
   observable changes.
 
-`BuildPool<T>` becomes a preference rather than a replacement:
+`BuildPool<T>` is a preference rather than a replacement — this is the shipped code
+(`ServiceCollectionExtensions.cs:344`):
 
 ```csharp
 var policyFactory = sp.GetService<IHayateObjectPolicyFactory<T>>();
@@ -192,3 +200,12 @@ the hot path.
 3. `src` 10 projects, Release and Debug, `--no-incremental`: **0 warnings, 0 errors**.
 4. No `docs/BREAKING-CHANGES.md` section and no `breaking_registry.json` entry: form ① is additive,
    so there is nothing to migrate.
+
+All four hold. Anchors 1 and 2 are covered by `NamedPoolPolicyFactoryTests`
+(`tests/HayateOP.Tests.DI/`, mirrored byte for byte into `tests/legacy/HayateOP.Tests.DI.Legacy/`):
+`AddHayatePolicyFactory_ShouldGiveEachNamedPoolItsOwnPolicy` and
+`AddHayatePolicyFactory_ShouldReceiveTheCanonicalRegistryName` for the first, the two
+`WithoutAFactory_…` cases for the second. Deleting the `BuildPool<T>` preference makes **9 of those
+12 cases fail**, and the three that still pass are exactly the ones that must not depend on it —
+which is what makes them evidence rather than decoration. Anchor 3 is the `src` gate; anchor 4 needs
+no work, because nothing was added to the breaking surface.
