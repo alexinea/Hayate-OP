@@ -10,6 +10,130 @@ Breaking changes are described in full — with migration guidance — in
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-09-24
+
+Lifetime and wake-up semantics, with one signature change and one namespace move. 3.0 states in full
+what `MaxLifeTime` always meant and leaves the enforcement of the borrowed half exactly where 2.9 put
+it — behind an opt-in switch that is off by default (β). It removes the 100 ms quantisation blocking
+borrows used to carry, so a waiter now wakes on a signal published by every site that makes an object
+available, and the blocking timeout becomes a boundary rather than a floor (B6). The one-call factory
+grows on a miss instead of timing the second borrow out (B6). A shard's ends are padded so
+neighbouring stripes stop sharing a cache line (G-4). `IHayateLogger` gains four members — the
+release's one signature change, breaking for implementers, with a new `HayateLoggerBase` as the
+migration path (L7) — and the Microsoft.Extensions.Logging bridge moves into the namespace of the
+package that ships it (L8). Named pools gain a pool-name-aware policy factory, so two names of one
+element type can carry different policies without inventing a second element type (B8).
+
+Read [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md) before adopting: two of the entries above
+are breaking, and three more are observable behaviour changes.
+
+Three things in this release are not package changes. The target-framework matrix and the `net48`
+`ArrayPool` position were both re-examined and kept (T-1 / T-2); the review is recorded in the README,
+and the package support table now lists the `net48` assets Configuration and HealthCheck actually
+ship. Every dependency version the packages declare is now written once, in
+`asset/props/dependency.versions.props`, and checked by `scripts/check-dependency-versions.py` in CI
+(L9) — the shipped asset face is unchanged, byte for byte. And the hot-path baseline was re-captured
+on CI against the 3.0 tree, with the per-target thresholds carried forward (B6-① + G-4).
+
+### Added
+
+- **Pool-name-scoped policy resolution** (B8): `IHayateObjectPolicyFactory<T>` resolves the policy a
+  pool is built with from the pool's registry name, so two named pools of one element type can carry
+  different policies — "primary uses connection string A, replica uses connection string B" — without
+  a second element type standing in for a second configuration. Register one with
+  `AddHayatePolicyFactory<T>(factory)`, or with `AddHayatePolicyFactory<T, TFactory>()` when the
+  container should build the factory itself. Nothing existing changes: with no factory registered,
+  `BuildPool<T>` resolves `IHayateObjectPolicy<T>` by element type alone, which is what every earlier
+  version did, and the factory is consulted once per pool build on the cold path rather than per
+  borrow. It applies to the unnamed pool too, whose registry name is the bare element type name. The
+  alternative form — turning `IHayateObjectPolicy<T>` itself into a keyed service — was rejected:
+  keyed registration does not exist in the 6.0 / 7.0 abstractions this package targets, and it would
+  change what an existing registration means. The decision and the contract are recorded in
+  [`docs/named-pool-policies.md`](docs/named-pool-policies.md).
+- **`IHayateLogger` gained four members, and `HayateLoggerBase` to migrate through** (L7): `LogTrace`,
+  `LogCritical`, `IsEnabled(HayateLogLevel)` and `BeginScope` join the four the interface already had,
+  so a logger written for Microsoft.Extensions.Logging or Serilog can be handed to the pool without
+  the levels it exposes being dropped, and the pool can ask whether an entry is worth building before
+  it builds it. This is the release's one signature change, and the library cannot soften it with a
+  default interface method — the core package targets `netstandard2.0` and `net48`, and neither
+  runtime supports them. `HayateLoggerBase` is the migration path: the four members 2.x had are the
+  only ones it declares `abstract`, so a class written against 2.x changes its class clause and marks
+  its existing methods `override` — **no member 3.0 added has to be implemented**. They are abstract
+  rather than virtual with a body on purpose: a virtual member would let the one-clause change compile
+  and then hide the inherited member instead of overriding it, and every call through `IHayateLogger`
+  would reach the empty base method and record nothing.
+
+### Changed
+
+- **`MaxLifeTime` is documented as the maximum lifetime of a pooled object from the moment it is
+  created — idle or borrowed** (β): the documented scope used to be the idle half only, which read as
+  though a borrowed object could never age. The value, its default (10 minutes) and the pool's
+  behaviour are all unchanged, and `EnableLifetimeRotationOnBorrow` — the switch that decides whether
+  the borrowed half is enforced — is still `false` by default, so the default behaviour is the one
+  every release before 2.9 had. What changed is that the option's XML documentation and the README now
+  say the same sentence.
+- **Blocking wake-up is signal-driven, not quantised** (B6-①): `Block`, `BlockTimeout` and the
+  create-on-miss policies used to re-check their shard in fixed 100 ms slices, so a waiter could not
+  observe a return sooner than the next slice boundary. The wait is now a one-shot
+  `SemaphoreSlim.Wait(timeout)`, and every site that makes an object available publishes a signal
+  through `SignalAvailability()` — seven sites, the return path among them. Two consequences are
+  worth knowing before adopting: the blocking timeout is a **boundary rather than a floor** (a 400 ms
+  timeout that used to surface as roughly 500 ms now surfaces at 400 ms), and `Block` waits until a
+  signal is published with no timeout of its own. Re-measure a p99 that sat just under 100 ms. The
+  lean variant keeps the slice, and its behaviour is unchanged.
+- **The wait-based policies' growth contract is stated where it is enforced** (B6-E1 / B6-E2): a miss
+  on a pool that already tracks objects waits rather than growing, even while `MaxPoolSize` would
+  still allow more — so a pool whose objects are all lent out reaches `MaxPoolSize` only through the
+  background scaler, and a caller that gives up first sees a `TimeoutException` with room left in the
+  pool. Only a completely empty pool grows on the borrow path. The invariant behind the borrow path's
+  re-check is named too, and 3.0 turns it into a mechanism rather than a coincidence: every site that
+  makes an object available now publishes a signal, so the re-check stops being the only reason a
+  waiter sees an object.
+- **A shard's ends are padded so neighbouring stripes stop sharing a cache line** (G-4): the padding is
+  split across two types — a leading pad on a non-generic abstract base, a trailing pad on the
+  most-derived class — because a generic type cannot place a field after the fields its type
+  parameters contribute without an extra level of inheritance. No public surface changes. What the
+  padding is worth is **not yet measured**: the re-capture that landed with it moved every row, so its
+  own contribution is untested rather than proved.
+- **The Microsoft.Extensions.Logging bridge moved to `DotNetCore.HayateOP.DependencyInjection`** (L8):
+  `HayateMicrosoftLoggerAdapter`, `HayateMicrosoftLoggerAdapter<T>` and `HayateMicrosoftLoggerFactory`
+  sat in `DotNetCore.HayateOP.Logging` — the core package's namespace — while shipping in the
+  DependencyInjection package, so the namespace pointed readers at a package that does not contain
+  them. They now sit in the namespace of the package that does. Source that spelled the old namespace
+  keeps compiling: obsolete shells were left behind that derive from the moved types and add nothing.
+  Two costs are real — a file that imports both namespaces sees each of the three names twice
+  (`CS0104`), and the shell is a separate type from the one the container hands out, so an `is` /
+  `typeof` test written against the old name no longer matches.
+
+### Fixed
+
+- **`HayatePool.Simple(n, …)` grows on a miss instead of timing the second borrow out** (B6-②): the
+  one-call factory left the reject policy at the library default, `BlockTimeout`, which creates only
+  when the pool is completely empty — so a second concurrent borrow waited its timeout out even
+  though the pool had room. It now sets `CreateOnDemand`, the policy the presets and
+  `ParameterizedHayatePool` already set, and "a pool of `n` objects" is what the call gives you. The
+  ceiling behaves differently too: at `n` the request no longer throws — `CreateOnDemand` waits the
+  timeout out and then creates, so a pool under sustained overload can end up holding more than `n`.
+  A workload that used to see one object and a wall of timeouts now sees objects created; note that
+  `CreateOnDemand` reports metrics as off, so count creations in the factory rather than reading
+  `TotalCreated`.
+- **The package support table now lists the `net48` assets Configuration and HealthCheck ship**
+  (T-pk): the README's table put both packages under "All other
+  `DotNetCore.HayateOP.Extensions.*` packages — .NET 6/7/8/9/10", which contradicted the prose two
+  paragraphs above it and the packages themselves — both carry a `net48` leg.
+- **The allocation gate no longer fails on three rows whose reading is not reproducible** (CI
+  tooling): `Acquire+Release | Full`, `Async Lean` and `Async Full` carry `allocGateExempt` in the
+  baseline, with the reason recorded beside it. All three keep a background maintenance loop —
+  eviction, auto-scaling, leak detection and metrics — running across the measured window, so their
+  allocation reading varies with when the loop fires rather than with the code under test.
+- **A re-captured hot-path baseline is adopted as a whole** (CI tooling): the 3.0 re-capture carries
+  the per-target thresholds forward from the committed baseline, so a re-capture no longer reverts
+  them. It describes the 3.0 tree; it does not isolate any single change's contribution.
+- **The uptime-ratio test no longer races the Windows clock tick** (test-only; no runtime change):
+  `StartedAt` comes from a clock whose resolution on Windows is 15.6 ms, so reading the uptime ratios
+  immediately after construction could divide by a value the test had not waited for. The test now
+  waits the tick out.
+
 ## [2.9.0] - 2026-09-22
 
 Asynchronous-contract and logging release, no breaking API change. Highlights: the asynchronous
@@ -1163,7 +1287,8 @@ No breaking change beyond the lease-context rework listed below.
 
 Initial release.
 
-[Unreleased]: https://github.com/alexinea/object-pool/compare/v2.9...HEAD
+[Unreleased]: https://github.com/alexinea/object-pool/compare/v3.0...HEAD
+[3.0.0]: https://github.com/alexinea/object-pool/compare/v2.9...v3.0
 [2.9.0]: https://github.com/alexinea/object-pool/compare/v2.8...v2.9
 [2.8.0]: https://github.com/alexinea/object-pool/compare/v2.7...v2.8
 [2.7.0]: https://github.com/alexinea/object-pool/compare/v2.6...v2.7
