@@ -1,5 +1,5 @@
 ﻿using DotNetCore.HayateOP;
-using DotNetCore.HayateOP.Logging;
+using DotNetCore.HayateOP.DependencyInjection;
 using DotNetCore.HayateOP.Metrics;
 using DotNetCore.HayateOP.Policies;
 using DotNetCore.HayateOP.Scaling;

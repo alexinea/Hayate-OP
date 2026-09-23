@@ -4,12 +4,13 @@ Migration guidance for every breaking change, newest first, plus the behavioural
 frequently surprise adopters. For a per-version summary of all changes see
 [`../CHANGELOG.md`](../CHANGELOG.md).
 
-## 3.0 — Lifetime semantics named, blocking wake-up made signal-driven, one-call factory grows on a miss, logging surface extended
+## 3.0 — Lifetime semantics named, blocking wake-up made signal-driven, one-call factory grows on a miss, logging surface extended and relocated
 
 3.0 states the meaning `MaxLifeTime` always had, in full, and leaves the enforcement of the borrowed
 half exactly where 2.9 put it: behind an opt-in switch that is off by default. It also removes the
-100 ms quantisation that blocking borrows used to carry, and extends `IHayateLogger` — the release's
-one signature change. Three of the bullets below are an observable behaviour change, so read them
+100 ms quantisation that blocking borrows used to carry, extends `IHayateLogger` — the release's one
+signature change — and moves the Microsoft.Extensions.Logging bridge into the namespace of the package
+that ships it. Three of the bullets below are an observable behaviour change, so read them
 before adopting: a blocking wait now wakes on the signal, its timeout is a boundary rather than a
 floor, and a pool built by the one-call factory grows on a miss.
 
@@ -63,15 +64,27 @@ floor, and a pool built by the one-call factory grows on a miss.
   `params` array and the boxed arguments used to be allocated. The default answer is `true` for every
   real level, so an implementation that never asked to filter keeps writing exactly what it wrote
   before.
+- **The Microsoft.Extensions.Logging bridge moved to `DotNetCore.HayateOP.DependencyInjection`** (L8).
+  `HayateMicrosoftLoggerAdapter`, `HayateMicrosoftLoggerAdapter<T>` and `HayateMicrosoftLoggerFactory`
+  sat in `DotNetCore.HayateOP.Logging` — the core package's namespace — while shipping in the
+  DependencyInjection package, so the namespace pointed readers at a package that does not contain them.
+  They now sit in the namespace of the package that does. Source that spelled the old namespace keeps
+  compiling: obsolete shells were left behind that derive from the moved types and add nothing, so an
+  upgrade needs no edit. Two costs are real, and the migration note below spells both out: a file that
+  imports the old and the new namespace sees each of the three names twice (CS0104), and the shell is a
+  separate type from the one the container hands out.
 
 ### Migration
 
 Nothing to migrate for the lifetime semantics: an application that compiled and ran against 2.9
 compiles and behaves the same against 3.0 on that count — those two bullets record a naming decision,
-not a change. Two things are worth checking: a pool built by `HayatePool.Simple` (see
-[Migrating a pool built with HayatePool.Simple](#migrating-a-pool-built-with-hayatepoolsimple)) and an
+not a change. Three things are worth checking: a pool built by `HayatePool.Simple` (see
+[Migrating a pool built with HayatePool.Simple](#migrating-a-pool-built-with-hayatepoolsimple)), an
 `IHayateLogger` implementation of your own (see
-[Migrating an IHayateLogger implementation](#migrating-an-ihayatelogger-implementation)).
+[Migrating an IHayateLogger implementation](#migrating-an-ihayatelogger-implementation)), and any file
+that names the logging bridge (see
+[Migrating off the old logging namespace](#migrating-off-the-old-logging-namespace) — nothing there has
+to change, but the one new compile error is worth knowing about).
 
 If you do want the borrowed half enforced — the case where a server-side `max_connection_lifetime` or an
 intermediary's idle timeout can invalidate a connection the pool still believes is good — turn the switch
@@ -177,6 +190,36 @@ Two further notes:
   observable is lost — the release build's default logger discarded every entry before 3.0 too — and
   the borrow and release paths stop paying for the message arguments. Pass a logger of your own if you
   want the trace in a release build.
+
+### Migrating off the old logging namespace
+
+Nothing has to change: the three names still resolve through `DotNetCore.HayateOP.Logging`, now to
+obsolete shells. New code should take them from `DotNetCore.HayateOP.DependencyInjection`:
+
+```csharp
+// 2.x, and still compiling in 3.0 (with one CS0618 warning)
+using DotNetCore.HayateOP.Logging;
+
+var factory = new HayateMicrosoftLoggerFactory(loggerFactory);
+
+// 3.0
+using DotNetCore.HayateOP.DependencyInjection;
+
+var factory = new HayateMicrosoftLoggerFactory(loggerFactory);
+```
+
+This is a namespace change, not a signature change: the constructors, the members and the behaviour of
+all three types are untouched, and `IHayateLogger` — the interface they implement — did not move.
+Two things are worth knowing, and only the first one is a compile error:
+
+- **A file that imports both namespaces gets CS0104 on each of the three names**, because both
+  namespaces declare them. Delete the old `using` rather than qualifying the call sites.
+- **The shell and the moved type are two different types.** They are interchangeable through
+  `IHayateLogger` and `IHayateLoggerFactory`, and the container, the builders and the factories always
+  hand out the moved one. A type test written against the old name therefore stops matching objects the
+  container produced — `logger is DotNetCore.HayateOP.Logging.HayateMicrosoftLoggerAdapter` is `false`
+  for an adapter the container built — while the reverse test is `true`, because the shell derives from
+  the moved type.
 
 ## 2.9 — Asynchronous contracts and logging (no breaking API change)
 
@@ -460,7 +503,7 @@ Behaviours to be aware of before adopting HayateOP.
   (`Block` / `BlockTimeout` / `CreateNew` / `CreateOnDemand`) still re-check in fixed slices of 100 ms,
   so the observed tail latency of a return-to-acquire handoff is quantized to that slice size. The
   general-purpose engine no longer has that step: since 3.0 its blocking waits are signal-driven (see
-  [3.0](#30--lifetime-semantics-named-blocking-wake-up-made-signal-driven-one-call-factory-grows-on-a-miss-logging-surface-extended)).
+  [3.0](#30--lifetime-semantics-named-blocking-wake-up-made-signal-driven-one-call-factory-grows-on-a-miss-logging-surface-extended-and-relocated)).
 - **`MinPoolSize = 0` cold pools bootstrap on first acquire.** No background component pre-creates
   objects to reach `MinPoolSize`; the pool starts empty, and the first acquire on a fully empty
   pool creates its object on demand. (A non-zero `MinPoolSize` is pre-warmed once, at construction,
@@ -484,3 +527,10 @@ Behaviours to be aware of before adopting HayateOP.
   Related: `IHayateObjectPolicy.OnDestroy` is not invoked for objects released by
   `Clear()` / `Dispose()` on the general-purpose engine, unlike every other destroy path. See
   [`disposal.md`](disposal.md).
+- **A type test written against the old logging namespace no longer matches.** Since 3.0 the
+  Microsoft.Extensions.Logging bridge lives in `DotNetCore.HayateOP.DependencyInjection`, and the names
+  left in `DotNetCore.HayateOP.Logging` are obsolete shells deriving from it (see
+  [3.0](#30--lifetime-semantics-named-blocking-wake-up-made-signal-driven-one-call-factory-grows-on-a-miss-logging-surface-extended-and-relocated-and-relocated)). An adapter or factory the container produced is an instance of the moved type and so
+  *not* an instance of the old name, which means `is` / `typeof` comparisons against
+  `DotNetCore.HayateOP.Logging.HayateMicrosoftLoggerAdapter` quietly stop matching. The reverse test
+  still holds, and `IHayateLogger` / `IHayateLoggerFactory` are unaffected — they never moved.

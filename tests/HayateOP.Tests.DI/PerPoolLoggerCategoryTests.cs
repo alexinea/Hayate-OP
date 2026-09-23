@@ -1,7 +1,7 @@
 using System;
 using System.Linq;
 using DotNetCore.HayateOP;
-using DotNetCore.HayateOP.Logging;
+using DotNetCore.HayateOP.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 

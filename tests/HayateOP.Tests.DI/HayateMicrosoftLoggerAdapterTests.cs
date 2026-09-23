@@ -1,4 +1,4 @@
-using DotNetCore.HayateOP.Logging;
+using DotNetCore.HayateOP.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace HayateOP.Tests.DI;
@@ -50,7 +50,7 @@ public class HayateMicrosoftLoggerAdapterTests
         }
     }
 
-    private static (IHayateLogger Logger, CapturingProvider Capture) BuildCaptured(string category)
+    private static (DotNetCore.HayateOP.Logging.IHayateLogger Logger, CapturingProvider Capture) BuildCaptured(string category)
     {
         var capture = new CapturingProvider();
         var factory = LoggerFactory.Create(b => b.AddProvider(capture).SetMinimumLevel(LogLevel.Trace));
@@ -61,7 +61,7 @@ public class HayateMicrosoftLoggerAdapterTests
     [Fact]
     public void NullLogger_ShouldDiscardEverythingWithoutThrowing()
     {
-        IHayateLogger logger = new HayateMicrosoftLoggerAdapter(null);
+        DotNetCore.HayateOP.Logging.IHayateLogger logger = new HayateMicrosoftLoggerAdapter(null);
 
         logger.LogDebug("d {A}", 1);
         logger.LogInformation("i {A}", 1);

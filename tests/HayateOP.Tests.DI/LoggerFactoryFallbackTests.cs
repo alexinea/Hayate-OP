@@ -1,5 +1,5 @@
 using DotNetCore.HayateOP;
-using DotNetCore.HayateOP.Logging;
+using DotNetCore.HayateOP.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace HayateOP.Tests.DI;
@@ -18,7 +18,8 @@ public class LoggerFactoryFallbackTests
     {
         // Compared by type, not by identity: DefaultHayateLogger is internal and is created fresh per
         // call, so "is it the built-in one?" can only be answered by asking what type came back.
-        var expected = DefaultHayateLoggerFactory.Instance.CreateLogger("pool").GetType();
+        var expected = DotNetCore.HayateOP.Logging.DefaultHayateLoggerFactory.Instance
+            .CreateLogger("pool").GetType();
         var actual = new HayateMicrosoftLoggerFactory(null).CreateLogger("pool").GetType();
 
         Assert.Equal(expected, actual);
