@@ -22,11 +22,17 @@
 | :--- | :--- | :--- |
 | `Acquire+Release \| Reservoir` | Suite 1 — single-threaded synchronous | `Rent()`, a payload write, then `Return()` |
 | `Concurrent-100 \| Reservoir` | Suite 4 — contention | 100-thread `Parallel.For` rent/write/return round trip |
-| `Concurrent-N \| MEOP` | Suite 5 — ladder | 100,000 pairs split across 1/4/8/16 workers |
-| `Concurrent-N \| Hayate AllOff` | Suite 5 — ladder | same |
-| `Concurrent-N \| Hayate Lean` | Suite 5 — ladder | same |
-| `Concurrent-N \| Hayate Sharded4` | Suite 5 — ladder | same |
-| `Concurrent-N \| Reservoir` | Suite 5 — ladder | same |
+| `Concurrent-1/4/8/16 \| MEOP` | Suite 5 — ladder | 100,000 pairs split across 1/4/8/16 workers |
+| `Concurrent-1/4/8/16 \| Hayate AllOff` | Suite 5 — ladder | same |
+| `Concurrent-1/4/8/16 \| Hayate Lean` | Suite 5 — ladder | same |
+| `Concurrent-1/4/8/16 \| Hayate Sharded4` | Suite 5 — ladder | same |
+| `Concurrent-1/4/8/16 \| Reservoir` | Suite 5 — ladder | same |
+
+> **Renamed in 3.1** (commit `4cbecc3`). At capture time every tier of a ladder row rendered the
+> *same* description, `Concurrent-N | <impl>`, and the tiers were distinguishable only by the
+> auto-generated `threads` column. 3.1 split the ladder into one benchmark method per tier so each
+> tier renders its own name — the precondition for ever gating it. §3 and §6 have the details; the
+> `.csv` committed next to this report is the pre-rename capture.
 
 `Reservoir` cannot appear in Suite 3 (asynchronous `AcquireAsync+Release`): the library exposes **no
 asynchronous API** — `Rent()` is the only acquire path. Suite 3 is therefore N/A for this line, which
@@ -71,14 +77,21 @@ about 98% `Parallel.For` scheduling. Amortising a fixed work quantity per iterat
 ladder readable at all. The discarded figures are still in the working log and are cited here only as
 the reason for the redesign; do not quote them.
 
-`Description` is rendered **verbatim** by BDN — there is no `{threads}` placeholder support (verified:
-it prints literally). The tier is therefore carried by BDN's auto-generated `threads` column, and all
-five rows share one description, `Concurrent-N | <impl>`.
+**Naming, and why it changed in 3.1.** `Description` is rendered **verbatim** by BDN — there is no
+`{threads}` placeholder support (verified: it prints literally), so one `[Arguments]`-driven method
+can only ever produce one rendered name. As captured here, all four tiers of a row therefore shared
+one description, `Concurrent-N | <impl>`, and the tier was carried by BDN's auto-generated `threads`
+column. 3.1 (commit `4cbecc3`) replaced that with one benchmark method per tier, so each tier now
+renders its own name, `Concurrent-1 | <impl>` … `Concurrent-16 | <impl>`, and the `threads` column is
+gone — the tier is read from the name. The CSV committed next to this report is the **pre-rename**
+capture and still shows `Concurrent-N`; §6 records why the rename was required.
 
 ## 4. Results
 
 Job `Short` (IterationCount=10, WarmupCount=3, Server GC, concurrent), .NET 10.0.11, X64 RyuJIT
-x86-64-v3, 16 logical processors. `Mean` and `StdDev` in ns; `Allocated` per operation.
+x86-64-v3, 16 logical processors. `Mean` and `StdDev` in ns; `Allocated` per operation. Row labels are
+the descriptions **as captured** — pre-rename, so all four tiers of a row share one label here and are
+told apart by column (see §3).
 
 | Row | 1 worker | 4 workers | 8 workers | 16 workers | Allocated |
 | :--- | ---: | ---: | ---: | ---: | :--- |
@@ -142,13 +155,24 @@ threshold means something". Relative standard deviation (`StdDev / Mean`) per ti
   regression threshold would be swamped by its own noise.
 - **AllOff sits at 5–7.5% throughout**, which is marginal.
 
-**⚠️ Before any `Concurrent-N` row is gated, the description collision must be fixed.**
-`bench-compare.py` keys rows by the rendered benchmark description (`bench-compare.py:145`), and the
-four tiers of each implementation share **one** description (`Concurrent-N | <impl>`). Gating them as
-they stand would let the four tiers overwrite each other in the comparison — last write wins, with no
-error. The description has to become unique per tier first. This is recorded in
-`HayateOP-3.1-plan-2026-09-22.md` §一.1.1 and in the Suite 5 comment block in
-`tests/HayateOP.Benchmarks/Program.cs`.
+**✅ The description collision was fixed in 3.1** (commit `4cbecc3`). `bench-compare.py` keys rows by
+the rendered benchmark description (`read_report` at `bench-compare.py:159`, via `normalize_method` at
+`:141`), and the four tiers of each implementation used to share **one** description
+(`Concurrent-N | <impl>`). Gating them as they stood would have let the four tiers overwrite each
+other — last write wins, with no error. The ladder is now one benchmark method per tier, so every tier
+renders its own name. Verified against the real gate code rather than a reimplementation:
+`read_report()` on the pre-fix CSV collapses its 20 ladder rows into **5** entries, while a post-fix
+report returns **20** distinct ones. Both the old and the new names contain `Concurrent`, so the rows
+stay excluded by the name rule (`bench-compare.py:219-220`) as well as by category.
+
+**Verdict on gating (3.1 plan §一.1.1): the ladder stays a reference column in this window.** Fixing
+the collision was only the precondition. The decision criterion is *CI* cross-run spread, and CI has
+never measured these rows: `perf-regression.yml` runs `--anyCategories hot`, these rows are
+`[BenchmarkCategory("concurrent")]`, and the committed `baseline.json` carries no concurrent target at
+all. Re-capturing does not change that, because the re-capture reuses the same run line. The local
+pre-screen above already excludes the majority (Sharded4 is worst and worsens with workers; AllOff is
+marginal), so the only rows a future gate could ever consider are **Lean** and **MEOP**. Unblocking
+that would first require CI to sample the `concurrent` category outside the gate.
 
 ## 7. Reproducing
 
@@ -157,8 +181,13 @@ From the repository root, with the build environment sourced:
 ```
 dotnet build tests/HayateOP.Benchmarks/HayateOP.Benchmarks.csproj -c Release
 tests/HayateOP.Benchmarks/bin/Release/net10.0/HayateOP.Benchmarks.exe \
-    --filter '*ConcurrentTier*' --job Short
+    --filter '*_Concurrent1' '*_Concurrent4' '*_Concurrent8' '*_Concurrent16' --job Short
 ```
+
+The four filters are the post-rename form (pre-rename, one `--filter '*ConcurrentTier*'` covered the
+whole ladder); together they select exactly the 20 cases, which `--list flat` with the same filters
+confirms. `--anyCategories concurrent` would also work but additionally pulls in the 10 Suite 4
+`Concurrent-100` rows.
 
 The full 20-case ladder (5 rows × 4 tiers) takes about five minutes on the host used here. BDN writes
 its own `BenchmarkDotNet.Artifacts/results/HayateOpBenchmarks-report.csv`; the run behind this report
