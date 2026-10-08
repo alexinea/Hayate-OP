@@ -822,32 +822,33 @@ public class HayateOpBenchmarks
     // is therefore directly comparable with the single-threaded Suite 1 rows - the one thing this
     // ladder does share with the rest of the matrix.
     //
-    // The descriptions read "Concurrent-N | ..." rather than naming a tier because BenchmarkDotNet
-    // uses Description verbatim: it has no placeholder for an [Arguments] value, so "{threads}"
-    // would be printed literally (verified on a dry run). The tier is carried by the generated
-    // `threads` column instead, which is where the ladder is read from.
+    // ── Naming: one benchmark method per tier (fixed for 3.1) ────────────────────────
     //
-    // ⚠️ Trap for whoever gates this ladder, recorded because it fails silently. The gate keys rows
-    // by the CSV "Method" column - scripts/bench-compare.py:145 runs it through normalize_method,
-    // which only strips quotes - and that column carries whatever BDN renders, i.e. the Description
-    // when one is set. Two consequences:
-    //   1. These rows can never be gated as they stand: bench-compare.py:192-193 computes
-    //      gated = "Hayate" in method and "Concurrent" not in method, so anything whose rendered
-    //      name contains "Concurrent" is marked excluded. That is a second, independent guarantee
-    //      alongside "CI only runs --anyCategories hot".
-    //   2. All four tiers of a row share one rendered name ("Concurrent-N | ..."), so if they were
-    //      ever gated they would collide in that dict and the last one would silently win. Gating a
-    //      Concurrent-N row therefore requires unique rendered names first - which means either one
-    //      method per tier with the tier spelled out in the Description, or dropping the Description
-    //      so BDN falls back to the method name plus its arguments column.
+    // Every tier renders a unique name, "Concurrent-1 | X" through "Concurrent-16 | X", which is
+    // why each row is four benchmark methods rather than one [Arguments]-parameterised method.
+    // BenchmarkDotNet renders Description verbatim and has no placeholder for an [Arguments] value
+    // ("{threads}" prints literally - verified on a dry run), so a single method can only ever
+    // produce one rendered name. That was harmless while the ladder was a non-gated reference
+    // column, but the gate keys report rows by the rendered name alone (scripts/bench-compare.py:171
+    // read_report -> normalize_method at :141, which only strips the quotes BDN adds), so two rows
+    // sharing a name means the last one silently wins. One method per tier is what makes a
+    // Concurrent-N row gateable at all. The tier is now read from the name, so the CSV no longer
+    // carries a `threads` column; the five loop bodies are unchanged and live in the private *Tier
+    // helpers below.
+    //
+    // Two invariants the split must not break:
+    //   1. Every rendered name still contains "Concurrent", so bench-compare.py:219-220 keeps
+    //      classifying the whole ladder as excluded (gated = "Hayate" in method and "Concurrent"
+    //      not in method). Renaming it to something without "Concurrent" would silently pull the
+    //      Hayate rows into the gate.
+    //   2. The case count is unchanged - 5 implementations x 4 tiers = 20 - so the ladder costs
+    //      exactly what it cost before.
+    //
+    // Gateability is only a precondition, not the decision. CI runs --anyCategories hot and these
+    // rows are [BenchmarkCategory("concurrent")], so CI has never measured them and no re-capture
+    // will; the gating decision is recorded in the 3.1 plan, section 1.1.
 
-    [Benchmark(Description = "Concurrent-N | MEOP", OperationsPerInvoke = TierTotalOps)]
-    [BenchmarkCategory("concurrent")]
-    [Arguments(1)]
-    [Arguments(4)]
-    [Arguments(8)]
-    [Arguments(16)]
-    public void Meop_ConcurrentTier(int threads)
+    private void MeopTier(int threads)
     {
         var perWorker = TierTotalOps / threads;
         Parallel.For(0, threads, OptionsFor(threads), _ =>
@@ -861,13 +862,23 @@ public class HayateOpBenchmarks
         });
     }
 
-    [Benchmark(Description = "Concurrent-N | Hayate AllOff", OperationsPerInvoke = TierTotalOps)]
+    [Benchmark(Description = "Concurrent-1 | MEOP", OperationsPerInvoke = TierTotalOps)]
     [BenchmarkCategory("concurrent")]
-    [Arguments(1)]
-    [Arguments(4)]
-    [Arguments(8)]
-    [Arguments(16)]
-    public void Hayate_AllOff_ConcurrentTier(int threads)
+    public void Meop_Concurrent1() => MeopTier(1);
+
+    [Benchmark(Description = "Concurrent-4 | MEOP", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    public void Meop_Concurrent4() => MeopTier(4);
+
+    [Benchmark(Description = "Concurrent-8 | MEOP", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    public void Meop_Concurrent8() => MeopTier(8);
+
+    [Benchmark(Description = "Concurrent-16 | MEOP", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    public void Meop_Concurrent16() => MeopTier(16);
+
+    private void Hayate_AllOffTier(int threads)
     {
         var perWorker = TierTotalOps / threads;
         Parallel.For(0, threads, OptionsFor(threads), _ =>
@@ -881,13 +892,23 @@ public class HayateOpBenchmarks
         });
     }
 
-    [Benchmark(Description = "Concurrent-N | Hayate Lean", OperationsPerInvoke = TierTotalOps)]
+    [Benchmark(Description = "Concurrent-1 | Hayate AllOff", OperationsPerInvoke = TierTotalOps)]
     [BenchmarkCategory("concurrent")]
-    [Arguments(1)]
-    [Arguments(4)]
-    [Arguments(8)]
-    [Arguments(16)]
-    public void Hayate_Lean_ConcurrentTier(int threads)
+    public void Hayate_AllOff_Concurrent1() => Hayate_AllOffTier(1);
+
+    [Benchmark(Description = "Concurrent-4 | Hayate AllOff", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    public void Hayate_AllOff_Concurrent4() => Hayate_AllOffTier(4);
+
+    [Benchmark(Description = "Concurrent-8 | Hayate AllOff", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    public void Hayate_AllOff_Concurrent8() => Hayate_AllOffTier(8);
+
+    [Benchmark(Description = "Concurrent-16 | Hayate AllOff", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    public void Hayate_AllOff_Concurrent16() => Hayate_AllOffTier(16);
+
+    private void Hayate_LeanTier(int threads)
     {
         var perWorker = TierTotalOps / threads;
         Parallel.For(0, threads, OptionsFor(threads), _ =>
@@ -901,13 +922,23 @@ public class HayateOpBenchmarks
         });
     }
 
-    [Benchmark(Description = "Concurrent-N | Hayate Sharded4", OperationsPerInvoke = TierTotalOps)]
+    [Benchmark(Description = "Concurrent-1 | Hayate Lean", OperationsPerInvoke = TierTotalOps)]
     [BenchmarkCategory("concurrent")]
-    [Arguments(1)]
-    [Arguments(4)]
-    [Arguments(8)]
-    [Arguments(16)]
-    public void Hayate_Sharded_ConcurrentTier(int threads)
+    public void Hayate_Lean_Concurrent1() => Hayate_LeanTier(1);
+
+    [Benchmark(Description = "Concurrent-4 | Hayate Lean", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    public void Hayate_Lean_Concurrent4() => Hayate_LeanTier(4);
+
+    [Benchmark(Description = "Concurrent-8 | Hayate Lean", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    public void Hayate_Lean_Concurrent8() => Hayate_LeanTier(8);
+
+    [Benchmark(Description = "Concurrent-16 | Hayate Lean", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    public void Hayate_Lean_Concurrent16() => Hayate_LeanTier(16);
+
+    private void Hayate_ShardedTier(int threads)
     {
         var perWorker = TierTotalOps / threads;
         Parallel.For(0, threads, OptionsFor(threads), _ =>
@@ -921,13 +952,23 @@ public class HayateOpBenchmarks
         });
     }
 
-    [Benchmark(Description = "Concurrent-N | Reservoir", OperationsPerInvoke = TierTotalOps)]
+    [Benchmark(Description = "Concurrent-1 | Hayate Sharded4", OperationsPerInvoke = TierTotalOps)]
     [BenchmarkCategory("concurrent")]
-    [Arguments(1)]
-    [Arguments(4)]
-    [Arguments(8)]
-    [Arguments(16)]
-    public void Reservoir_ConcurrentTier(int threads)
+    public void Hayate_Sharded_Concurrent1() => Hayate_ShardedTier(1);
+
+    [Benchmark(Description = "Concurrent-4 | Hayate Sharded4", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    public void Hayate_Sharded_Concurrent4() => Hayate_ShardedTier(4);
+
+    [Benchmark(Description = "Concurrent-8 | Hayate Sharded4", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    public void Hayate_Sharded_Concurrent8() => Hayate_ShardedTier(8);
+
+    [Benchmark(Description = "Concurrent-16 | Hayate Sharded4", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    public void Hayate_Sharded_Concurrent16() => Hayate_ShardedTier(16);
+
+    private void ReservoirTier(int threads)
     {
         var perWorker = TierTotalOps / threads;
         Parallel.For(0, threads, OptionsFor(threads), _ =>
@@ -940,6 +981,22 @@ public class HayateOpBenchmarks
             }
         });
     }
+
+    [Benchmark(Description = "Concurrent-1 | Reservoir", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    public void Reservoir_Concurrent1() => ReservoirTier(1);
+
+    [Benchmark(Description = "Concurrent-4 | Reservoir", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    public void Reservoir_Concurrent4() => ReservoirTier(4);
+
+    [Benchmark(Description = "Concurrent-8 | Reservoir", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    public void Reservoir_Concurrent8() => ReservoirTier(8);
+
+    [Benchmark(Description = "Concurrent-16 | Reservoir", OperationsPerInvoke = TierTotalOps)]
+    [BenchmarkCategory("concurrent")]
+    public void Reservoir_Concurrent16() => ReservoirTier(16);
 
     // ── Reservoir (thomhurst) policy ─────────────────────────
 
