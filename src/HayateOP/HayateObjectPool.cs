@@ -82,6 +82,114 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     }
 
     /// <summary>
+    /// G-5: the number of objects currently out on loan, re-derived from the shards rather than read
+    /// from <c>_activeCount</c>. Only the saturated path pays for it — it walks the shards, taking each
+    /// one's registry count and its (locked) idle count — which is exactly why the borrow path keeps the
+    /// paired counter and does not call this per borrow.
+    /// </summary>
+    private int DerivedActiveObjectCount()
+    {
+        var total = 0;
+        var shards = _shards;
+        for (var i = 0; i < shards.Length; i++)
+        {
+            total += shards[i].TrackedCount - shards[i].Count;
+        }
+
+        return total;
+    }
+
+    /// <summary>
+    /// G-5: claims one active-object slot for a hand-out, or returns <c>false</c> when the
+    /// <see cref="HayatePoolOptions.MaxActiveObjects"/> ceiling is already reached. Only called while the
+    /// ceiling is on.
+    /// </summary>
+    /// <remarks>
+    /// The claim is a compare-and-exchange rather than a read followed by a hand-out, because the whole
+    /// point of the ceiling is to hold under concurrency: a plain read would let every racing borrower
+    /// see the last free slot and overshoot by the width of the race, which is precisely the burst the
+    /// ceiling exists to stop. The re-derivation on the failing branch is the safety valve — if a loan
+    /// ended on a path that could not decrement (a user hook throwing out of the hand-out), the paired
+    /// counter would otherwise stay above the true borrowed count and refuse every later borrow forever.
+    /// It corrects downwards only: snapping it up would hand out slots the shards do not actually have.
+    /// </remarks>
+    private bool TryClaimActiveSlot()
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref _activeCount);
+            if (current >= _maxActiveObjects)
+            {
+                var derived = DerivedActiveObjectCount();
+                if (derived < current)
+                {
+                    Interlocked.CompareExchange(ref _activeCount, derived, current);
+                }
+
+                return false;
+            }
+
+            if (Interlocked.CompareExchange(ref _activeCount, current + 1, current) == current) return true;
+        }
+    }
+
+    /// <summary>
+    /// G-5: ends one loan — gives the slot back and publishes a wake-up, because a borrower parked at
+    /// the ceiling waits on the same gate a miss uses and a freed slot is exactly the event that lets it
+    /// make progress (see the invariant on <c>_blockGate</c>). A no-op while the ceiling is off, signal
+    /// included, so the default configuration is untouched.
+    /// </summary>
+    private void ReleaseActiveSlot()
+    {
+        if (_maxActiveObjects <= 0) return;
+
+        Interlocked.Decrement(ref _activeCount);
+        SignalAvailability();
+    }
+
+    /// <summary>
+    /// G-5: the borrow reached the active-object ceiling. Nothing is handed out and nothing is created —
+    /// a created object would itself be out on loan — so the outcome is the one
+    /// <see cref="HayatePoolOptions.RejectPolicy"/> already gives a caller that missed: <c>Abort</c>
+    /// refuses, <c>Block</c> waits for a return, <c>BlockTimeout</c> waits the timeout out and then gives
+    /// up. The two creation policies wait as well instead of creating, which is the single place the
+    /// ceiling overrules the policy. No forced scale-up runs here: capacity is not what is binding.
+    /// </summary>
+    private void HandleActiveLimitReached(ValueStopwatch sw, TimeSpan timeout)
+    {
+        Interlocked.Increment(ref _activeLimitThrottledCount);
+
+        switch (_options.RejectPolicy)
+        {
+            case HayatePoolRejectPolicy.Abort:
+                if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
+                throw new InvalidOperationException(
+                    $"HayatePool [{_name}] has {_maxActiveObjects} objects out on loan, which is its MaxActiveObjects ceiling; the request was rejected by the Abort reject policy.");
+
+            case HayatePoolRejectPolicy.Block:
+                // No timeout under Block, exactly as on the miss path.
+                _blockGate.Wait();
+                return;
+
+            case HayatePoolRejectPolicy.BlockTimeout:
+            case HayatePoolRejectPolicy.CreateNew:
+            case HayatePoolRejectPolicy.CreateOnDemand:
+                if (sw.Elapsed >= timeout)
+                {
+                    if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
+                    throw new TimeoutException(
+                        $"HayatePool [{_name}] timed out acquiring an object after {timeout.TotalSeconds}s: all {_maxActiveObjects} objects of its MaxActiveObjects ceiling are still out on loan.");
+                }
+
+                _blockGate.Wait(RemainingWaitMs(timeout, sw.Elapsed));
+                return;
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(_options.RejectPolicy), "Unknown reject policy.");
+        }
+    }
+
+    /// <summary>
     /// Removes the registry entry from the wrapper's owning shard; if ShardIndex is invalid, falls back to a full-shard scan (theoretically unreachable,
     /// since the entry is written to the target shard and its ShardIndex synced in CreateWrappedObject).
     /// </summary>
@@ -264,6 +372,26 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     // A3a: cumulative count of objects destroyed on the borrow path for having outlived MaxLifeTime
     // (0 unless EnableLifetimeRotationOnBorrow is on).
     private long _lifetimeRotatedCount;
+
+    // G-5: the hard ceiling on simultaneously borrowed objects (0 = disabled, the default). Snapshotted
+    // at construction like every other feature switch, so the borrow path reads a readonly field and the
+    // whole ceiling costs one predicted branch when it is off.
+    private readonly int _maxActiveObjects;
+
+    // G-5: the number of objects currently out on loan, maintained only while _maxActiveObjects > 0.
+    // It is deliberately a *paired* counter — incremented where an object is handed out and decremented
+    // where the loan ends — because a ceiling has to be claimed atomically to mean anything: deriving the
+    // count from the shard registries on the borrow path would put a per-shard lock and a registry probe
+    // on the hot path (see the note on HayatePoolStats.PeakActiveObjects), and reading a derived count
+    // before taking an object would let every racing borrower pass the check and overshoot the ceiling by
+    // the width of the race. A paired counter can only be wrong if a loan ends without a decrement, which
+    // is what the re-derivation in TryClaimActiveSlot guards against.
+    private int _activeCount;
+
+    // G-5: cumulative number of borrows the ceiling held back, counted like the other problem counters
+    // (AbandonedRemovedCount, LifetimeRotatedCount) rather than behind the diagnostics switch — a ceiling
+    // that bites is a capacity fact about the pool, not a diagnostic trace.
+    private long _activeLimitThrottledCount;
     // How many oldest outstanding borrows one borrow-path pass examines (the maintenance pass scans
     // everything). A small bounded budget keeps the opt-in borrow path's latency predictable while the
     // FIFO borrowed list guarantees the oldest — hence most likely abandoned — borrows are seen first.
@@ -407,6 +535,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         // T-R: the return-path soft ceiling (0 = disabled). Snapshotted here so the return path reads a
         // readonly field; IsValid has already rejected a ceiling outside [MinPoolSize, MaxPoolSize].
         _softCapacity = _options.SoftCapacity;
+
+        // G-5: the borrow-path active-object ceiling (0 = disabled). Snapshotted here so the borrow path
+        // reads a readonly field; IsValid has already rejected a ceiling above MaxPoolSize and the
+        // combination with lean mode.
+        _maxActiveObjects = _options.MaxActiveObjects;
 
         // Abandoned recovery (K2) — feature-switch snapshot (lean normalization has already forced both
         // toggles off in lean mode, so the engine pool is the only host).
@@ -844,6 +977,18 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         while (true)
         {
+            // G-5: the active-object ceiling (off by default → one predicted branch on a readonly
+            // field). This is the cheap half of the gate: a saturated pool refuses to even look for an
+            // object, so the claim below is only ever reached when the ceiling is genuinely free. The
+            // claim itself sits on the hand-out path, because a slot belongs to the object that is handed
+            // over — the rotation path retires one object and hands over another, and a slot held for the
+            // iteration would be counted twice there.
+            if (_maxActiveObjects > 0 && Volatile.Read(ref _activeCount) >= _maxActiveObjects)
+            {
+                HandleActiveLimitReached(sw, timeout);
+                continue;
+            }
+
             // Ring scan starting from the affinity shard (equivalent to a sequential foreach scan when start = 0).
             for (var offset = 0; offset < _shards.Length; offset++)
             {
@@ -855,6 +1000,17 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     // On a successful borrow, consume one wake-up signal (if any) to keep the signal count aligned with the pool's idle objects;
                     // preventing waiters from being spuriously woken one by one by stale signals into a busy spin. Wait(0) returns false immediately when no signal.
                     _blockGate.Wait(0);
+
+                    // G-5: the object is handed over only under a claimed active slot. The pre-check at
+                    // the top of the loop keeps the common case out of this work, so a claim can only fail
+                    // here when the ceiling was reached between that check and this take; the object then
+                    // goes straight back to the shard and the borrow backs off like any other ceiling hit.
+                    if (_maxActiveObjects > 0 && !TryClaimActiveSlot())
+                    {
+                        if (shard.Add(w)) SignalAvailability();
+                        HandleActiveLimitReached(sw, timeout);
+                        continue;
+                    }
 
                     #region Borrow-path clock and object age (A3a: one read, two consumers)
 
@@ -942,6 +1098,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     if (shouldValidate && !_policy.Validate(w.Value))
                     {
                         _logger.LogWarning("[Shard {Index}] Object failed validation on borrow. Disposing. Type: {Type}", shard.Index, typeof(T).Name);
+                        // G-5: the object never reaches the caller, so the loan it would have started
+                        // ends here instead.
+                        ReleaseActiveSlot();
                         Destroy(w);
                         continue;
                     }
@@ -1121,6 +1280,18 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         // Create a new object after the timeout
                         if (elapsed >= timeout)
                         {
+                            // G-5: at the active ceiling this step is suppressed — the object it would
+                            // create is itself out on loan, which is what the ceiling forbids — so the
+                            // borrow gives up exactly as a caller that waited out a return does. This is
+                            // the one place the ceiling overrules the policy's create-on-miss behaviour.
+                            if (_maxActiveObjects > 0 && Volatile.Read(ref _activeCount) >= _maxActiveObjects)
+                            {
+                                Interlocked.Increment(ref _activeLimitThrottledCount);
+                                if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
+                                throw new TimeoutException(
+                                    $"HayatePool [{_name}] timed out acquiring an object after {timeout.TotalSeconds}s: all {_maxActiveObjects} objects of its MaxActiveObjects ceiling are still out on loan.");
+                            }
+
                             if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
                             // Covered by the _enableMetrics gate (timeout-create path leak-trace point)
                             if (_enableMetrics)
@@ -1180,6 +1351,17 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         while (!cancellationToken.IsCancellationRequested)
         {
+            // G-5: the active-object ceiling, on the same terms as the synchronous core (off by default
+            // → one predicted branch). This path has no reject-policy switch — it always waits — so a
+            // borrow at the ceiling simply parks without scanning and without creating, and is woken by
+            // the return that frees a slot.
+            if (_maxActiveObjects > 0 && Volatile.Read(ref _activeCount) >= _maxActiveObjects)
+            {
+                Interlocked.Increment(ref _activeLimitThrottledCount);
+                await _blockGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
             // Ring scan starting from the affinity shard (equivalent to a sequential foreach scan when start = 0).
             for (var offset = 0; offset < _shards.Length; offset++)
             {
@@ -1192,6 +1374,17 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     // On a successful borrow, consume one wake-up signal (if any), consistent with the synchronous path,
                     // preventing stale signals from accumulating and causing asynchronous waiters to spin spuriously.
                     _blockGate.Wait(0);
+
+                    // G-5: same claim as the synchronous core — the object is handed over only under a
+                    // claimed active slot, and goes straight back to the shard when the ceiling was
+                    // reached in the meantime.
+                    if (_maxActiveObjects > 0 && !TryClaimActiveSlot())
+                    {
+                        if (shard.Add(w)) SignalAvailability();
+                        Interlocked.Increment(ref _activeLimitThrottledCount);
+                        await _blockGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
 
                     // A3a: the asynchronous borrow honours the same lifetime ceiling as the synchronous one.
                     // The age is derived from the timestamp this path records unconditionally anyway, so the
@@ -1235,6 +1428,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                     if (_options.ValidateOnBorrow && !_policy.Validate(w.Value))
                     {
+                        // G-5: the object never reaches the caller, so the loan it would have started
+                        // ends here instead.
+                        ReleaseActiveSlot();
                         Destroy(w);
                         continue;
                     }
@@ -1470,6 +1666,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         if (_enableValidation && _options.ValidateOnReturn && !_policy.Validate(item))
         {
             _logger.LogWarning("Object returned to pool. Disposing. Type: {Type}", typeof(T).Name);
+            // G-5: this return destroys the object without reaching CompleteReturn, so the loan ends here.
+            ReleaseActiveSlot();
             Destroy(w);
 
             if (_enableMetrics)
@@ -1485,6 +1683,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
     private void CompleteReturn(HayateObject<T> w, T item, bool accepted)
     {
+        // G-5: this return ends the loan, whichever branch below disposes or parks the object — the
+        // parked, the soft-ceiling-dropped and the policy-rejected outcomes all free the same slot.
+        ReleaseActiveSlot();
+
         // G-1: stamped for every branch below — a return that is parked, dropped by the soft ceiling or
         // destroyed by a rejected verdict is equally "the pool was active just now".
         TouchActivity();
@@ -2045,6 +2247,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         if (TrackedObjectCount != 0) return null;
         if (Interlocked.CompareExchange(ref _coldBootClaimed, 1, 0) != 0) return null;
 
+        // G-5: at the active ceiling a creation would itself be an object out on loan, so the cold-boot
+        // path declines and its caller keeps waiting. Checked without claiming, so this path can never
+        // leak a slot; the residual race — two creators passing the check together — can overshoot the
+        // ceiling by one per racing creator, and the next borrow's re-derivation pulls the count back.
+        if (_maxActiveObjects > 0 && Volatile.Read(ref _activeCount) >= _maxActiveObjects) return null;
+
         try
         {
             // Double-check: during the CAS, a concurrent return / scale-up may make the pool non-empty — just fall back to the normal wait path then.
@@ -2077,6 +2285,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         if (TrackedObjectCount >= _options.MaxPoolSize) return null;
 
+        // G-5: the same ceiling check the cold-boot path makes, so a create-on-miss cannot grow the pool
+        // past the number of objects that may be out at once.
+        if (_maxActiveObjects > 0 && Volatile.Read(ref _activeCount) >= _maxActiveObjects) return null;
+
         return CreateBorrowedOnDemand(waitTimeMs);
     }
 
@@ -2101,6 +2313,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// </summary>
     private void FinishBorrowedOnDemand(Shard shard, HayateObject<T> w, long waitTimeMs)
     {
+        // G-5: a created object is handed out already borrowed, so it takes an active slot here — the one
+        // hand-out choke point shared by the cold-boot path, both create-on-miss paths and their
+        // asynchronous twins.
+        if (_maxActiveObjects > 0) Interlocked.Increment(ref _activeCount);
+
         w.Location = HayateObjectLocation.Borrowed;
         // A freshly created object handed out already borrowed must join the borrowed list too (K2),
         // or the abandoned scan would never see create-on-miss / cold-boot borrows.
@@ -2198,6 +2415,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         if (TrackedObjectCount != 0) return null;
         if (Interlocked.CompareExchange(ref _coldBootClaimed, 1, 0) != 0) return null;
 
+        // G-5: same ceiling check as the synchronous twin, for the same reason.
+        if (_maxActiveObjects > 0 && Volatile.Read(ref _activeCount) >= _maxActiveObjects) return null;
+
         try
         {
             // Double-check: during the CAS, a concurrent return / scale-up may make the pool non-empty — just fall back to the normal wait path then.
@@ -2221,6 +2441,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         if (coldBoot is not null) return coldBoot;
 
         if (TrackedObjectCount >= _options.MaxPoolSize) return null;
+
+        // G-5: same ceiling check as the synchronous twin.
+        if (_maxActiveObjects > 0 && Volatile.Read(ref _activeCount) >= _maxActiveObjects) return null;
 
         return await CreateBorrowedOnDemandAsync(waitTimeMs, cancellationToken).ConfigureAwait(false);
     }
@@ -2635,6 +2858,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// </remarks>
     private void RetireExpiredOnBorrow(HayateObject<T> w)
     {
+        // G-5: the borrowed object is retired instead of handed over, so the slot claimed for it goes
+        // back; the replacement the caller creates next claims one of its own. Shared by the synchronous
+        // and asynchronous rotation paths.
+        ReleaseActiveSlot();
         Destroy(w);
         Interlocked.Increment(ref _lifetimeRotatedCount);
         if (DebugTraceEnabled)
@@ -2784,6 +3011,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
                     found = true;
                     reclaimed++;
+                    // G-5: reclamation ends a loan without a Release, so the slot is given back here —
+                    // the same reason the destroy path below frees the tracked slot.
+                    ReleaseActiveSlot();
                     Interlocked.Increment(ref _abandonedRemovedCount);
                     if (_logAbandoned) LogAbandonedObject(w);
                     Destroy(w);
@@ -3021,6 +3251,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             LeakSuspectedCount = Interlocked.Read(ref _leakSuspectedCount),
             AbandonedRemovedCount = Interlocked.Read(ref _abandonedRemovedCount),
             LifetimeRotatedCount = Interlocked.Read(ref _lifetimeRotatedCount),
+            ActiveLimitThrottledCount = Interlocked.Read(ref _activeLimitThrottledCount),
             AllocationTrackingEnabled = _enableAllocationTracking,
             AcquireAllocatedBytes = Interlocked.Read(ref _acquireAllocatedBytes),
             ReleaseAllocatedBytes = Interlocked.Read(ref _releaseAllocatedBytes),
@@ -3133,6 +3364,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             LeakSuspectedCount = Interlocked.Read(ref _leakSuspectedCount),
             AbandonedRemovedCount = Interlocked.Read(ref _abandonedRemovedCount),
             LifetimeRotatedCount = Interlocked.Read(ref _lifetimeRotatedCount),
+            ActiveLimitThrottledCount = Interlocked.Read(ref _activeLimitThrottledCount),
             AllocationTrackingEnabled = _enableAllocationTracking,
             AcquireAllocatedBytes = Interlocked.Read(ref _acquireAllocatedBytes),
             ReleaseAllocatedBytes = Interlocked.Read(ref _releaseAllocatedBytes),
@@ -3228,6 +3460,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             // The registry is cleared with the shard (including entries of borrowed objects, consistent with the original pool-level map.Clear semantics).
             shard.ClearTracked();
         }
+
+        // G-5: the borrowed objects whose registry entries just went away can no longer be recognised on
+        // return — a later Release destroys them as foreign objects, without a decrement — so the ceiling
+        // is reset rather than left counting loans that will never be given back. That also makes Clear
+        // the ceiling's recovery point if a loan ever ends on a path that could not decrement.
+        if (_maxActiveObjects > 0) Interlocked.Exchange(ref _activeCount, 0);
+
         _logger.LogInformation("Clearing object pool. Type: {Type}", typeof(T).Name);
     }
 

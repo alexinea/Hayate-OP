@@ -906,6 +906,48 @@
             no allocation: the enumerable form would box the array's enumerator on every return.
             </remarks>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.DerivedActiveObjectCount">
+            <summary>
+            G-5: the number of objects currently out on loan, re-derived from the shards rather than read
+            from <c>_activeCount</c>. Only the saturated path pays for it — it walks the shards, taking each
+            one's registry count and its (locked) idle count — which is exactly why the borrow path keeps the
+            paired counter and does not call this per borrow.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryClaimActiveSlot">
+            <summary>
+            G-5: claims one active-object slot for a hand-out, or returns <c>false</c> when the
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxActiveObjects"/> ceiling is already reached. Only called while the
+            ceiling is on.
+            </summary>
+            <remarks>
+            The claim is a compare-and-exchange rather than a read followed by a hand-out, because the whole
+            point of the ceiling is to hold under concurrency: a plain read would let every racing borrower
+            see the last free slot and overshoot by the width of the race, which is precisely the burst the
+            ceiling exists to stop. The re-derivation on the failing branch is the safety valve — if a loan
+            ended on a path that could not decrement (a user hook throwing out of the hand-out), the paired
+            counter would otherwise stay above the true borrowed count and refuse every later borrow forever.
+            It corrects downwards only: snapping it up would hand out slots the shards do not actually have.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.ReleaseActiveSlot">
+            <summary>
+            G-5: ends one loan — gives the slot back and publishes a wake-up, because a borrower parked at
+            the ceiling waits on the same gate a miss uses and a freed slot is exactly the event that lets it
+            make progress (see the invariant on <c>_blockGate</c>). A no-op while the ceiling is off, signal
+            included, so the default configuration is untouched.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.HandleActiveLimitReached(DotNetCore.HayateOP.Common.ValueStopwatch,System.TimeSpan)">
+            <summary>
+            G-5: the borrow reached the active-object ceiling. Nothing is handed out and nothing is created —
+            a created object would itself be out on loan — so the outcome is the one
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RejectPolicy"/> already gives a caller that missed: <c>Abort</c>
+            refuses, <c>Block</c> waits for a return, <c>BlockTimeout</c> waits the timeout out and then gives
+            up. The two creation policies wait as well instead of creating, which is the single place the
+            ceiling overrules the policy. No forced scale-up runs here: capacity is not what is binding.
+            </summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.UntrackObject(DotNetCore.HayateOP.HayateObject{`0})">
             <summary>
             Removes the registry entry from the wrapper's owning shard; if ShardIndex is invalid, falls back to a full-shard scan (theoretically unreachable,
@@ -2373,6 +2415,33 @@
             </code>
             </example>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithMaxActiveObjects(System.Int32)">
+            <summary>
+            Sets the hard ceiling on how many objects may be out on loan at the same time. Zero — the
+            default — disables the ceiling.
+            </summary>
+            <param name="maxActiveObjects">The maximum number of simultaneously borrowed objects;
+            <c>0</c> disables it.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="maxActiveObjects"/> is negative.</exception>
+            <remarks>
+            Unlike <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithSoftCapacity(System.Int32)"/>, which bounds what the pool keeps, this bounds how
+            many borrowers may be in flight at once — the setting to reach for when the objects stand for a
+            dependency that can only serve so many callers concurrently. At the ceiling the
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RejectPolicy"/> decides the outcome, except that the two creation
+            policies wait instead of creating: a newly created object would itself be out on loan. The value
+            must not exceed <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/> when it is not zero, and it cannot be
+            combined with lean mode; either combination is rejected at build time because it could never take
+            effect.
+            </remarks>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyConnection&gt;()
+                .WithMaxSize(512)
+                .WithMaxActiveObjects(32);
+            </code>
+            </example>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithShardCount(System.Int32)">
             <summary>
             Sets the number of shards.
@@ -3408,6 +3477,55 @@
                 .WithMaxSize(64)
                 .WithSoftCapacity(8)
                 .Build();
+            </code>
+            </example>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.MaxActiveObjects">
+            <summary>
+            Hard ceiling on how many objects may be out on loan at the same time. Zero (the default)
+            disables the ceiling.<br />
+            Default value: 0 (disabled — the pool lends out as many objects as it holds).
+            </summary>
+            <remarks>
+            Purpose: bound the <i>concurrency</i> a pool allows, independently of how many objects it keeps.
+            It is the third constraint on the borrow path, next to the two that already exist: a shard's
+            capacity bounds the objects the pool holds (idle plus borrowed, derived from
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/>), and the reject policy decides what happens when no object is free.
+            Neither of them caps how many borrowers may be in flight at once when the pool is large, so a
+            pool sized for memory rather than for a downstream dependency will happily hand out every object
+            it owns — and a database, a socket peer or a remote service behind those objects sees the whole
+            burst at once. This option is what caps that number.<br />
+            Difference from <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/>: that one bounds the objects the pool may create and
+            retain, so a pool at its ceiling refuses to <i>create</i>. This one bounds how many of them may
+            be out simultaneously, so a pool at its ceiling refuses to <i>lend out</i> while still holding
+            idle objects that could not be handed over. It is meaningful only below
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/>: at or above it the borrowed count can never reach the ceiling, so the
+            combination is rejected rather than accepted and ignored.<br />
+            What happens at the ceiling is decided by <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.RejectPolicy"/>, exactly as it decides a
+            miss — the ceiling is a second reason for the same decision, not a separate policy:
+            <c>Abort</c> refuses the request outright, <c>Block</c> waits until a borrower returns an object,
+            and <c>BlockTimeout</c> waits for <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.DefaultAcquireTimeout"/> before giving up. The two
+            creation policies are the deliberate exception: <c>CreateNew</c> and <c>CreateOnDemand</c> both
+            <b>wait instead of creating</b>, because an object created to satisfy the request would be an
+            object out on loan, which is precisely what the ceiling forbids. At the ceiling the ceiling wins
+            over the policy's create-on-miss behaviour; the timeout then expires exactly as it does for a
+            caller that waited out a return.<br />
+            Cost: with the ceiling off the borrow path pays one perfectly predicted branch on a readonly
+            field. With it on, an accepted borrow pays one atomic compare-and-exchange, and a borrow that
+            reaches the ceiling pays one pass over the shards to re-derive the true borrowed count before it
+            parks. Nothing is added to the return path beyond one decrement per return.<br />
+            Boundary: <c>0</c> (disabled) or a value between 1 and <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/>; cannot be
+            combined with <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLean"/>, whose fast path keeps no borrow bookkeeping at all, so
+            the combination fails validation rather than silently ignoring the ceiling. Fixed at construction
+            like every other feature switch: <c>ReloadConfig</c> does not apply it.<br />
+            Recommended range: set it to the concurrency the dependency behind the pool can actually serve —
+            a connection pool's size, a licence count, a peer's connection limit. Leave it at 0 when the
+            objects are pure in-memory values with no downstream to protect.
+            </remarks>
+            <example>
+            <code>
+            // Keep up to 512 objects for reuse, but never have more than 32 out at once.
+            var options = new HayatePoolOptions { MaxPoolSize = 512, MaxActiveObjects = 32 };
             </code>
             </example>
         </member>
@@ -4905,6 +5023,13 @@
             <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLifetimeRotationOnBorrow"/> is off, which is the default).
             </summary>
         </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.ActiveLimitThrottledCount">
+            <summary>
+            Cumulative number of borrows held back by the <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxActiveObjects"/>
+            ceiling (G-5, opt-in; 0 unless the ceiling is on, which is the default). Counts every borrow that
+            reached the ceiling, whether it then waited and succeeded or gave up.
+            </summary>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolSnapshot.LeakTraces">
             <summary>The captured leak traces (stack frames or placeholders), if leak tracing is enabled.</summary>
         </member>
@@ -5006,6 +5131,16 @@
             <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/> (A3a). Always 0 unless
             <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLifetimeRotationOnBorrow"/> is on — the default keeps
             <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/> a limit on idle objects only.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolStats.ActiveLimitThrottledCount">
+            <summary>
+            Cumulative number of borrows that reached <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxActiveObjects"/> and
+            were therefore held back — refused outright, made to wait, or timed out — instead of being
+            handed an object. Always 0 unless the ceiling is on, which is the default. A borrow that waited
+            and then succeeded is counted here as well: the counter answers "how often did the ceiling bite",
+            not "how often did a caller fail", so a pool whose ceiling is set correctly and whose callers
+            simply queue will still show a non-zero value.
             </summary>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolStats.AllocationTrackingEnabled">

@@ -83,6 +83,55 @@ public class HayatePoolOptions
     /// </example>
     public int SoftCapacity { get; set; }
 
+    /// <summary>
+    /// Hard ceiling on how many objects may be out on loan at the same time. Zero (the default)
+    /// disables the ceiling.<br />
+    /// Default value: 0 (disabled — the pool lends out as many objects as it holds).
+    /// </summary>
+    /// <remarks>
+    /// Purpose: bound the <i>concurrency</i> a pool allows, independently of how many objects it keeps.
+    /// It is the third constraint on the borrow path, next to the two that already exist: a shard's
+    /// capacity bounds the objects the pool holds (idle plus borrowed, derived from
+    /// <see cref="MaxPoolSize"/>), and the reject policy decides what happens when no object is free.
+    /// Neither of them caps how many borrowers may be in flight at once when the pool is large, so a
+    /// pool sized for memory rather than for a downstream dependency will happily hand out every object
+    /// it owns — and a database, a socket peer or a remote service behind those objects sees the whole
+    /// burst at once. This option is what caps that number.<br />
+    /// Difference from <see cref="MaxPoolSize"/>: that one bounds the objects the pool may create and
+    /// retain, so a pool at its ceiling refuses to <i>create</i>. This one bounds how many of them may
+    /// be out simultaneously, so a pool at its ceiling refuses to <i>lend out</i> while still holding
+    /// idle objects that could not be handed over. It is meaningful only below
+    /// <see cref="MaxPoolSize"/>: at or above it the borrowed count can never reach the ceiling, so the
+    /// combination is rejected rather than accepted and ignored.<br />
+    /// What happens at the ceiling is decided by <see cref="RejectPolicy"/>, exactly as it decides a
+    /// miss — the ceiling is a second reason for the same decision, not a separate policy:
+    /// <c>Abort</c> refuses the request outright, <c>Block</c> waits until a borrower returns an object,
+    /// and <c>BlockTimeout</c> waits for <see cref="DefaultAcquireTimeout"/> before giving up. The two
+    /// creation policies are the deliberate exception: <c>CreateNew</c> and <c>CreateOnDemand</c> both
+    /// <b>wait instead of creating</b>, because an object created to satisfy the request would be an
+    /// object out on loan, which is precisely what the ceiling forbids. At the ceiling the ceiling wins
+    /// over the policy's create-on-miss behaviour; the timeout then expires exactly as it does for a
+    /// caller that waited out a return.<br />
+    /// Cost: with the ceiling off the borrow path pays one perfectly predicted branch on a readonly
+    /// field. With it on, an accepted borrow pays one atomic compare-and-exchange, and a borrow that
+    /// reaches the ceiling pays one pass over the shards to re-derive the true borrowed count before it
+    /// parks. Nothing is added to the return path beyond one decrement per return.<br />
+    /// Boundary: <c>0</c> (disabled) or a value between 1 and <see cref="MaxPoolSize"/>; cannot be
+    /// combined with <see cref="EnableLean"/>, whose fast path keeps no borrow bookkeeping at all, so
+    /// the combination fails validation rather than silently ignoring the ceiling. Fixed at construction
+    /// like every other feature switch: <c>ReloadConfig</c> does not apply it.<br />
+    /// Recommended range: set it to the concurrency the dependency behind the pool can actually serve —
+    /// a connection pool's size, a licence count, a peer's connection limit. Leave it at 0 when the
+    /// objects are pure in-memory values with no downstream to protect.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// // Keep up to 512 objects for reuse, but never have more than 32 out at once.
+    /// var options = new HayatePoolOptions { MaxPoolSize = 512, MaxActiveObjects = 32 };
+    /// </code>
+    /// </example>
+    public int MaxActiveObjects { get; set; }
+
     #region Timeouts
 
     /// <summary>
@@ -1128,6 +1177,7 @@ public class HayatePoolOptions
         options.MinPoolSize = this.MinPoolSize;
         options.MaxPoolSize = this.MaxPoolSize;
         options.SoftCapacity = this.SoftCapacity;
+        options.MaxActiveObjects = this.MaxActiveObjects;
 
         // Timeout
         options.DefaultAcquireTimeout = this.DefaultAcquireTimeout;
@@ -1437,6 +1487,17 @@ public class HayatePoolOptions
         // silently does nothing.
         if (SoftCapacity < 0) return false;
         if (SoftCapacity > 0 && (SoftCapacity < MinPoolSize || SoftCapacity > MaxPoolSize)) return false;
+
+        // Active-object ceiling (G-5): 0 disables it. A live one has to sit at or below the hard ceiling,
+        // for the same reason SoftCapacity does — above it the pool could never have that many objects out
+        // at once, so the check could never fire and the setting would be a knob that silently does
+        // nothing. The lean fast path keeps no borrow bookkeeping, so it cannot honour a ceiling either;
+        // rejecting the combination is the same "cannot be honoured" rule that rejects
+        // EnableLifetimeRotationOnBorrow, and it is order-independent, whereas normalizing it away would
+        // make builder call order significant.
+        if (MaxActiveObjects < 0) return false;
+        if (MaxActiveObjects > 0 && MaxActiveObjects > MaxPoolSize) return false;
+        if (EnableLean && MaxActiveObjects > 0) return false;
 
         // Checks when auto-scaling is enabled
         if (EnableAutoScaling)

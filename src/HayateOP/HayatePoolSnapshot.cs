@@ -32,6 +32,12 @@ public class HayatePoolSnapshot
     /// <see cref="HayatePoolOptions.EnableLifetimeRotationOnBorrow"/> is off, which is the default).
     /// </summary>
     public long LifetimeRotatedCount { get; set; }
+    /// <summary>
+    /// Cumulative number of borrows held back by the <see cref="HayatePoolOptions.MaxActiveObjects"/>
+    /// ceiling (G-5, opt-in; 0 unless the ceiling is on, which is the default). Counts every borrow that
+    /// reached the ceiling, whether it then waited and succeeded or gave up.
+    /// </summary>
+    public long ActiveLimitThrottledCount { get; set; }
     /// <summary>The captured leak traces (stack frames or placeholders), if leak tracing is enabled.</summary>
     public IReadOnlyList<string> LeakTraces { get; set; } = [];
     /// <summary>

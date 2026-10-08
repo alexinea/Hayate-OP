@@ -662,6 +662,38 @@ public class HayatePoolBuilder<T> where T : class
     }
 
     /// <summary>
+    /// Sets the hard ceiling on how many objects may be out on loan at the same time. Zero — the
+    /// default — disables the ceiling.
+    /// </summary>
+    /// <param name="maxActiveObjects">The maximum number of simultaneously borrowed objects;
+    /// <c>0</c> disables it.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxActiveObjects"/> is negative.</exception>
+    /// <remarks>
+    /// Unlike <see cref="WithSoftCapacity(int)"/>, which bounds what the pool keeps, this bounds how
+    /// many borrowers may be in flight at once — the setting to reach for when the objects stand for a
+    /// dependency that can only serve so many callers concurrently. At the ceiling the
+    /// <see cref="HayatePoolOptions.RejectPolicy"/> decides the outcome, except that the two creation
+    /// policies wait instead of creating: a newly created object would itself be out on loan. The value
+    /// must not exceed <see cref="HayatePoolOptions.MaxPoolSize"/> when it is not zero, and it cannot be
+    /// combined with lean mode; either combination is rejected at build time because it could never take
+    /// effect.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyConnection&gt;()
+    ///     .WithMaxSize(512)
+    ///     .WithMaxActiveObjects(32);
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithMaxActiveObjects(int maxActiveObjects)
+    {
+        if (maxActiveObjects < 0) throw new ArgumentOutOfRangeException(nameof(maxActiveObjects), "MaxActiveObjects cannot be negative");
+        _options.MaxActiveObjects = maxActiveObjects;
+        return this;
+    }
+
+    /// <summary>
     /// Sets the number of shards.
     /// </summary>
     /// <param name="shardCount">The number of shards (1~32).</param>

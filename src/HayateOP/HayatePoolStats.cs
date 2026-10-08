@@ -83,6 +83,16 @@ public class HayatePoolStats
     public long LifetimeRotatedCount { get; set; }
 
     /// <summary>
+    /// Cumulative number of borrows that reached <see cref="HayatePoolOptions.MaxActiveObjects"/> and
+    /// were therefore held back — refused outright, made to wait, or timed out — instead of being
+    /// handed an object. Always 0 unless the ceiling is on, which is the default. A borrow that waited
+    /// and then succeeded is counted here as well: the counter answers "how often did the ceiling bite",
+    /// not "how often did a caller fail", so a pool whose ceiling is set correctly and whose callers
+    /// simply queue will still show a non-zero value.
+    /// </summary>
+    public long ActiveLimitThrottledCount { get; set; }
+
+    /// <summary>
     /// Whether allocation tracking is enabled.
     /// </summary>
     public bool AllocationTrackingEnabled { get; set; }
@@ -268,6 +278,7 @@ public class HayatePoolStats
   LeakSuspectedCount: {LeakSuspectedCount}
   AbandonedRemovedCount: {AbandonedRemovedCount}
   LifetimeRotatedCount: {LifetimeRotatedCount}
+  ActiveLimitThrottledCount: {ActiveLimitThrottledCount}
   AllocationTrackingEnabled: {AllocationTrackingEnabled}
   AverageAcquireAllocatedBytes: {AverageAcquireAllocatedBytes:F1}
   AverageReleaseAllocatedBytes: {AverageReleaseAllocatedBytes:F1}
