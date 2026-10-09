@@ -3334,6 +3334,229 @@
             <exception cref="T:System.InvalidCastException">The registered or built pool's element type is not
             <typeparamref name="T"/>.</exception>
         </member>
+        <member name="T:DotNetCore.HayateOP.HayatePoolLease`1">
+             <summary>
+             A borrow that returns itself, as a value type: the object taken from the pool is held by this lease, and
+             disposing the lease puts it back exactly once. It is the allocation-free counterpart of
+             <see cref="T:DotNetCore.HayateOP.HayatePoolScope`1"/> — same lifetime rules, same return path, no heap object.
+             </summary>
+             <remarks>
+             <para>
+             Obtain one through <see cref="T:DotNetCore.HayateOP.HayatePoolLeaseExtensions"/> — the four <c>AcquireLeased</c> /
+             <c>AcquireLeaseAsync</c> overloads are the only producers. Nothing else produces a lease, so the lifetime
+             is unambiguous: the caller owns it, and the object it holds is unusable once the lease ends.
+             </para>
+             <para>
+             <b>Which scope should I use?</b> Both return the object on every path, including the exception paths, and
+             both run the identical return path (validation, policy hooks, background eviction). They differ in one
+             respect: this lease is a value type kept on the stack or in the calling frame, so acquiring one does not
+             allocate, while <see cref="T:DotNetCore.HayateOP.HayatePoolScope`1"/> is a class and costs one allocation per borrow. Reach for
+             this lease on hot paths and in loops; reach for the scope when you need to pass the lease to a method that
+             outlives the frame, store it in a field, hand it across an async boundary as an object, or otherwise need
+             to treat it as a reference.
+             </para>
+             <para>
+             Disposal is idempotent. A lease represents one borrow, so returning must happen exactly once — a second
+             <see cref="M:DotNetCore.HayateOP.HayatePoolLease`1.Dispose"/> call is deliberately a no-op rather than a second return, because double-returning
+             the same object would let two borrowers share it later. The single-call guarantee holds even if several
+             threads dispose the same lease concurrently, through an atomic claim.
+             </para>
+             <para>
+             <b>Why this is a mutable struct rather than a <c>ref struct</c>.</b> A <c>ref struct</c> cannot live across
+             an <c>await</c> boundary: the compiler rejects it (CS4007), because the borrowed object would then have no
+             defined owner while the continuation is pending. That makes its asynchronous disposal unreachable in
+             practice, which would be a capability <em>regression</em> against <see cref="T:DotNetCore.HayateOP.HayatePoolScope`1"/>, whose
+             asynchronous disposal the 2.9 work added. Keeping the type a plain mutable struct preserves every capability
+             of the scope — including <c>await using</c> and borrows that span an <c>await</c> — while still removing the
+             per-borrow allocation. The price is the one guarantee a <c>ref struct</c> gave for free: this lease
+             <i>can</i> be boxed, so putting one in a field or an <c>object</c> reference is allowed by the compiler and
+             allocates then. It stays a value type in the normal <c>using</c> / <c>await using</c> flow. A
+             <c>readonly struct</c> would not work either: the once-only return claim needs
+             <see cref="M:System.Threading.Interlocked.Exchange(System.Int32@,System.Int32)"/>, and taking a field of a <c>readonly struct</c> by reference
+             is rejected (CS8340).
+             </para>
+             </remarks>
+             <typeparam name="T">The pooled object type.</typeparam>
+             <example>
+             <code>
+             using var lease = pool.AcquireLeased();
+             lease.Value.DoWork();     // returned to the pool at the end of the enclosing block
+            
+             await using var asyncLease = await pool.AcquireLeaseAsync(cancellationToken);
+             asyncLease.Value.DoWork();
+             </code>
+             </example>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolLease`1.Value">
+            <summary>
+            The borrowed object.
+            </summary>
+            <exception cref="T:System.ObjectDisposedException">The lease has been disposed — the object has already been
+            returned to the pool and must not be touched again.</exception>
+            <example>
+            <code>
+            using var lease = pool.AcquireLeased();
+            Console.WriteLine(lease.Value);
+            </code>
+            </example>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolLease`1.IsActive">
+            <summary>
+            Whether this lease still owns its object (equivalently: whether it has not been disposed yet).
+            </summary>
+            <remarks>
+            Useful for handlers that receive a lease they may or may not be responsible for, where calling
+            <see cref="M:DotNetCore.HayateOP.HayatePoolLease`1.Dispose"/> unconditionally is easier than tracking ownership. It is a plain read, so it is
+            advisory — <see cref="M:DotNetCore.HayateOP.HayatePoolLease`1.Dispose"/> remains the authoritative once-only return even when this says
+            <c>true</c>.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolLease`1.Dispose">
+            <summary>
+            Returns the borrowed object to the pool. Called automatically at the end of a <c>using</c> block.
+            </summary>
+            <remarks>
+            The return happens exactly once; every later call is a no-op. After disposal, reading
+            <see cref="P:DotNetCore.HayateOP.HayatePoolLease`1.Value"/> throws and <see cref="P:DotNetCore.HayateOP.HayatePoolLease`1.IsActive"/> is <c>false</c>. The release itself goes
+            through the pool's ordinary return path, so validation, the policy hooks and background eviction
+            behave exactly as they do for a manual <c>Release</c>.
+            </remarks>
+            <example>
+            <code>
+            var lease = pool.AcquireLeased();
+            try { /* use lease.Value */ }
+            finally { lease.Dispose(); }
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolLease`1.DisposeAsync">
+            <summary>
+            Returns the borrowed object asynchronously. Called automatically at the end of an <c>await using</c> block.
+            </summary>
+            <remarks>
+            For a pool with an asynchronous return path, completion means its asynchronous policy hooks have finished.
+            Other pool implementations use their ordinary synchronous return path.
+            </remarks>
+        </member>
+        <member name="T:DotNetCore.HayateOP.HayatePoolLeaseExtensions">
+             <summary>
+             <c>using</c>-friendly borrows that do not allocate: the synchronous and asynchronous ways to take an object
+             together with the value-type lease that puts it back.
+             </summary>
+             <remarks>
+             These are the counterparts of <see cref="T:DotNetCore.HayateOP.HayatePoolScopeExtensions"/>: same four overloads, same return
+             semantics, same exception behaviour, but the lease they hand back is a value type, so a borrow through them
+             allocates nothing on the way in.<br />
+             Each method borrows one object and hands it over to the returned <see cref="T:DotNetCore.HayateOP.HayatePoolLease`1"/>. The lease
+             returns the object when it is disposed — once per lease, on the exception paths included.<br />
+             These calls add nothing to the borrow itself: they delegate to the ordinary <c>Acquire</c> /
+             <c>AcquireAsync</c> path, so the acquire timeout, cancellation, validation and every other configured
+             semantics apply unchanged. Only the return side is automated.<br />
+             On <c>net6.0</c> and later the lease also implements <c>IAsyncDisposable</c>, so dispose it with
+             <c>await using</c> wherever the pooled object's return may be asynchronous. On <c>net48</c> and
+             <c>netstandard2.0</c> the lease is <c>IDisposable</c> only — those targets produce no asynchronous
+             return path, so <c>using</c> is the only form.
+             </remarks>
+             <example>
+             <code>
+             using var lease = pool.AcquireLeased();
+             lease.Value.DoWork();
+            
+             var asyncLease = await pool.AcquireLeaseAsync(cancellationToken);
+             using (asyncLease) { asyncLease.Value.DoWork(); }
+             </code>
+             </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolLeaseExtensions.AcquireLeased``1(DotNetCore.HayateOP.IHayateObjectPool{``0})">
+            <summary>
+            Borrows an object together with the lease that returns it, so a <c>using</c> block replaces the
+            manual <c>try</c>/<c>finally</c> — without allocating.
+            </summary>
+            <param name="pool">The pool to borrow from.</param>
+            <returns>A lease holding the borrowed object; disposing it returns the object to the pool.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="pool"/> is <c>null</c>.</exception>
+            <exception cref="T:System.TimeoutException">The configured acquire timeout elapsed before an object became
+            available, under a reject policy that waits. Nothing is borrowed in that case, so there is no lease
+            to dispose.</exception>
+            <remarks>
+            Blocks for up to the pool's configured acquire timeout, exactly like <c>Acquire</c>. The lease is a value
+            type: disposing it returns the object, and nothing is allocated to carry it.
+            </remarks>
+            <example>
+            <code>
+            using var lease = pool.AcquireLeased();
+            lease.Value.DoWork();
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolLeaseExtensions.AcquireLeased``1(DotNetCore.HayateOP.IHayateObjectPool{``0},System.TimeSpan)">
+            <summary>
+            Borrows an object with an explicit wait bound, together with the lease that returns it — without
+            allocating.
+            </summary>
+            <param name="pool">The pool to borrow from.</param>
+            <param name="timeout">The maximum wait time, overriding the pool's configured acquire timeout.</param>
+            <returns>A lease holding the borrowed object; disposing it returns the object to the pool.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="pool"/> is <c>null</c>.</exception>
+            <exception cref="T:System.TimeoutException"><paramref name="timeout"/> elapsed before an object became
+            available. Nothing is borrowed in that case.</exception>
+            <example>
+            <code>
+            using var lease = pool.AcquireLeased(TimeSpan.FromSeconds(2));
+            lease.Value.DoWork();
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolLeaseExtensions.AcquireLeaseAsync``1(DotNetCore.HayateOP.IHayateObjectPool{``0},System.Threading.CancellationToken)">
+            <summary>
+            Asynchronously borrows an object together with the lease that returns it, waiting without blocking a
+            thread.
+            </summary>
+            <param name="pool">The pool to borrow from.</param>
+            <param name="cancellationToken">A token that can interrupt the wait.</param>
+            <returns>A lease holding the borrowed object; disposing it returns the object to the pool.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="pool"/> is <c>null</c>.</exception>
+            <exception cref="T:System.OperationCanceledException"><paramref name="cancellationToken"/> was cancelled
+            before an object became available, or the configured acquire timeout elapsed. Nothing is borrowed in
+            those cases.</exception>
+            <remarks>
+            Await this and dispose the resulting lease, so cancellation during the wait cannot leave a borrowed
+            object unowned: when the wait fails, no object was taken at all.<br />
+            On <c>net6.0</c> and later the lease implements <c>IAsyncDisposable</c>, so dispose it with
+            <c>await using</c>: when the pool's policy implements the asynchronous contract, returning the object
+            runs asynchronous hooks, and the synchronous <c>using</c> blocks the calling thread on them. On
+            <c>net48</c> and <c>netstandard2.0</c> the lease is <see cref="T:System.IDisposable"/> only — those targets
+            produce no asynchronous return path, so there is nothing to wait for and <c>using</c> is the only
+            form.
+            </remarks>
+            <example>
+            <code>
+            using var lease = await pool.AcquireLeaseAsync(cancellationToken);
+            lease.Value.DoWork();
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolLeaseExtensions.AcquireLeaseAsync``1(DotNetCore.HayateOP.IHayateObjectPool{``0},System.TimeSpan,System.Threading.CancellationToken)">
+            <summary>
+            Asynchronously borrows an object with an explicit wait bound, together with the lease that returns it.
+            </summary>
+            <param name="pool">The pool to borrow from.</param>
+            <param name="timeout">The maximum wait time.</param>
+            <param name="cancellationToken">A token that can interrupt the wait.</param>
+            <returns>A lease holding the borrowed object; disposing it returns the object to the pool.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="pool"/> is <c>null</c>.</exception>
+            <exception cref="T:System.OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.
+            Nothing is borrowed in that case.</exception>
+            <exception cref="T:System.TimeoutException"><paramref name="timeout"/> elapsed before an object became
+            available, while external cancellation propagates as <see cref="T:System.OperationCanceledException"/> — the
+            same split as the underlying asynchronous acquire. Nothing is borrowed either way.</exception>
+            <example>
+            <code>
+            var lease = await pool.AcquireLeaseAsync(TimeSpan.FromSeconds(3), cancellationToken);
+            using (lease) { lease.Value.DoWork(); }
+            </code>
+            </example>
+        </member>
         <member name="T:DotNetCore.HayateOP.HayatePoolMetadata">
             <summary>
             A metadata entry for a single pool in the registry (2.5).
