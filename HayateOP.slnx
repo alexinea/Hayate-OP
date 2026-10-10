@@ -3,6 +3,14 @@
     <Project Path="samples/HayateOP.Samples.Endpoints/HayateOP.Samples.Endpoints.csproj" />
     <Project Path="samples/HayateOP.Samples/HayateOP.Samples.csproj" />
     <Project Path="samples/HayateOP.Samples.ObjectPoolCompat/HayateOP.Samples.ObjectPoolCompat.csproj" />
+    <Project Path="samples/HayateOP.Samples.Lease/HayateOP.Samples.Lease.csproj" />
+    <Project Path="samples/HayateOP.Samples.Unbounded/HayateOP.Samples.Unbounded.csproj" />
+    <Project Path="samples/HayateOP.Samples.Preparation/HayateOP.Samples.Preparation.csproj" />
+    <Project Path="samples/HayateOP.Samples.Presets/HayateOP.Samples.Presets.csproj" />
+    <Project Path="samples/HayateOP.Samples.Metrics/HayateOP.Samples.Metrics.csproj" />
+    <Project Path="samples/HayateOP.Samples.Validation/HayateOP.Samples.Validation.csproj" />
+    <Project Path="samples/HayateOP.Samples.Resilience/HayateOP.Samples.Resilience.csproj" />
+    <Project Path="samples/HayateOP.Samples.NamedPools/HayateOP.Samples.NamedPools.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HayateOP.Extensions.Configuration/HayateOP.Extensions.Configuration.csproj" Id="197d2007-2165-43c8-b7d5-eb26153b7185" />
