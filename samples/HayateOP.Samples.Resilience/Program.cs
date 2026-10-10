@@ -9,6 +9,9 @@ using DotNetCore.HayateOP.Samples.Resilience;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
+// Section 1: the pool-level circuit breaker. When enabled, CheckAvailable() reports false while the
+// breaker is open, and SetUnavailable()/SetAvailable() let the application take the pool out of (and
+// back into) service as the dependency behind it fails / recovers. The callbacks announce transitions.
 Console.WriteLine("=== 1. Circuit breaker ===");
 var pool = new HayatePoolBuilder<Resource>()
     .WithMinSize(2)
@@ -24,6 +27,8 @@ Console.WriteLine($"   available after SetUnavailable? {pool.CheckAvailable()}")
 pool.SetAvailable();
 Console.WriteLine($"   available after SetAvailable? {pool.CheckAvailable()}");
 
+// Section 2: the Abort reject policy. With a pool of exactly one slot, holding the only object and
+// then borrowing again fails immediately with an exception instead of blocking or waiting.
 Console.WriteLine("=== 2. Reject policy: Abort throws immediately when at capacity ===");
 var failFast = new HayatePoolBuilder<Resource>()
     .WithMinSize(1)
@@ -38,6 +43,9 @@ try
 }
 finally { failFast.Release(heldAbort); }
 
+// Section 3: the BlockTimeout reject policy (the default). With one slot held, the second acquire
+// blocks until the acquire timeout elapses, then throws TimeoutException. The short 200ms timeout
+// keeps the demo fast; in production this is the backpressure knob that bounds how long a caller waits.
 Console.WriteLine("=== 3. Reject policy: BlockTimeout waits, then times out ===");
 var blocking = new HayatePoolBuilder<Resource>()
     .WithMinSize(1)
