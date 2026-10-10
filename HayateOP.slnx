@@ -11,6 +11,10 @@
     <Project Path="samples/HayateOP.Samples.Validation/HayateOP.Samples.Validation.csproj" />
     <Project Path="samples/HayateOP.Samples.Resilience/HayateOP.Samples.Resilience.csproj" />
     <Project Path="samples/HayateOP.Samples.NamedPools/HayateOP.Samples.NamedPools.csproj" />
+    <Project Path="samples/HayateOP.Samples.Async/HayateOP.Samples.Async.csproj" />
+    <Project Path="samples/HayateOP.Samples.Scoped/HayateOP.Samples.Scoped.csproj" />
+    <Project Path="samples/HayateOP.Samples.Diagnostics/HayateOP.Samples.Diagnostics.csproj" />
+    <Project Path="samples/HayateOP.Samples.ActiveCeiling/HayateOP.Samples.ActiveCeiling.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HayateOP.Extensions.Configuration/HayateOP.Extensions.Configuration.csproj" Id="197d2007-2165-43c8-b7d5-eb26153b7185" />
