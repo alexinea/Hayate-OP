@@ -15,6 +15,9 @@
     <Project Path="samples/HayateOP.Samples.Scoped/HayateOP.Samples.Scoped.csproj" />
     <Project Path="samples/HayateOP.Samples.Diagnostics/HayateOP.Samples.Diagnostics.csproj" />
     <Project Path="samples/HayateOP.Samples.ActiveCeiling/HayateOP.Samples.ActiveCeiling.csproj" />
+    <Project Path="samples/HayateOP.Samples.Sharding/HayateOP.Samples.Sharding.csproj" />
+    <Project Path="samples/HayateOP.Samples.Scaling/HayateOP.Samples.Scaling.csproj" />
+    <Project Path="samples/HayateOP.Samples.Keyed/HayateOP.Samples.Keyed.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HayateOP.Extensions.Configuration/HayateOP.Extensions.Configuration.csproj" Id="197d2007-2165-43c8-b7d5-eb26153b7185" />
