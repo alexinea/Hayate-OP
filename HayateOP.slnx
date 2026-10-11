@@ -18,6 +18,14 @@
     <Project Path="samples/HayateOP.Samples.Sharding/HayateOP.Samples.Sharding.csproj" />
     <Project Path="samples/HayateOP.Samples.Scaling/HayateOP.Samples.Scaling.csproj" />
     <Project Path="samples/HayateOP.Samples.Keyed/HayateOP.Samples.Keyed.csproj" />
+    <Project Path="samples/HayateOP.Samples.BorrowOrder/HayateOP.Samples.BorrowOrder.csproj" />
+    <Project Path="samples/HayateOP.Samples.SoftCapacity/HayateOP.Samples.SoftCapacity.csproj" />
+    <Project Path="samples/HayateOP.Samples.BucketedBuffer/HayateOP.Samples.BucketedBuffer.csproj" />
+    <Project Path="samples/HayateOP.Samples.Eviction/HayateOP.Samples.Eviction.csproj" />
+    <Project Path="samples/HayateOP.Samples.Generation/HayateOP.Samples.Generation.csproj" />
+    <Project Path="samples/HayateOP.Samples.LeakDetection/HayateOP.Samples.LeakDetection.csproj" />
+    <Project Path="samples/HayateOP.Samples.AbandonedRecovery/HayateOP.Samples.AbandonedRecovery.csproj" />
+    <Project Path="samples/HayateOP.Samples.RejectPolicies/HayateOP.Samples.RejectPolicies.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HayateOP.Extensions.Configuration/HayateOP.Extensions.Configuration.csproj" Id="197d2007-2165-43c8-b7d5-eb26153b7185" />
