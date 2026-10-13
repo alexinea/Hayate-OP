@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <Import Project="..\..\common.tests.props" />
+
+    <!-- ================================================================
+         G-12 分析器验收（33-O-1）。
+         - 单 TFM net10.0：被测包是 netstandard2.0（宿主加载约束），但验收只需要一个能跑
+           Roslyn 的进程；多 TFM 只会让同一份断言重复跑三遍，不增加覆盖。
+         - Roslyn 引用固定在 3.8.0：与被测包同一代际。若测试用更新的 Roslyn，测试可能编译
+           通过而被测包在 3.8 宿主上根本加载不了。
+         - Workspaces 是必需的：CodeFix 的重写入口引用 Formatter，而分析器工程的
+           PrivateAssets="all" 不会把该依赖传过来。
+    ================================================================ -->
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <RootNamespace>DotNetCore.HayateOP.Tests.Analyzers</RootNamespace>
+        <OutputType>Exe</OutputType>
+        <IsTestProject>true</IsTestProject>
+        <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+        <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="xunit.v3" Version="4.0.0" />
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="3.8.0" />
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="3.8.0" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- 被测库：规则的命名空间门控与符号判定都建立在这个程序集的真实类型上 -->
+        <ProjectReference Include="..\..\src\HayateOP\HayateOP.csproj" />
+        <!-- 被测包：分析器与 CodeFix -->
+        <ProjectReference Include="..\..\src\HayateOP.Extensions.Analyzers\HayateOP.Extensions.Analyzers.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <Using Include="Xunit" />
+    </ItemGroup>
+
+</Project>
