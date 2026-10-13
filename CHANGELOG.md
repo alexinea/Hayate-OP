@@ -35,6 +35,10 @@ The line also lands a compiler-side surface (G-12), in a separate optional packa
 free of a Roslyn dependency: six analyzers that report pool misuse where it is written, and three code
 fixes. The one Error among them is a deliberate decision, explained in its entry below.
 
+The line also closes a small diagnostics debt carried since 2.9 (G-16): the exception a waiting borrow
+ends in now names the cause the caller reading it is usually in a position to fix — borrowed objects
+that never come back.
+
 ### Added
 
 - **A ceiling on concurrent borrows** (G-5): `MaxActiveObjects` caps how many objects may be lent out
@@ -164,6 +168,17 @@ fixes. The one Error among them is a deliberate decision, explained in its entry
   project that does not use the library gets no diagnostic at all. Targets `netstandard2.0` against
   Roslyn 3.8, the oldest host the current line-up shares, and is a pure addition: nothing in the core,
   the extensions or the samples references it.
+
+### Changed
+
+- **A borrow timeout now names the likely cause** (G-16): the three `TimeoutException` messages a
+  waiting borrow can end in — the synchronous general-purpose path, the synchronous lean path and the
+  asynchronous one — gained a sentence naming the usual cause of the wait, borrowed objects that are
+  never returned. The original sentence is untouched and the hint follows it, so everything that keys on
+  the existing text keeps working: the four `Assert.Contains` in the preparation pool's tests,
+  log-parsing rules, and alert filters that route on message fragments. The two variants whose original
+  sentence already reports the `MaxActiveObjects` ceiling ("all N objects ... are still out on loan")
+  did not gain it — they already say what is wrong. No policy, option or signature changed.
 
 ### Fixed
 
