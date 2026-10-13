@@ -10,6 +10,56 @@ Breaking changes are described in full — with migration guidance — in
 
 ## [Unreleased]
 
+The 3.1 capability line adds three things to the borrow path's vocabulary: a ceiling on how many
+objects may be out on loan at once (G-5), a value-type lease so a scoped borrow allocates nothing
+(G-6), and two switches that move the automatic reset of an `IHayateResettable` object from the return
+side of the cycle to the borrow side (G-7). All three are pure additions — every default is the
+behaviour of the release before them, so a pool that asks for none of them is unchanged.
+
+### Added
+
+- **A ceiling on concurrent borrows** (G-5): `MaxActiveObjects` caps how many objects may be lent out
+  at once. The pool already bounded the objects it holds (a shard's capacity, derived from
+  `MaxPoolSize`) and decided what a miss does (`RejectPolicy`), but neither capped how many borrowers
+  are in flight — so a pool sized for memory rather than for a downstream dependency handed out every
+  object it owned, and the database, socket peer or remote service behind those objects saw the whole
+  burst. `0` — the default — disables it, so the default configuration is unchanged. At the ceiling a
+  caller gets the outcome its `RejectPolicy` already gives a miss: `Abort` refuses, `Block` waits for
+  a return, `BlockTimeout` waits the timeout out and then gives up; the two creation policies wait
+  instead of creating, which is the one place the ceiling overrules the policy, because an object
+  created to satisfy the request would itself be out on loan. A ceiling above `MaxPoolSize` is
+  rejected at build time — it could never fire, the rule `SoftCapacity` already follows — as is the
+  combination with lean mode, which keeps no borrow bookkeeping to count against. The slot is claimed
+  with a compare-and-exchange on the hand-out path rather than read from a derived count, so racing
+  borrowers cannot all see the last free slot and overshoot.
+- **`HayatePoolLease<T>`, with the four `AcquireLeased` / `AcquireLeaseAsync` overloads that produce it** (G-6): a
+  value-type counterpart to the existing `HayatePoolScope<T>` class, so a scoped borrow no longer has
+  to allocate a lease object — the lease lives in the caller's frame, and the return-once guarantee is
+  carried by an `Interlocked` claim exactly as the class scope does. The class scope is unchanged and
+  stays the right choice when the lease must outlive the frame or be treated as a reference. The type
+  is a **mutable** struct rather than the `ref struct` the plan first specified: a `ref struct` local
+  cannot cross an `await` boundary (`CS4007`), so its asynchronous disposal — which the class scope's
+  own contract requires — would be unreachable, and a `readonly struct` is ruled out too, because the
+  once-only claim needs `Interlocked.Exchange` on a field (`CS8340`). The mutable form keeps every
+  capability of the class scope, including `await using`, and gives up only the compile-time guarantee
+  that a lease cannot be boxed. Asynchronous disposal reuses the existing internal
+  `IHayateAsyncReturnPool<T>`, gated to `net6.0+` like the class scope.
+- **Reset timing switches** (G-7): `ResetOnReturn` (default `true`) and `ResetOnBorrow` (default
+  `false`) move the automatic reset of an `IHayateResettable` object from the return side of the cycle
+  to the borrow side, so a pool that over-creates pays for reset only on the objects it actually hands
+  out. On by default is the behaviour before 3.1, so a pool that never asks is unchanged. The two are
+  orthogonal timing, not a mode: both may be on (a cycle then resets twice) and both may be off (a
+  pool of stateless payloads never resets), and `IsValid` states no rule about them. They govern only
+  the reset the pool and `DefaultHayateObjectPolicy<T>` drive — a custom `IHayateObjectPolicy<T>`
+  supplied through `WithPolicy` keeps its own `OnRelease` / `OnAcquire`, which the switches never
+  touch. Lean pins the reset back to the return side, writing **both** halves rather than clearing
+  only the borrow side, so a caller who had moved the reset to the borrow side lands on the return
+  side and not on no reset at all. `HayateUnboundedPool<T>` takes no options object and stays fixed to
+  the return side. What moving the reset costs is measured in
+  [`docs/hot-path-costs.md`](docs/hot-path-costs.md): the reset moves rather than multiplies — roughly
+  3 ns of hook cost, with a 4 KB reset shifting a 3% round trip from the return path to the borrow
+  path.
+
 ## [3.0.0] - 2026-09-24
 
 Lifetime and wake-up semantics, with one signature change and one namespace move. 3.0 states in full
