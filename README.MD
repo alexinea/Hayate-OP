@@ -34,6 +34,10 @@ returning an object transfers, and which misuses the engine actually detects —
 assistants: the shape decision, the canonical skeleton, the traps, and the facts that are easy to get
 wrong.
 
+Everything outside the core lives in an optional package: DI, configuration, health checks, management
+endpoints, diagnostics, the specialized pools, the bucketed buffer pool, and the Roslyn analyzers
+([`docs/analyzers.md`](docs/analyzers.md), which also covers why exactly one of its rules is an Error).
+
 ## Installation
 
 ### NuGet Packages
@@ -48,6 +52,7 @@ wrong.
 | `DotNetCore.HayateOP.Extensions.Diagnostics`         | Integration with System.Diagnostics for advanced performance monitoring and telemetry.               |
 | `DotNetCore.HayateOP.Extensions.Specialized`         | Ready-to-use specialized pools for `MemoryStream`, `StringBuilder` and `CancellationTokenSource`.    |
 | `DotNetCore.HayateOP.Extensions.Buffers`             | Bucketed array pool (`HayateBufferPool<T>`) with round-up-to-nearest-size routing over declared buckets. |
+| `DotNetCore.HayateOP.Extensions.Analyzers`           | Roslyn analyzers and code fixes that move pool misuse from run time to build time.                              |
 
 #### Supported Target Frameworks
 
@@ -58,6 +63,7 @@ wrong.
 | `DotNetCore.HayateOP.Extensions.DependencyInjection` | .NET Framework 4.8; .NET 6/7/8/9/10 |
 | `DotNetCore.HayateOP.Extensions.Specialized` | .NET Framework 4.8; .NET 6/7/8/9/10 |
 | `DotNetCore.HayateOP.Extensions.Buffers` | .NET Framework 4.8; .NET 6/7/8/9/10 |
+| `DotNetCore.HayateOP.Extensions.Analyzers` | .NET Standard 2.0 (Roslyn host requirement; runs in the compiler, not in your app) |
 | `DotNetCore.HayateOP.Extensions.Configuration` | .NET Framework 4.8; .NET 6/7/8/9/10 |
 | `DotNetCore.HayateOP.Extensions.HealthCheck` | .NET Framework 4.8; .NET 6/7/8/9/10 |
 | All other `DotNetCore.HayateOP.Extensions.*` packages | .NET 6/7/8/9/10 |
@@ -634,6 +640,36 @@ once, and a return past the bucket's capacity is dropped for the garbage collect
 thread-safe (one lock per bucket, so different sizes do not contend), runs no background workers, and
 `Dispose` drops every parked array. The package ships `net48` and `net6.0`–`net10.0` assets and has no
 dependencies.
+
+### Analyzers and code fixes
+
+The optional [`DotNetCore.HayateOP.Extensions.Analyzers`](https://www.nuget.org/packages/DotNetCore.HayateOP.Extensions.Analyzers)
+package turns six classes of pool misuse into compiler diagnostics, so the mistake is caught where
+the code is written rather than at the first GC pass.
+
+```bash
+dotnet add package DotNetCore.HayateOP.Extensions.Analyzers
+```
+
+| Rule | Default severity | Reports |
+| :--- | :--- | :--- |
+| `HYO009` | Error | a lease or scope whose result is thrown away — nothing will ever dispose it |
+| `HYO001` | Warning | a pooled object acquired and dropped without being released |
+| `HYO003` | Warning | an acquire on a pool that was disposed earlier in the same method body |
+| `HYO004` | Info | a blocking `Acquire` inside an `async` method |
+| `HYO005` | Info | an async acquire that ignores a `CancellationToken` the enclosing method has |
+| `HYO006` | Warning | `OnRelease` disposing the item the pool still owns |
+
+`HYO009` is the one that is an Error on purpose: `HayatePoolScope<T>` has no finalizer and
+`HayatePoolLease<T>` is a `struct`, so a discarded lease is a permanent leak with no later chance to
+notice — the compiler refusing to build is the honest signal. Everything else is a Warning or Info and
+never blocks a build. Three code fixes ship with it — wrap the acquire in a `using`, switch to
+`AcquireAsync`, forward the token — each offered only for the rule it belongs to.
+
+Two things the package deliberately does not do: it never rewrites more than the call it was given,
+and it never reports anything in a project that does not use the library (the rules key on the
+namespace, not on the method name). Design, the reasons for each severity, and the known limits are in
+[`docs/analyzers.md`](docs/analyzers.md).
 
 ### With Dependency Injection
 

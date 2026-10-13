@@ -71,6 +71,12 @@ it on the lean path — the full table of what is and is not detected is in
 | Use `.UseLeanProfile()` when you want misuse detected | The lean path keeps no registry, so a foreign object is **accepted** and a double return is not caught |
 | Read `MaxPoolSize` as "0 means unlimited" | It means the opposite here. See §4 |
 
+Three of the five shapes above can be caught before the code runs: the optional
+[`DotNetCore.HayateOP.Extensions.Analyzers`](../README.MD) package reports a discarded lease or scope as
+a build **Error** (`HYO009`), a dropped object as a warning (`HYO001`), and an `OnRelease` that disposes
+what the pool still owns (`HYO006`). It is an optional package, so its absence changes nothing — but when
+it is there, treat its diagnostics as the source of truth about these shapes rather than re-deriving them.
+
 ## 4. Facts that are easy to get wrong
 
 Each of these was checked against the source; several contradict older documentation and blog-shaped
@@ -111,6 +117,7 @@ intuition.
 | Who disposes what | [`docs/disposal.md`](disposal.md) |
 | Async borrow semantics | [`docs/async-policy.md`](async-policy.md) |
 | Why named pools are not built on keyed services, and the 3.0 plan for per-name policies | [`docs/named-pool-policies.md`](named-pool-policies.md) |
+| Which misuse the compiler can catch for you, and why one rule is an Error | [`docs/analyzers.md`](analyzers.md) |
 | Behaviour changes between versions | [`docs/BREAKING-CHANGES.md`](BREAKING-CHANGES.md), then `CHANGELOG.md` |
 | A runnable example | the `reports/examples/` case set (repository-only) |
 
