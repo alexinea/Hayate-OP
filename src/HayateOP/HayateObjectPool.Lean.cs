@@ -681,7 +681,7 @@ public partial class HayatePoolBasic<T>
                         // construction, so "create while the pool has room" is never satisfiable here.
                         if (sw.Elapsed >= timeout)
                         {
-                            throw new TimeoutException($"HayatePool [{_name}] timed out acquiring an object after {timeout.TotalSeconds}s.");
+                            throw new TimeoutException($"HayatePool [{_name}] timed out acquiring an object after {timeout.TotalSeconds}s. Borrowed objects that are never returned are the usual cause of this wait: check for a suspected leak and pair every borrow with a return.");
                         }
 
                         _blockGate.Wait(BlockWaitSliceMs);

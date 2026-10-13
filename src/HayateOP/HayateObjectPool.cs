@@ -1533,7 +1533,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         {
                             if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
                             if (_enableAutoScaling) ForceScaleUpOneStep();
-                            throw new TimeoutException($"HayatePool [{_name}] timed out acquiring an object after {timeout.TotalSeconds}s.");
+                            throw new TimeoutException($"HayatePool [{_name}] timed out acquiring an object after {timeout.TotalSeconds}s. Borrowed objects that are never returned are the usual cause of this wait: check for a suspected leak and pair every borrow with a return.");
                         }
 
                         // Wait for a signal, and for no longer than the timeout still allows: a signal wakes at once, and
@@ -1839,7 +1839,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             // Only a timeout triggers this (external CT not cancelled) → aligns with the BlockTimeout branch of the synchronous Acquire(timeout)
             if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
             if (_enableAutoScaling) ForceScaleUpOneStep();
-            throw new TimeoutException($"HayatePool [{_name}] timed out acquiring an object asynchronously after {timeout.TotalSeconds}s.");
+            throw new TimeoutException($"HayatePool [{_name}] timed out acquiring an object asynchronously after {timeout.TotalSeconds}s. Borrowed objects that are never returned are the usual cause of this wait: check for a suspected leak and pair every borrow with a return.");
         }
     }
 
