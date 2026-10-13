@@ -51,9 +51,12 @@ The calibration flag is therefore the switch: committing a CI-native baseline re
 and hardens the gate in the same commit. No workflow change is needed.
 
 The gate has been enforcing since the first CI-native capture (2026-09-21); the current file is
-the 2026-09-22 re-capture. That first capture predated the emit path carrying per-target
+the 2026-10-13 re-capture. That first capture predated the emit path carrying per-target
 thresholds, so the three sub-100 ns lean rows had to have their 30/60 overrides re-stamped by
-hand after it. The emit path inherits them now — see the note in the runbook below.
+hand after it; the re-captures since inherit them — see the note in the runbook below. The
+2026-10-13 file moved every gated row down, by 12% on the sub-100 ns lean rows and 37–51% on the
+shard-bound ones, from a file captured on 2026-09-23 — the day the G-4 shard-padding change
+landed, so the previous file is the last one that predates it.
 
 ## Capturing the CI-native baseline (runbook)
 
@@ -134,4 +137,6 @@ lean rows carry 30/60 overrides per the PG4 noise measurements. The first CI-nat
 previous local figures — but it does not yet carry enough repeats to justify tightening the
 overrides; keep 30/60 until CI variance data allows it. The 2026-09-22 re-capture keeps 30/60
 for the same reason: its own `Release | Hayate Lean` came in 14% above the previous capture,
-inside the range those overrides exist to absorb and a point under the global warning bar.
+inside the range those overrides exist to absorb and a point under the global warning bar. The
+2026-10-13 re-capture keeps them too, and is the first file to carry them through the emit path
+alone — nothing was re-stamped by hand.
