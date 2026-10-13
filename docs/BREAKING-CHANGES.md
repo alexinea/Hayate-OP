@@ -527,6 +527,29 @@ Behaviours to be aware of before adopting HayateOP.
   Related: `IHayateObjectPolicy.OnDestroy` is not invoked for objects released by
   `Clear()` / `Dispose()` on the general-purpose engine, unlike every other destroy path. See
   [`disposal.md`](disposal.md).
+- **The lock-free store keeps no order, so it takes three promises away with it.** With
+  `EnableLockFreeStorage` on (off by default, and a pool that never turns it on is unchanged), a shard's
+  idle set is a slot array rather than a list, and an array has no order to keep. `BorrowStrategy` is
+  therefore refused at build time rather than ignored: a `Lifo` order throws from `Build()`, and a pool
+  that never asked for an order holds `Fifo`, so it builds. The slot array is sized when the shard is
+  built and never replaced, so `ReloadConfig` rejects a `MaxPoolSize` above it — lowering stays allowed,
+  and the store clamps to the smaller of the two — which is the narrower form of the rule `SoftCapacity`
+  already follows. And the eviction sampler walks a contiguous run of the store's slots instead of the
+  coldest end of the idle order: `MaxIdleTime` and `MaxLifeTime` still reclaim every object past its
+  limit, but sampling no longer guarantees that the oldest objects are the ones sampled, so a pool that
+  leans on the sample being age-ordered to retire objects in arrival order should stay on the default
+  store. Everything else — `Count`, `GetAll`, `DrainForClear`, the registry and the three `Remove` call
+  sites — keeps its meaning, because claiming an idle object is the same exchange a borrow performs.
+- **A front-slot object is parked on a thread, so it is only reachable through that thread.**
+  `EnableThreadLocalFrontSlot` (off by default) keeps one idle object per borrowing thread on the pool
+  instance. The `Rents` rule stops a thread that has never borrowed from parking anything, so a
+  completion callback or hand-off worker cannot strand an object in a slot nobody reads, but a thread
+  that *has* borrowed and then disappears is indistinguishable from one that is simply idle between
+  borrows: the object stays parked until eviction, `Clear`, `Dispose`, or that thread's next borrow
+  reaches it. While it is parked the pool still counts it as idle, its eviction sweep still reaches it,
+  and both `Clear` and `Dispose` drain the tier back into the shards first, so nothing is lost — it is a
+  question of when, and of which thread. The tier is per pool instance, so two named pools of one
+  element type do not share a front slot.
 - **A type test written against the old logging namespace no longer matches.** Since 3.0 the
   Microsoft.Extensions.Logging bridge lives in `DotNetCore.HayateOP.DependencyInjection`, and the names
   left in `DotNetCore.HayateOP.Logging` are obsolete shells deriving from it (see

@@ -1,9 +1,9 @@
 # Storage backends: the lock-free shard store and the thread-local front slot
 
-Status: **form decided 2026-10-13, not yet implemented.** This page is the design source for
-`G-9` and `G-10` of the 3.1 performance line (`33-R-5` / `33-R-6`). Per the B8-1 precedent the form
-is recorded before it is built, so the implementation is measured against a stated contract rather
-than against what it happens to do.
+Status: **implemented 2026-10-13.** This page is the design source for `G-9` and `G-10` of the 3.1
+performance line (`33-R-5` / `33-R-6`). Per the B8-1 precedent the form was recorded before it was
+built, so the implementation is measured against a stated contract rather than against what it happens
+to do. Section 8 records the two places where building it settled a question this page had left open.
 
 Both backends are **off by default**. With them off, neither the shard free list nor the borrow /
 return path changes a single instruction.
@@ -162,6 +162,12 @@ is not.
 Return: park the object in the front slot when the thread may (see 4.2) and the slot is empty;
 otherwise take the existing shard path.
 
+Both statements cover the asynchronous borrow and release pair as well, and they have to. `CompleteReturn`
+is shared by the two release paths, so an asynchronous pool parks like any other; an asynchronous borrow
+that did not read the slot back would strand every object such a pool parked, in a slot nothing reads.
+The tier itself stays per *thread*, so an asynchronous flow that resumes on a different pool thread
+simply misses the slot — that is a property of a thread-local tier rather than an exception to it.
+
 ### 4.2 The `Rents` rule
 
 A slot records how many objects its thread has borrowed. **Only a thread that has borrowed may park
@@ -169,6 +175,12 @@ a return in its own slot.** Without that rule a thread that never borrows — an
 callback, a hand-off worker — parks objects in a slot nobody will ever read, and the objects are
 unreachable to every other borrower while still counted as live: the shared layer starves with
 objects sitting in it. This is the non-obvious part of the blueprint and it is ported as-is.
+
+Where the count is taken follows from what the rule means. It is incremented where a borrow is *handed
+over* — both borrow loops and the create-on-miss hand-out — rather than where the object was taken, so a
+take that the active-object ceiling refuses and the loop retries does not count as a borrow this thread
+made. It must not be a slot hit that increments it: the first park is the park that needs the count, so a
+rule that only a slot hit could satisfy would leave the slot permanently empty.
 
 ### 4.3 Clear, Dispose and the parking race
 
@@ -179,7 +191,7 @@ object that loses the race is dropped and destroyed, never left parked past the 
 ### 4.4 Visibility and accounting
 
 An object parked in a front slot is idle, but it is not in any shard's list, so it is invisible to
-everything that measures or sweeps shards. Three consequences, all of which the implementation has
+everything that measures or sweeps shards. Four consequences, all of which the implementation has
 to answer rather than document away:
 
 - **Idle accounting.** The pool derives its idle and borrowed counts from the shards
@@ -191,6 +203,10 @@ to answer rather than document away:
   true` buys — on the cold path only.
 - **Clear.** `Clear` and `Dispose` sweep `Values` and destroy what they find, on the same terms the
   shard drain uses.
+- **The borrowed list (`K2`).** A parked object stops being in flight, so the park unlinks it from the
+  borrowed list and the slot hit links it back. Answering only one half would be worse than answering
+  neither: an object borrowed out of the slot and then abandoned would be invisible to the abandoned
+  scan, so the loan would fall outside `K2` silently rather than loudly.
 
 The front-tier count costs one atomic per park and per hit. That is one more than a pure front tier
 would need; it is bought so that the pool's own numbers stay true, and it is still far short of the
@@ -256,3 +272,23 @@ prevent.
 
 - **2026-10-13** — first version. Form decided: slot-owned compare-exchange for `G-9` (the "slot"
   form, with the free-slot stack as the only version-packed head), single slot for `G-10`.
+- **2026-10-13** — built. Two questions this page had left open were settled while building, both
+  because the tests written against the page caught the page being incomplete rather than the code
+  being wrong:
+  - **§4.1 covers the asynchronous borrow as well.** The page said "borrow" without qualifying it, and
+    the shared `CompleteReturn` means an asynchronous pool parks. Reading the slot back only on the
+    synchronous path would have stranded every object an asynchronous pool parked.
+  - **§4.2 pins where the count is taken.** "How many objects its thread has borrowed" is the hand-out,
+    not a slot hit — a slot-hit-only rule can never fill the slot, because the first park is the park
+    that needs the count.
+  Also settled in the same pass, and visible in §4.4 rather than as a new section: the park unlinks the
+  wrapper from the borrowed list (`K2`) because a parked object is idle, and the slot hit links it back;
+  without the pair, an object borrowed out of the slot and then abandoned would be invisible to the
+  abandoned scan.
+- **2026-10-13** — gated. A third consequence, this one outside the page's scope but inside the change's
+  blast radius: the shard gained seven fields, and the hand-written control in `CacheLinePaddingTests`
+  (`UnpaddedShardShape`) mirrors the shard's field set by name and by storage size deliberately, so that
+  a field added to the shard breaks the test instead of silently weakening it. It did, at the count
+  (21 against 14). The control was extended to match; the lock-free arrays are the shared empty-array
+  singletons on the off path, so the two mirrored fields cost the control no bytes and the paired
+  difference still measures the padding alone.

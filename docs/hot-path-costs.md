@@ -59,6 +59,8 @@ Two caveats that matter when reading any absolute number here:
 | :--- | :--- | :--- |
 | `EnableLean` | Replaces the general engine entirely | No wrapper, no shard lock, no registry probe, no diagnostic write — see §1 |
 | `EnableSharding` / `ShardCount` | One idle-list probe per shard until a hit | A hit normally comes from the first scanned shard, so the added cost is a function of misses, not of `ShardCount` |
+| `EnableLockFreeStorage` | Replaces the shard's spin lock and idle list with a slot array: a take is one compare-exchange per slot scanned, and it costs no lock acquisition and no list walk | A wrapper owns one slot for its lifetime, so the scan length is the slot array's, not the idle set's. It is also where `BorrowStrategy` is given up — a slot array has no order to keep — so `Lifo` fails the build instead of being silently dropped |
+| `EnableThreadLocalFrontSlot` | One hop before the shard scan; a hit takes the object without looking at a shard at all | The hop is one load and one compare-exchange on a slot this thread owns, so a hit is cheaper than any shard visit; a miss adds that exchange to the same borrow. It also costs one atomic per successful borrow (the `Rents` count the park rule reads), and the first borrow on a thread materialises that thread's slot — one small object, once per thread |
 | `ShardAffinityMode` | `None` costs nothing; `Thread` / `Custom` evaluate a start shard once per borrow | One thread-ID read or one user delegate invocation per `Acquire` (falling back to a sequential scan on a null / out-of-range / throwing delegate) |
 | `BorrowStrategy` | `Fifo` (the default) reads the end the borrow path has always read — no added cost; `Lifo` reads the tail of the idle list instead | One predicted branch on a constructor-time flag inside the shard lock. The list is not reordered, so the strategy changes the order of borrows only |
 | `EnableGenerationOptimization` | One extra `Stopwatch.GetTimestamp()`, a ticks-to-milliseconds division and a compare, plus a `ValidationSkipCount` write for old-generation objects | This is the only switch that adds a QPC read to the borrow path |
@@ -88,6 +90,8 @@ it stores the pooled value directly instead of a wrapper.
 | Switch | Effect on the return path | Source of the cost |
 | :--- | :--- | :--- |
 | `EnableLean` | Replaces the general engine entirely | No registry probe, no free-list lock |
+| `EnableLockFreeStorage` | A return is one compare-exchange into the wrapper's own slot — no lock, no list append, no node allocation | The slot index travels on the wrapper, so the store never has to allocate one on the way in. A full store refuses the return, and the object is destroyed by the caller as it always was |
+| `EnableThreadLocalFrontSlot` | A return is parked in this thread's slot when the thread has borrowed and the slot is free; otherwise it takes the shard path unchanged | One compare-exchange, one generation recheck and one atomic on the idle count. The recheck is the clear-wins rule: a park that lost to a clear in flight is destroyed rather than left parked. A thread that has never touched this pool materialises its slot here in order to read the count, so a hand-off thread that only ever returns pays one small allocation, once |
 | `ValidateOnReturn` | One `Validate` call per return, plus `Destroy` on a failed verdict | Also requires `EnableValidation` |
 | `ResetOnReturn` | One `IHayateResettable.Reset` call per return, for a pooled type that implements the marker | On by default — this row was an unconditional cost of the default policy's `OnRelease` before 3.1 made it a switch. Turning it off moves the cost to the borrow path (`ResetOnBorrow`) or removes it entirely, which is only safe for a stateless payload. `EnableLean` forces it back on. Same jurisdiction limit as `ResetOnBorrow`: the default policy only |
 | `EnableDiagnostics` (**master**) | When off, removes the whole `EnableMetrics` block and the per-return debug trace — one branch otherwise | Implied by `EnableLean` |
@@ -275,6 +279,9 @@ that the workload did not need, and pays for it on every operation.
   the reproduction commands.
 * [`docs/ownership.md`](ownership.md) — the return contract, what the engine checks and what the
   lean path deliberately does not.
+* [`docs/storage-backends.md`](storage-backends.md) — the two storage backends behind
+  `EnableLockFreeStorage` and `EnableThreadLocalFrontSlot`: the layouts, the protocol, what each gives
+  up and how it is refused rather than ignored.
 * [`docs/BREAKING-CHANGES.md`](BREAKING-CHANGES.md) — the behavioural notes worth reading
   before trimming (cold boot, `CreateNew` laziness, lean mode's ~100 ms blocking wake-up
   granularity).

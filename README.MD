@@ -929,6 +929,8 @@ The short version of how to trim:
 | :--- | :--- |
 | `EnableLean` | Removes the wrapper allocation, the shard lock, the return-side registry probe and every diagnostic write — about 10.6x against the same feature set |
 | `EnableSharding` | One extra idle-list probe per shard on a miss; free in single-threaded steady state |
+| `EnableLockFreeStorage` | Replaces the shard spin lock and its idle list with a slot array, so a take is one compare-exchange per slot scanned — no lock, no list walk, and no allocation. Off by default → one predicted branch. It gives up `BorrowStrategy` (`Lifo` fails the build) and any `ReloadConfig` that would widen the ceiling |
+| `EnableThreadLocalFrontSlot` | One hop before the shard scan, plus one atomic on each park and each hit to keep the pool's own idle count true. A hit never reaches a shard. Off by default → one predicted branch |
 | `BorrowStrategy` | `Fifo` (the default) reads the end the borrow path has always read — no added cost; `Lifo` costs one predicted branch on a constructor-time flag |
 | `EnableGenerationOptimization` | One extra `Stopwatch.GetTimestamp()` per borrow — the only switch that adds a QPC read to the borrow path |
 | `ValidateOnBorrow` / `ValidateOnReturn` | One `IHayateObjectPolicy.Validate` call per borrow / return; the policy's own work (often a health probe) dominates |
@@ -1261,6 +1263,57 @@ Rules and boundaries:
   slots — so it costs the return hot path nothing beyond the existing slot scan. The unbounded pool
   model does not read the switch: its retained set is already bounded by its own `MaxIdle`, which
   drops a return once the queue is full.
+
+### Storage backends (lock-free shard store, thread-local front slot)
+
+Two switches that change *where* an idle object lives and *how* a borrow claims it. Both are off by
+default, and with them off the borrow and return paths keep exactly the statements they had. They are
+evaluated as a pair and switched independently — each gain can be attributed on its own — and both
+apply to the general engine: the lean profile forces them off, because lean has its own storage and a
+switch that cannot apply must not be silently ignored.
+
+```csharp
+var pool = new HayatePoolBuilder<MyBuffer>()
+    .WithMaxSize(64)
+    .WithLockFreeStorage()        // claim a slot, not a lock
+    .WithThreadLocalFrontSlot()   // ... and keep one object per thread in front of it
+    .Build();
+```
+
+**`WithLockFreeStorage()`** replaces the per-shard spin lock and its linked idle list with a slot
+array whose entries are claimed by compare-exchange. Each wrapper owns one slot for as long as it
+lives, which is what lets a borrow take an object without entering the shard lock at all.
+
+- **Retrieval order is given up, and refused rather than ignored.** A slot array has no order to keep,
+  so `BorrowStrategy` cannot be honoured: `EnableLockFreeStorage` with anything other than the default
+  `Fifo` throws from `Build()`.
+- **The ceiling can no longer be widened.** The slot array is sized when the shard is built, so
+  `ReloadConfig` rejects a `MaxPoolSize` above it (lowering stays allowed, and the store clamps to the
+  smaller of the two).
+- **The idle sample stops being the coldest end.** The eviction sampler walks a contiguous run of
+  slots instead of the oldest end of the list. `MaxIdleTime` and `MaxLifeTime` reclaim exactly what
+  they always did — an object past its limit is destroyed when it is sampled — but sampling no longer
+  guarantees that the oldest objects are the ones sampled.
+- Everything else keeps its meaning: `Count`, `GetAll`, the registry, the borrowed list and
+  `DrainForClear` are unchanged, because claiming-and-removing an idle object is the same exchange a
+  borrow performs.
+
+**`WithThreadLocalFrontSlot()`** keeps one idle object per borrowing thread, on the pool instance, and
+checks it before any shard. A thread that has borrowed gets its own object back without touching a
+shard; on a miss the borrow falls through to the shard path unchanged. Depth is one slot, so a thread
+cycling through several objects in sequence will not hit it every time.
+
+- **Only a thread that has borrowed may park.** A slot records how many objects its thread has
+  borrowed, and a return is parked only when that count is non-zero. Without the rule a thread that
+  never borrows — an I/O completion callback, a hand-off worker — parks objects into a slot nobody will
+  ever read: unreachable to every other borrower while still counted as live.
+- **A parked object is still idle, and still reachable.** It lives in no shard, so the pool's idle and
+  borrowed numbers explicitly carry the front tier's count, and the eviction sweep reads the tier's own
+  slots. `Clear` and `Dispose` drain the tier back into the shards first, so a cleared pool's semantics
+  do not depend on where an object happened to be parked.
+- **A clear wins the race against a parking return.** A park in flight when a clear starts is
+  reconciled after the fact, and the object that lost is destroyed rather than left parked.
+- The tier is per pool instance, so two named pools of one element type do not share a front slot.
 
 ### Reload configuration at runtime
 
