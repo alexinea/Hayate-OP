@@ -867,6 +867,23 @@
             queue rebuild to an O(1) unlink.
             </summary>
         </member>
+        <member name="F:DotNetCore.HayateOP.HayateObject`1.SlotIndex">
+            <summary>
+            The slot this wrapper owns in its shard's lock-free store (G-9), or <c>-1</c> when it owns no
+            slot. The index is what makes that store a slot array rather than a link-following structure: a
+            parked wrapper is found by looking at a slot instead of walking a list, so there is no link to
+            go stale and no pointer that has to carry a version on its back. Two facts follow from it —
+            a wrapper writes straight into its own slot on a return (nobody else was ever handed that slot
+            index), and the take / claim paths exchange the wrapper out of a slot they name by index and
+            validate by identity.
+            </summary>
+            <remarks>
+            A wrapper keeps the index for as long as it holds the slot: a borrow leaves it in place, so the
+            return goes back to the same slot, and the shard gets the index back only when the wrapper is
+            claimed for destruction or when the shard is drained. The lock-free store is the only reader —
+            with the backend off the field stays <c>-1</c> and the locked path never touches it.
+            </remarks>
+        </member>
         <member name="F:DotNetCore.HayateOP.HayateObject`1.BorrowedNode">
             <summary>
             The node reference of the object within its shard's borrowed-object list (only maintained when
@@ -913,6 +930,51 @@
         <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.TrackedObjectCount">
             <summary>Total number of live objects (idle + borrowed), derived by summing each shard's registry.</summary>
         </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1._enableThreadLocalFrontSlot">
+            <summary>Whether this pool keeps a per-thread front slot ahead of the shard scan (G-10), snapshotted at construction.</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1._frontSlots">
+            <summary>The per-thread front slots, or <c>null</c> with the tier off.</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1._frontSlotIdleCount">
+            <summary>
+            The number of objects currently parked in the front tier: idle, but living in no shard. Every
+            idle / borrowed derivation adds it, because the shard-only sums would otherwise report a
+            parked object as borrowed.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1._frontTierGeneration">
+            <summary>
+            Bumped by every Clear. A borrower reads it before parking and checks it after, so a park that
+            raced a clear destroys its object instead of leaving it parked past the clear — the clear wins.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1._frontSlotHits">
+            <summary>How many borrows the front tier served without touching a shard (diagnostic use).</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1._frontSlotParks">
+            <summary>How many returns the front tier took in (diagnostic use).</summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.HayatePoolBasic`1.FrontSlot">
+            <summary>
+            G-10: one thread's front slot. <see cref="F:DotNetCore.HayateOP.HayatePoolBasic`1.FrontSlot.Parked"/> holds at most one idle object;
+            <see cref="F:DotNetCore.HayateOP.HayatePoolBasic`1.FrontSlot.Rents"/> records how many objects this thread has borrowed from this pool.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1.FrontSlot.Parked">
+            <summary>The idle object this thread parked, or <c>null</c> when the slot is free.</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1.FrontSlot.Rents">
+            <summary>
+            How many objects this thread has borrowed from this pool. Only a thread that has borrowed
+            may park a return here: without that rule a thread that never borrows — an I/O completion
+            callback, a hand-off worker — would park objects in a slot nobody ever reads, and the
+            shared layer would starve with objects sitting in it while still counted as live.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.FrontSlotIdleCount">
+            <summary>The number of idle objects the front tier holds, clamped at zero (diagnostic use).</summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.IdleObjectCount">
             <summary>
             The number of idle objects the pool currently holds across every shard. Diagnostic and
@@ -922,7 +984,9 @@
             </summary>
             <remarks>
             Written as an indexed loop rather than <c>_shards.Sum(...)</c> so the soft-capacity check costs
-            no allocation: the enumerable form would box the array's enumerator on every return.
+            no allocation: the enumerable form would box the array's enumerator on every return.<br />
+            G-10: the front tier's own count is added, because an object parked in a thread's front slot is
+            idle while living in no shard — the shard walk alone would miss it entirely.
             </remarks>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.DerivedActiveObjectCount">
@@ -932,6 +996,74 @@
             one's registry count and its (locked) idle count — which is exactly why the borrow path keeps the
             paired counter and does not call this per borrow.
             </summary>
+            <remarks>
+            G-10: the front tier's count is subtracted as well as the shards' — a parked object is registered
+            like any other live object, so leaving it out would count it as borrowed and make this derivation
+            disagree with the shard sums about an object that is plainly idle.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryTakeFrontSlot(DotNetCore.HayateOP.HayateObject{`0}@)">
+            <summary>
+            G-10: takes the object this thread parked in its front slot, if there is one. A hit hands the
+            object over without looking at a shard at all.
+            </summary>
+            <param name="w">The parked object, or <c>null</c> when the slot is empty.</param>
+            <returns><c>true</c> when an object was taken from the slot.</returns>
+            <remarks>
+            The claim is the lean fast lane's: read the field, then exchange it to <c>null</c>. The exchange
+            returns the previous value, so a reference match proves this thread won it. The slot belongs to
+            one thread, so there is in practice no second writer — the exchange is kept because it is also
+            the read, and because "in practice" is not a guarantee.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryParkFrontSlot(DotNetCore.HayateOP.HayateObject{`0})">
+            <summary>
+            G-10: parks a returned object in this thread's front slot when the thread has borrowed and the
+            slot is free.
+            </summary>
+            <param name="w">The object being returned.</param>
+            <returns>
+            <c>true</c> when the return was handled — either parked, or reclaimed because a clear won the
+            race, which the caller must treat the same way (the object is gone). <c>false</c> when the
+            return has to take the shard path.
+            </returns>
+            <remarks>
+            Two rules decide it. The <b>Rents</b> rule keeps a thread that never borrows from parking: an
+            object in a slot its thread will never read is unreachable to every other borrower while still
+            counting as live (see <see cref="F:DotNetCore.HayateOP.HayatePoolBasic`1.FrontSlot.Rents"/>). The <b>generation</b> check keeps a park
+            from outliving a clear: the generation is read before the park and checked after, and the clear
+            wins — an object that lost the race is destroyed here instead of left parked.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.NoteBorrowedOnThisThread">
+            <summary>
+            G-10: records that this thread has borrowed from this pool, which is what the <c>Rents</c> rule
+            reads before a later park (see <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryParkFrontSlot(DotNetCore.HayateOP.HayateObject{`0})"/>).
+            </summary>
+            <remarks>
+            Recorded on the hand-out paths — the two borrow loops and the create-on-miss hand-out — rather than
+            where the object was taken, so a take that is refused by the active-object ceiling and retried does
+            not count. The rule means "objects this thread has borrowed", not "objects it reached for", and the
+            difference is exactly the retried take. It has to be the hand-out rather than a front-slot hit: a
+            slot that only a slot hit could increment would never fill at all, because the first park is the
+            one that needs it.
+            <para>
+            Off by default: one predicted branch and (for a thread that has not touched the pool before) the
+            slot the front tier would have created on its first take anyway.
+            </para>
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.DrainFrontTiersIntoShards">
+            <summary>
+            G-10: returns everything the front tiers hold to the shards, so a Clear destroys it on exactly
+            the terms it destroys the objects that were already there. Also bumps the tier generation, which
+            is what makes a park still in flight lose to this clear.
+            </summary>
+            <remarks>
+            Handing each object to its home shard rather than disposing it here is deliberate: the shard
+            clear owns the "mark destroyed and dispose the value" pair, and one mechanism doing it keeps a
+            cleared pool's semantics identical whether the object was idle in a shard or idle in a slot.
+            </remarks>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryClaimActiveSlot">
             <summary>
@@ -1402,6 +1534,22 @@
             time it takes to create an object cannot spin.
             </remarks>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.EvictFrontTiers(System.Int64,System.Int32)">
+            <summary>
+            G-10: runs the eviction rule over the objects parked in the front tiers.
+            </summary>
+            <param name="now">The run's single clock read, shared with the per-shard sweep.</param>
+            <param name="minIdlePerShard">The soft-minimum-idle floor, computed once per run.</param>
+            <returns>The number of objects claimed and destroyed.</returns>
+            <remarks>
+            A parked object is marked Borrowed — the borrow path hands it over without ever putting it back
+            into a shard, and that mark is what stops a shard from accepting the same wrapper twice — so the
+            per-shard sample can only skip it. Reaching it means walking the tier's own slots, which is the
+            other half of why they are enumerable. The rule and the claim are the ones the shard sweep uses:
+            the eviction policy decides, and only the caller that exchanges the wrapper out of its slot owns
+            the destruction — so a borrow that wins the same exchange simply keeps the object.
+            </remarks>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.LogEviction(System.Int32,DotNetCore.HayateOP.HayateEvictionCandidate{`0}@)">
             <summary>
             Logs one eviction. A pool running the built-in rule keeps the historical line, whose three flags
@@ -1699,6 +1847,52 @@
         <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TrackedValues">
             <summary>All wrapper objects registered in this shard (including those currently borrowed).</summary>
         </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1.Shard._useLockFreeStore">
+            <summary>Whether this shard holds idle objects in the lock-free slot store (G-9), snapshotted at construction.</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1.Shard._slots">
+            <summary>The slot array: one entry per slot, holding the parked wrapper that owns it.</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1.Shard._freeNext">
+            <summary>
+            Intrusive free-slot stack: <c>_freeNext[i]</c> is the next free index after slot <c>i</c>,
+            threaded through this array so a push and a pop cost no allocation. Only the <b>head</b>
+            needs a version. Indices are genuinely recycled here — a popped index can legitimately
+            return to the head between a reader's load and its compare-exchange — so the version is
+            what tells the two apart. Slot ownership needs none: a slot's writers are only "the
+            wrapper that owns it" and "the thread that just exchanged it out", never a third party
+            arriving through a followed link, so there is no ABA to defend against there.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1.Shard._freeHead">
+            <summary>The packed (version, index) head of the free-slot stack; an index of -1 means empty.</summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1.Shard._scanCursor">
+            <summary>
+            The round-robin scan cursor. A <i>shared</i> starting point, not an affinity: its job is to
+            spread concurrent scanners across the shard's slots, not to claim that a thread owns one.
+            The pool already routes a borrow through a ring scan from an affinity start, and a second
+            private affinity here would be a second mechanism for the same job.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1.Shard._idleCount">
+            <summary>
+            The number of idle wrappers the store holds. A counter rather than a walk, because a slot
+            array has no cheap way to be counted, and it is the input to the capacity decision on the
+            return path. Reads are volatile: <see cref="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.Count"/> and the pool's idle derivation both
+            go through it.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1.Shard._lockFreeTakes">
+            <summary>
+            How many takes the lock-free store served without entering the shard lock. It exists so
+            "the lock is gone" is asserted through a counter rather than through a wall-clock reading,
+            which is the only way that claim can be pinned in a test.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.LockFreeTakes">
+            <summary>The number of takes served by the lock-free store without entering the shard lock (diagnostic use).</summary>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.SpareCount">
             <summary>The number of wrappers currently parked on the spare stack (diagnostic use).</summary>
         </member>
@@ -1716,6 +1910,49 @@
             The caller (the pool's create path only) must fully reset the wrapper before use.
             </summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.PackHead(System.Int32,System.Int32)">
+            <summary>
+            Packs a version and a slot index into the free-stack head. An index of -1 marks the empty
+            stack; the version occupies the high half and is what makes a recycled index
+            distinguishable from the one a reader loaded.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TryPopSlot(System.Int32@)">
+            <summary>
+            Pops a free slot index off the intrusive stack, or returns <c>false</c> when every slot is
+            owned by a wrapper.
+            </summary>
+            <remarks>
+            The classic Treiber stack, with the head carrying a version: the link is read before the
+            exchange, and the version is what makes a stale read of that link harmless when the same
+            index is recycled in between. Without the version, a reader whose compare-exchange lands
+            after the index left and returned to the head would take the wrong successor.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.PushSlot(System.Int32)">
+            <summary>
+            Pushes a slot index back onto the free stack.
+            </summary>
+            <remarks>
+            The caller owns the index — it was popped for a wrapper that is now being destroyed, or it
+            belonged to a wrapper the shard has just exchanged out — so nothing else can be writing this
+            link while the push is in flight, and a retry after a lost compare-exchange simply rewrites
+            it for the new head.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.ReleaseSlot(DotNetCore.HayateOP.HayateObject{`0})">
+            <summary>
+            Hands a wrapper's slot index back to the shard, or does nothing when the wrapper owns no
+            slot. Called from the pool's destroy path (the single place a wrapper is torn down) and from
+            the store's own claim path.
+            </summary>
+            <remarks>
+            The index is cleared with a compare-exchange rather than a plain store, so the release is
+            idempotent: destruction is already guarded by <see cref="F:DotNetCore.HayateOP.HayateObject`1.Destroyed"/>, and
+            this closes the same door for the slot — an index returns to the free stack exactly once,
+            however many destroy attempts race for the wrapper.
+            </remarks>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.Add(DotNetCore.HayateOP.HayateObject{`0})">
             <summary>
             Appends an object to the shard free list.
@@ -1726,6 +1963,40 @@
             object was already claimed by eviction / validation / destroy and must not be
             handed out again.
             </returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.AddLockFree(DotNetCore.HayateOP.HayateObject{`0})">
+            <summary>
+            The lock-free store's half of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.Add(DotNetCore.HayateOP.HayateObject{`0})"/>: reserves one idle slot against the shard's
+            capacity and writes the wrapper into the slot it owns.
+            </summary>
+            <returns>
+            The same two answers <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.Add(DotNetCore.HayateOP.HayateObject{`0})"/> gives — <c>true</c> when the object was parked;
+            <c>false</c> when it must not be handed out again (it was already claimed by eviction /
+            validation / destroy) or when the shard is at capacity. As on the locked path the object is
+            not disposed here: the single real caller (<c>Release</c> -&gt; <c>Destroy</c>) runs the
+            full destruction, so <c>OnDestroy</c> still fires exactly once.
+            </returns>
+            <remarks>
+            The reservation is a compare-exchange loop rather than a bare increment, so concurrent
+            returns cannot overshoot the shard's capacity — the same shape the lean buffer uses for its
+            own ceiling. The store into the slot is a plain write, not an exchange: the index was handed
+            to this wrapper alone (popped fresh for a create, or kept from the wrapper's last park), so
+            there is no competing writer to lose to.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TryTakeLockFree(DotNetCore.HayateOP.HayateObject{`0}@)">
+            <summary>
+            The lock-free store's half of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TryTake(DotNetCore.HayateOP.HayateObject{`0}@)"/>: scans the slots from a shared round-robin
+            start and exchanges the first idle wrapper it finds out of its slot. Pure <c>Interlocked</c> —
+            no lock, no allocation, no list walk.
+            </summary>
+            <remarks>
+            The claim is the same pattern the lean fast path uses: read the slot, then compare-exchange it
+            to <c>null</c>. The exchange returns the previous value, so a reference match proves this
+            thread was the one that won the object. Nothing is followed through a link — the slot names
+            the wrapper directly — so there is nothing that can have gone stale between the read and the
+            exchange, which is why this form needs no version on the slot itself.
+            </remarks>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.MarkBorrowed(DotNetCore.HayateOP.HayateObject{`0})">
             <summary>
@@ -1782,6 +2053,24 @@
             caller MUST NOT destroy it.
             </returns>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.RemoveLockFree(DotNetCore.HayateOP.HayateObject{`0})">
+            <summary>
+            The lock-free store's half of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.Remove(DotNetCore.HayateOP.HayateObject{`0})"/>: claims an idle object for destruction by
+            exchanging it out of the slot its index names, and hands the slot index back to the shard.
+            </summary>
+            <returns>
+            The same single-winner contract: <c>true</c> only for the caller that won the exchange, which
+            then owns the destruction. <c>false</c> means the object is borrowed, has already been
+            claimed, or no longer sits in the slot its index names — and the caller MUST NOT destroy it.
+            </returns>
+            <remarks>
+            This is the reason the slot form was chosen over a linked one. A lock-free structure cannot
+            physically unlink an arbitrary interior node without a tombstone and a new identity model for
+            every cold path that walks the storage; exchanging the wrapper out of a slot it names itself
+            keeps "claim and unlink" exactly what it always was, so the three <c>Remove</c> call sites and
+            the six other cold paths that read the store need no changes at all.
+            </remarks>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.SnapshotHead(DotNetCore.HayateOP.HayateObject{`0}[],System.Int32)">
             <summary>
             Copies up to <paramref name="count"/> idle objects from the head of the shard free
@@ -1793,7 +2082,12 @@
             "Head" is the oldest-returned end of the list. That end does not follow
             <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.BorrowStrategy"/>: LIFO changes which object is served next,
             not the order the list is kept in, so a sampler that wants the coldest objects keeps
-            getting them under either strategy.
+            getting them under either strategy.<br />
+            On the lock-free store (G-9) there is no age order to name: a wrapper owns its slot, so the
+            run this copies is a contiguous run of slots rather than the coldest objects. The sample is
+            still a fair sample and the retirement criteria are unchanged — an object past its idle or
+            lifetime limit is reclaimed whenever it is sampled — but "the oldest are sampled first" is
+            gone, which is one of the two things that backend gives up.
             </remarks>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.DrainForClear">
@@ -1804,6 +2098,21 @@
             lock through the awaited destroy path. No user code runs inside the critical section —
             the same hard constraint Clear has always kept.
             </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.DrainForClearLockFree">
+            <summary>
+            The lock-free store's half of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.DrainForClear"/>: exchanges every occupied slot out
+            and returns the wrappers it won, with each wrapper marked destroyed exactly as the locked
+            drain does.
+            </summary>
+            <remarks>
+            The per-slot exchange is what keeps this correct without a lock. A wrapper the drain wins
+            belongs to the drain and is destroyed; a wrapper a concurrent take wins is borrowed and
+            correctly left alone — and no wrapper can fall to both, because the exchange is the same
+            single-winner claim <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.RemoveLockFree(DotNetCore.HayateOP.HayateObject{`0})"/> makes. A wrapper lost this way is not a leak:
+            it is out on loan, not idle, so the drain was never going to see it. The slot index goes back
+            to the shard with each wrapper it retires, so a cleared shard can fill its slots again.
+            </remarks>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.SafeDispose(DotNetCore.HayateOP.HayateObject{`0},System.String)">
             <summary>
@@ -2021,6 +2330,58 @@
             <param name="enable">Whether to use the ArrayPool storage backend; defaults to
             <c>true</c>.</param>
             <returns>The same builder instance for chaining.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLockFreeStorage(System.Boolean)">
+            <summary>
+            Switches the general-purpose engine's shard free list to the lock-free slot store (G-9): an
+            idle object is held in a slot the wrapper owns and is taken, or claimed for destruction, by a
+            single compare-exchange on that slot, so a hit never enters the shard's spin lock.
+            </summary>
+            <param name="enable">Whether to use the lock-free shard store; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <remarks>
+            Retrieval order stops being return order — a slot array keeps no order — and the eviction
+            sampler's "oldest idle first" preference goes with it. For that reason
+            <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.Build"/> refuses the combination with
+            <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithBorrowStrategy(DotNetCore.HayateOP.HayateBorrowStrategy)"/> = <c>Lifo</c> instead of silently downgrading it. The store
+            is sized when the shard is built, so a built pool also refuses a
+            <see cref="M:DotNetCore.HayateOP.IHayateObjectPool.ReloadConfig(System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/> that would raise the ceiling past it. This is
+            a general-purpose backend and has no effect in lean mode, which forces it off during
+            normalization. See <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLockFreeStorage"/>.
+            </remarks>
+            <example>
+            <code>
+            var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithLockFreeStorage()
+                .WithMaxSize(64)
+                .Build();
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithThreadLocalFrontSlot(System.Boolean)">
+            <summary>
+            Keeps one idle object per thread in a front slot ahead of the shard scan (G-10), so the
+            steady-state "take the object I just returned" cycle costs one compare-exchange on a field
+            only this thread touches. A miss falls through to the unchanged shard path.
+            </summary>
+            <param name="enable">Whether to keep the per-thread front slot; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <remarks>
+            Only a thread that has borrowed may park a return in its own slot; a thread that never borrows
+            (an I/O completion callback, a hand-off worker) takes the ordinary shard path, so it cannot
+            strand objects in a slot nobody reads. The front tier is per pool instance, so named pools of
+            one element type do not share it, and <c>Clear</c> / <c>Dispose</c> reach it. This is a
+            general-purpose tier and has no effect in lean mode, which forces it off during normalization.
+            See <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableThreadLocalFrontSlot"/>.
+            </remarks>
+            <example>
+            <code>
+            var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithThreadLocalFrontSlot()
+                .WithMaxSize(64)
+                .Build();
+            </code>
+            </example>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLeanProfile">
             <summary>
@@ -3931,6 +4292,84 @@
             Not part of the feature-profile normalization: like <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLean"/> it is a storage
             shape, not a bookkeeping switch, so <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.UseLeanProfile"/> leaves it alone.
             </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLockFreeStorage">
+            <summary>
+            Whether the general-purpose engine holds idle objects in a lock-free per-shard slot store
+            instead of the per-shard <c>SpinLock</c> + linked free list (G-9).<br />
+            Default value: <c>false</c> (the spin-lock free list, which is what every release before the
+            switch did).
+            </summary>
+            <remarks>
+            Purpose: the shard free list is the one lock the general-purpose borrow and return paths
+            take, and one <c>SpinLock</c> per shard is what a burst of borrowers landing on the same
+            shard contends on. With this switch on, an idle object sits in a slot the wrapper owns and is
+            taken, or claimed for destruction, by a single <c>Interlocked.CompareExchange</c> on that
+            slot — so a borrow or a return that finds the object never enters the shard lock, and neither
+            does the eviction / idle-validation claim.<br />
+            Special case: <b>retrieval order is no longer return order.</b> A slot array has no order to
+            keep — a wrapper owns its slot for as long as it is parked — so the sequence a borrow walks is
+            the slot layout, not the sequence the returns happened in. The eviction sampler's
+            "oldest idle first" preference goes the same way: an object past
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxIdleTime"/> or <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/> is still reclaimed when it is
+            sampled, but the sample is no longer age-ordered. Correctness of both limits is unchanged.<br />
+            For that reason the combination with <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.BorrowStrategy"/> = <c>Lifo</c> is
+            <i>refused</i> at build time rather than silently downgraded to <c>Fifo</c>: an explicit
+            request for an order the backend cannot honour fails the build, exactly as the lean fast path
+            refuses a borrow order it cannot honour. A pool that never asked for anything holds the
+            default <c>Fifo</c> and simply builds.<br />
+            Special case: the slot array is sized when the shard is built, so a pool with this backend on
+            refuses a <c>ReloadConfig</c> that would raise <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxPoolSize"/> past that size —
+            lowering it stays allowed. The same rejection the lean fast path makes for its own
+            construction-sized retention buffer.<br />
+            This is a storage shape, not a bookkeeping switch, so the feature profiles leave it alone;
+            lean mode does force it off, because lean has its own storage and a switch that is on but
+            cannot apply is the failure mode this option set exists to avoid.<br />
+            Boundary: boolean switch. Off by default; with it off the borrow and return paths gain one
+            predicted branch and nothing else.<br />
+            Recommended range: enable for a pool whose borrow/return rate makes shard-lock contention
+            measurable and whose consumers do not depend on the idle set ageing in return order. Requires
+            the default <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.BorrowStrategy"/> (<c>Fifo</c>) and the general-purpose mode.
+            </remarks>
+            <example>
+            <code>
+            var options = new HayatePoolOptions { EnableLockFreeStorage = true, MaxPoolSize = 64 };
+            </code>
+            </example>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableThreadLocalFrontSlot">
+            <summary>
+            Whether the general-purpose engine keeps a per-thread front slot that holds one idle object
+            ahead of the shard scan (G-10).<br />
+            Default value: <c>false</c> (every borrow starts at a shard).
+            </summary>
+            <remarks>
+            Purpose: the steady-state borrow/return cycle of a single thread is "take the object I
+            returned a moment ago". A per-thread slot turns that cycle into one compare-exchange on a
+            field only this thread touches, and skips the shard walk entirely; a miss falls through to
+            the unchanged shard path, which is the lock-free store when
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLockFreeStorage"/> is on and the spin-lock free list when it is not.<br />
+            Special case (<i>the non-obvious part</i>): <b>only a thread that has borrowed may park a
+            return in its own slot.</b> Without that rule a thread that never borrows — an I/O completion
+            callback, a hand-off worker — parks objects in a slot nobody will ever read, and those objects
+            are unreachable to every other borrower while still counting as live. The shared layer then
+            starves with objects sitting in it. A slot therefore records whether its thread has borrowed,
+            and a return from a thread that has not takes the ordinary shard path.<br />
+            Special case: an object parked in a front slot is idle but lives in no shard, so
+            <c>Clear</c> and the eviction sweep reach it through the per-thread slots as well, and the
+            pool's idle and borrowed counts include it.<br />
+            This is a storage shape, not a bookkeeping switch, so the feature profiles leave it alone;
+            lean mode does force it off, for the same reason as <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLockFreeStorage"/>.<br />
+            Boundary: boolean switch. Off by default; each parked object costs one atomic on the return
+            path and one on the borrow that hits it, in exchange for skipping the shard path.<br />
+            Recommended range: enable together with <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLockFreeStorage"/> for a pool whose
+            borrowing threads also return, so the slot is read by the thread that filled it.
+            </remarks>
+            <example>
+            <code>
+            var options = new HayatePoolOptions { EnableThreadLocalFrontSlot = true, MaxPoolSize = 64 };
+            </code>
+            </example>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableSharding">
             <summary>

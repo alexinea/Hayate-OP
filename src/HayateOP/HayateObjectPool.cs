@@ -59,6 +59,70 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     // that reads it is then a constant test on a readonly field and folds away.
     private readonly int _softCapacity;
 
+    // G-9: the lock-free shard store's enable switch, and the per-shard slot capacity its array was
+    // sized to at construction. Both are snapshots, and the ceiling exists for one reason only: so
+    // ReloadConfig can refuse a MaxPoolSize that would outgrow the arrays instead of accepting it and
+    // then quietly clamping every shard's idle capacity to a size the array happens to have.
+    private readonly bool _enableLockFreeStorage;
+    private readonly int _lockFreeSlotCeiling;
+
+    // ---------------------------------------------------------------------------------------------
+    // G-10: the per-pool thread-local front tier.
+    //
+    // One slot per thread, held on the pool instance rather than on the element type, so two named
+    // pools of one element type do not share a front tier (the same per-pool rule the named-pool
+    // policies follow). The slots enumerate — trackAllValues — because Clear, Dispose and the
+    // eviction sweep all have to reach an object that is idle in a slot rather than parked in a
+    // shard. With the switch off (the default) _frontSlots is null, every read below is a null test
+    // on a readonly field, and the borrow / return paths run exactly the statements they always ran.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>Whether this pool keeps a per-thread front slot ahead of the shard scan (G-10), snapshotted at construction.</summary>
+    private readonly bool _enableThreadLocalFrontSlot;
+
+    /// <summary>The per-thread front slots, or <c>null</c> with the tier off.</summary>
+    private readonly ThreadLocal<FrontSlot>? _frontSlots;
+
+    /// <summary>
+    /// The number of objects currently parked in the front tier: idle, but living in no shard. Every
+    /// idle / borrowed derivation adds it, because the shard-only sums would otherwise report a
+    /// parked object as borrowed.
+    /// </summary>
+    private int _frontSlotIdleCount;
+
+    /// <summary>
+    /// Bumped by every Clear. A borrower reads it before parking and checks it after, so a park that
+    /// raced a clear destroys its object instead of leaving it parked past the clear — the clear wins.
+    /// </summary>
+    private int _frontTierGeneration;
+
+    /// <summary>How many borrows the front tier served without touching a shard (diagnostic use).</summary>
+    private int _frontSlotHits;
+
+    /// <summary>How many returns the front tier took in (diagnostic use).</summary>
+    private int _frontSlotParks;
+
+    /// <summary>
+    /// G-10: one thread's front slot. <see cref="Parked"/> holds at most one idle object;
+    /// <see cref="Rents"/> records how many objects this thread has borrowed from this pool.
+    /// </summary>
+    private sealed class FrontSlot
+    {
+        /// <summary>The idle object this thread parked, or <c>null</c> when the slot is free.</summary>
+        internal HayateObject<T>? Parked;
+
+        /// <summary>
+        /// How many objects this thread has borrowed from this pool. Only a thread that has borrowed
+        /// may park a return here: without that rule a thread that never borrows — an I/O completion
+        /// callback, a hand-off worker — would park objects in a slot nobody ever reads, and the
+        /// shared layer would starve with objects sitting in it while still counted as live.
+        /// </summary>
+        internal int Rents;
+    }
+
+    /// <summary>The number of idle objects the front tier holds, clamped at zero (diagnostic use).</summary>
+    private int FrontSlotIdleCount => _frontSlots is null ? 0 : Math.Max(0, Volatile.Read(ref _frontSlotIdleCount));
+
     /// <summary>
     /// The number of idle objects the pool currently holds across every shard. Diagnostic and
     /// soft-capacity use: the per-shard free lists are the only place an idle object lives (a borrowed
@@ -67,7 +131,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// </summary>
     /// <remarks>
     /// Written as an indexed loop rather than <c>_shards.Sum(...)</c> so the soft-capacity check costs
-    /// no allocation: the enumerable form would box the array's enumerator on every return.
+    /// no allocation: the enumerable form would box the array's enumerator on every return.<br />
+    /// G-10: the front tier's own count is added, because an object parked in a thread's front slot is
+    /// idle while living in no shard — the shard walk alone would miss it entirely.
     /// </remarks>
     private int IdleObjectCount()
     {
@@ -78,7 +144,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             total += shards[i].Count;
         }
 
-        return total;
+        return total + FrontSlotIdleCount;
     }
 
     /// <summary>
@@ -87,6 +153,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// one's registry count and its (locked) idle count — which is exactly why the borrow path keeps the
     /// paired counter and does not call this per borrow.
     /// </summary>
+    /// <remarks>
+    /// G-10: the front tier's count is subtracted as well as the shards' — a parked object is registered
+    /// like any other live object, so leaving it out would count it as borrowed and make this derivation
+    /// disagree with the shard sums about an object that is plainly idle.
+    /// </remarks>
     private int DerivedActiveObjectCount()
     {
         var total = 0;
@@ -96,7 +167,172 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             total += shards[i].TrackedCount - shards[i].Count;
         }
 
-        return total;
+        return total - FrontSlotIdleCount;
+    }
+
+    /// <summary>
+    /// G-10: takes the object this thread parked in its front slot, if there is one. A hit hands the
+    /// object over without looking at a shard at all.
+    /// </summary>
+    /// <param name="w">The parked object, or <c>null</c> when the slot is empty.</param>
+    /// <returns><c>true</c> when an object was taken from the slot.</returns>
+    /// <remarks>
+    /// The claim is the lean fast lane's: read the field, then exchange it to <c>null</c>. The exchange
+    /// returns the previous value, so a reference match proves this thread won it. The slot belongs to
+    /// one thread, so there is in practice no second writer — the exchange is kept because it is also
+    /// the read, and because "in practice" is not a guarantee.
+    /// </remarks>
+    private bool TryTakeFrontSlot(out HayateObject<T> w)
+    {
+        w = null!;
+
+        var slots = _frontSlots;
+        if (slots is null) return false;
+
+        // The value factory guarantees a slot for every thread that asks, so this is never null.
+        var slot = slots.Value!;
+        var parked = slot.Parked;
+        if (parked is null) return false;
+
+        if (!ReferenceEquals(parked, Interlocked.CompareExchange(ref slot.Parked, null, parked)))
+        {
+            return false;
+        }
+
+        // The wrapper was unlinked from the borrowed list when it was parked (K2), so claiming it has to
+        // re-link it — otherwise an abandoned scan would never see this loan. The mirror of the unlink the
+        // park does in CompleteReturn, and the reason the two belong in the same change.
+        if (_enableAbandonedRecovery && (uint)parked.ShardIndex < (uint)_shards.Length)
+        {
+            _shards[parked.ShardIndex].MarkBorrowed(parked);
+        }
+
+        Interlocked.Decrement(ref _frontSlotIdleCount);
+        Interlocked.Increment(ref _frontSlotHits);
+
+        // Location is deliberately left alone: the wrapper was never put back into a shard, so it is
+        // still marked Borrowed, and the pool's idle derivation is corrected by the front-tier count
+        // instead of by moving the wrapper's state around. (Moving it would also stop the shard from
+        // ever accepting it again — the shard takes only None or Borrowed on the way in.)
+        w = parked;
+        return true;
+    }
+
+    /// <summary>
+    /// G-10: parks a returned object in this thread's front slot when the thread has borrowed and the
+    /// slot is free.
+    /// </summary>
+    /// <param name="w">The object being returned.</param>
+    /// <returns>
+    /// <c>true</c> when the return was handled — either parked, or reclaimed because a clear won the
+    /// race, which the caller must treat the same way (the object is gone). <c>false</c> when the
+    /// return has to take the shard path.
+    /// </returns>
+    /// <remarks>
+    /// Two rules decide it. The <b>Rents</b> rule keeps a thread that never borrows from parking: an
+    /// object in a slot its thread will never read is unreachable to every other borrower while still
+    /// counting as live (see <see cref="FrontSlot.Rents"/>). The <b>generation</b> check keeps a park
+    /// from outliving a clear: the generation is read before the park and checked after, and the clear
+    /// wins — an object that lost the race is destroyed here instead of left parked.
+    /// </remarks>
+    private bool TryParkFrontSlot(HayateObject<T> w)
+    {
+        var slots = _frontSlots;
+        if (slots is null) return false;
+
+        // The value factory guarantees a slot for every thread that asks, so this is never null.
+        var slot = slots.Value!;
+        if (Volatile.Read(ref slot.Rents) <= 0) return false;
+
+        var generation = Volatile.Read(ref _frontTierGeneration);
+
+        // One slot per thread: an occupied slot sends the object down the shared path unchanged.
+        if (Interlocked.CompareExchange(ref slot.Parked, w, null) is not null) return false;
+
+        if (Volatile.Read(ref _frontTierGeneration) != generation)
+        {
+            // A clear ran while this park was in flight. It advanced the generation before sweeping, so
+            // either the sweep already took this object or it is still here and only this thread can see
+            // it. Take it back if it is still ours, then destroy it: the clear wins.
+            if (ReferenceEquals(w, Interlocked.CompareExchange(ref slot.Parked, null, w)))
+            {
+                Interlocked.Decrement(ref _frontSlotIdleCount);
+            }
+
+            Destroy(w);
+            return true;
+        }
+
+        Interlocked.Increment(ref _frontSlotIdleCount);
+        Interlocked.Increment(ref _frontSlotParks);
+        return true;
+    }
+
+    /// <summary>
+    /// G-10: records that this thread has borrowed from this pool, which is what the <c>Rents</c> rule
+    /// reads before a later park (see <see cref="TryParkFrontSlot"/>).
+    /// </summary>
+    /// <remarks>
+    /// Recorded on the hand-out paths — the two borrow loops and the create-on-miss hand-out — rather than
+    /// where the object was taken, so a take that is refused by the active-object ceiling and retried does
+    /// not count. The rule means "objects this thread has borrowed", not "objects it reached for", and the
+    /// difference is exactly the retried take. It has to be the hand-out rather than a front-slot hit: a
+    /// slot that only a slot hit could increment would never fill at all, because the first park is the
+    /// one that needs it.
+    /// <para>
+    /// Off by default: one predicted branch and (for a thread that has not touched the pool before) the
+    /// slot the front tier would have created on its first take anyway.
+    /// </para>
+    /// </remarks>
+    private void NoteBorrowedOnThisThread()
+    {
+        if (!_enableThreadLocalFrontSlot) return;
+
+        // The value factory guarantees a slot for every thread that asks, so this is never null.
+        Interlocked.Increment(ref _frontSlots!.Value!.Rents);
+    }
+
+    /// <summary>
+    /// G-10: returns everything the front tiers hold to the shards, so a Clear destroys it on exactly
+    /// the terms it destroys the objects that were already there. Also bumps the tier generation, which
+    /// is what makes a park still in flight lose to this clear.
+    /// </summary>
+    /// <remarks>
+    /// Handing each object to its home shard rather than disposing it here is deliberate: the shard
+    /// clear owns the "mark destroyed and dispose the value" pair, and one mechanism doing it keeps a
+    /// cleared pool's semantics identical whether the object was idle in a shard or idle in a slot.
+    /// </remarks>
+    private void DrainFrontTiersIntoShards()
+    {
+        var slots = _frontSlots;
+        if (slots is null) return;
+
+        Interlocked.Increment(ref _frontTierGeneration);
+#if NET6_0_OR_GREATER
+        // Publish the bump process-wide before the sweep: a parking thread may be on another core with
+        // a stale view of the counter, and the whole point is that it checks the counter *after* its
+        // park and sees this clear.
+        Interlocked.MemoryBarrierProcessWide();
+#else
+        Thread.MemoryBarrier();
+#endif
+
+        foreach (var slot in slots.Values)
+        {
+            var parked = slot.Parked;
+            if (parked is null) continue;
+            if (!ReferenceEquals(parked, Interlocked.CompareExchange(ref slot.Parked, null, parked))) continue;
+
+            Interlocked.Decrement(ref _frontSlotIdleCount);
+
+            var shardIndex = (uint)parked.ShardIndex < (uint)_shards.Length ? parked.ShardIndex : 0;
+            if (!_shards[shardIndex].Add(parked))
+            {
+                // The shard has no room for it — a slot store whose capacity shrank under it. The object
+                // cannot be left reachable from nowhere, so it is destroyed outright.
+                Destroy(parked);
+            }
+        }
     }
 
     /// <summary>
@@ -560,6 +796,20 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _affinityMode = _options.ShardAffinityMode;
         _customShardAffinity = _options.CustomShardAffinity;
 
+        // G-9: snapshot the lock-free store switch and the per-shard slot ceiling its arrays are sized
+        // to — the same division the shard loop below uses, taken here because each Shard reads the
+        // switch from the options itself and sizes its own array.
+        _enableLockFreeStorage = _options.EnableLockFreeStorage;
+        _lockFreeSlotCeiling = _enableLockFreeStorage ? perShardMax + (remainderMax > 0 ? 1 : 0) : 0;
+
+        // G-10: the per-thread front tier. trackAllValues is what makes the slots enumerable, which is
+        // what Clear, Dispose and the eviction sweep need — a tier that could not be enumerated could
+        // not be cleared, and an object left in it would never retire.
+        _enableThreadLocalFrontSlot = _options.EnableThreadLocalFrontSlot;
+        _frontSlots = _enableThreadLocalFrontSlot
+            ? new ThreadLocal<FrontSlot>(() => new FrontSlot(), trackAllValues: true)
+            : null;
+
         // Initialize shards
         _shards = new Shard[shardCount];
         for (var i = 0; i < shardCount; i++)
@@ -738,6 +988,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         var idle = 0;
         foreach (var shard in _shards) idle += shard.Count;
+        // G-10: an object parked in a front slot is idle as well, so the warm-up target counts it.
+        idle += FrontSlotIdleCount;
         var remaining = target - idle;
         if (remaining <= 0) return 0;
 
@@ -989,13 +1241,36 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 continue;
             }
 
+            // G-10: the per-thread front slot is the first hop. A hit hands the object over without
+            // looking at a shard at all; a miss falls through to the ring scan below, unchanged.
+            HayateObject<T>? frontTook = null;
+            if (_enableThreadLocalFrontSlot && TryTakeFrontSlot(out var frontW)) frontTook = frontW;
+
             // Ring scan starting from the affinity shard (equivalent to a sequential foreach scan when start = 0).
             for (var offset = 0; offset < _shards.Length; offset++)
             {
-                var hop = affinityStart + offset;
-                var shard = _shards[hop >= _shards.Length ? hop - _shards.Length : hop];
+                Shard shard;
+                HayateObject<T> w;
 
-                if (shard.TryTake(out var w))
+                if (frontTook is not null)
+                {
+                    // The object's recorded home shard: the index write below is then an identity, and a
+                    // hand-back (the active-object ceiling refusing the loan) goes to the shard that owns
+                    // the wrapper's slot.
+                    w = frontTook;
+                    frontTook = null;
+                    shard = _shards[(uint)w.ShardIndex < (uint)_shards.Length ? w.ShardIndex : 0];
+                }
+                else
+                {
+                    var hop = affinityStart + offset;
+                    shard = _shards[hop >= _shards.Length ? hop - _shards.Length : hop];
+                    if (!shard.TryTake(out var taken)) continue;
+                    w = taken;
+                }
+
+                // The hand-out bookkeeping below is shared by both sources verbatim; this bare block is
+                // the scope that let the front-slot hop be added above without editing a line of it.
                 {
                     // On a successful borrow, consume one wake-up signal (if any) to keep the signal count aligned with the pool's idle objects;
                     // preventing waiters from being spuriously woken one by one by stale signals into a busy spin. Wait(0) returns false immediately when no signal.
@@ -1165,6 +1440,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     // master switch is the one configuration that opts out of it, which is what makes the
                     // pool's diagnostic surface completely free rather than merely quiet.
                     if (_enableDiagnostics) Interlocked.Increment(ref _totalAcquired);
+
+                    // G-10: this borrow is what the Rents rule reads before a later park. Counted here,
+                    // on the hand-out path, so a take refused by the active-object ceiling above is not
+                    // counted as a borrow this thread made.
+                    NoteBorrowedOnThisThread();
 
                     // Capacity-alarm probe (returns immediately internally when disabled)
                     CheckCapacityAlarm();
@@ -1362,14 +1642,36 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 continue;
             }
 
+            // G-10: the per-thread front slot is the first hop, exactly as on the synchronous path — a hit
+            // hands the object over without looking at a shard at all. Leaving it out here would strand
+            // every object an asynchronous pool parked, because CompleteReturn is shared by both release
+            // paths and would park into a slot this loop never reads.
+            HayateObject<T>? frontTook = null;
+            if (_enableThreadLocalFrontSlot && TryTakeFrontSlot(out var frontW)) frontTook = frontW;
+
             // Ring scan starting from the affinity shard (equivalent to a sequential foreach scan when start = 0).
             for (var offset = 0; offset < _shards.Length; offset++)
             {
-                var hop = affinityStart + offset;
-                var shard = _shards[hop >= _shards.Length ? hop - _shards.Length : hop];
+                Shard shard;
+                HayateObject<T> w;
 
-                //if (shard.TryTake(out var w, TimeSpan.Zero))
-                if (shard.TryTake(out var w))
+                if (frontTook is not null)
+                {
+                    // The object's recorded home shard: the index write below is then an identity.
+                    w = frontTook;
+                    frontTook = null;
+                    shard = _shards[(uint)w.ShardIndex < (uint)_shards.Length ? w.ShardIndex : 0];
+                }
+                else
+                {
+                    var hop = affinityStart + offset;
+                    shard = _shards[hop >= _shards.Length ? hop - _shards.Length : hop];
+                    if (!shard.TryTake(out var taken)) continue;
+                    w = taken;
+                }
+
+                // The hand-out bookkeeping below is shared by both sources verbatim; this bare block is
+                // the scope that let the front-slot hop be added above without editing a line of it.
                 {
                     // On a successful borrow, consume one wake-up signal (if any), consistent with the synchronous path,
                     // preventing stale signals from accumulating and causing asynchronous waiters to spin spuriously.
@@ -1451,6 +1753,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     w.LeaseCount++;
 
                     if (_enableDiagnostics) Interlocked.Increment(ref _totalAcquired);
+
+                    // G-10: the asynchronous hand-out counts as a borrow on this thread too — the Rents
+                    // rule reads it before a later park, and the release half is the shared CompleteReturn.
+                    NoteBorrowedOnThisThread();
 
                     // G-1: the asynchronous borrow loop has no metrics block of its own (it records no
                     // wait time), so the activity stamp carries its own gate.
@@ -1740,6 +2046,42 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             }
         }
 
+        // G-10: park it in this thread's front slot when the rules allow, so this thread's next borrow
+        // never has to look at a shard. The object keeps its Borrowed mark while parked — the front
+        // tier's own count is what corrects the pool's idle derivation, and moving the mark would stop
+        // the shard from ever accepting the wrapper again.
+        if (_enableThreadLocalFrontSlot && TryParkFrontSlot(w))
+        {
+            // The object stopped being in flight the moment it was parked. Without this a later
+            // abandoned scan (K2) could claim a wrapper that is idle in a slot.
+            if (_enableAbandonedRecovery && (uint)w.ShardIndex < (uint)_shards.Length)
+            {
+                _shards[w.ShardIndex].UnmarkBorrowed(w);
+            }
+
+            if (_enableLeakDetection && _leakTraceCaptureMode != HayateLeakTraceCaptureMode.Off)
+            {
+                HayateLeaseContext.DetachFromFlow();
+            }
+
+            // Signalled even though the object is only reachable by this thread. The signal count is
+            // paired with the "consume one wake-up on a successful borrow" rule near the top of the
+            // borrow loop, and a borrow that hits this slot does consume one — so a park that did not
+            // signal would drain the count one signal per cycle until the pool looked empty to every
+            // waiter. The price is the occasional wake-up that finds nothing in the shards; the
+            // alternative is a pool that stops waking borrowers while it holds idle objects.
+            SignalAvailability();
+
+            CheckCapacityAlarm();
+
+            if (DebugTraceEnabled)
+            {
+                _logger.LogDebug("Object parked in the thread-local front slot. Type: {Type} LeaseTime: {LeaseTime:F2}ms", typeof(T).Name, w.LeaseTimeMs);
+            }
+
+            return;
+        }
+
         var shardIndex = (uint)w.ShardIndex < (uint)_shards.Length ? w.ShardIndex : 0;
         var shard = _shards[shardIndex];
         if (!shard.Add(w))
@@ -1820,6 +2162,45 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         var now = Stopwatch.GetTimestamp();
         var evicted = 0;
+
+        // G-10: the front tier is swept on the same three criteria as the shards. A parked object is
+        // marked Borrowed — that is what stops a shard from accepting the same wrapper twice — so the
+        // shard snapshots below cannot surface it; reaching it means walking the tier's own slots.
+        if (_frontSlots is not null)
+        {
+            foreach (var slot in _frontSlots.Values)
+            {
+                if (slot is null) continue;
+
+                var parked = slot.Parked;
+                if (parked is null) continue;
+
+                bool match;
+                if (reason == HayateEvictReason.Touched)
+                {
+                    match = parked.LeaseCount > 0;
+                }
+                else if (reason == HayateEvictReason.Idle)
+                {
+                    match = (now - parked.LastReleasedAt) / (double)Stopwatch.Frequency > _options.MaxIdleTime.TotalSeconds;
+                }
+                else // Expired
+                {
+                    match = IsExpired(now, parked);
+                }
+
+                if (!match) continue;
+
+                // Same single-winner claim as the shard path: only the caller that exchanges the wrapper
+                // out of its slot may destroy it, so a concurrent borrow that just won the exchange keeps
+                // the object.
+                if (!ReferenceEquals(parked, Interlocked.CompareExchange(ref slot.Parked, null, parked))) continue;
+
+                Interlocked.Decrement(ref _frontSlotIdleCount);
+                Destroy(parked);
+                evicted++;
+            }
+        }
 
         foreach (var shard in _shards)
         {
@@ -2332,6 +2713,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         // Borrow-count contract, gated by the diagnostics master switch alone (see the sync path).
         if (_enableDiagnostics) Interlocked.Increment(ref _totalAcquired);
 
+        // G-10: a create-on-miss / cold-boot hand-out is a borrow on this thread just like a borrowed
+        // object, and it is the only hand-out a pool whose borrowing is all misses ever performs.
+        NoteBorrowedOnThisThread();
+
         // Capacity-alarm probe (returns immediately internally when disabled)
         CheckCapacityAlarm();
 
@@ -2553,6 +2938,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         if ((uint)w.ShardIndex < (uint)_shards.Length)
         {
             _shards[w.ShardIndex].UnmarkBorrowed(w);
+
+            // G-9: the wrapper is leaving the pool for good, so the slot index it owns goes back to the
+            // shard — a take deliberately leaves the index in place (the return goes to the same slot),
+            // and destruction is the other end of that choice. Identity-checked and idempotent, and a
+            // no-op with the lock-free store off, exactly like UnmarkBorrowed above; it sits on this
+            // side of the try below so a throwing user Dispose still returns the index.
+            _shards[w.ShardIndex].ReleaseSlot(w);
         }
 
         try
@@ -2768,7 +3160,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         var max = _options.MaxPoolSize;
         if (max <= 0) return;
 
-        var borrowed = TrackedObjectCount - _shards.Sum(s => s.Count);
+        // G-10: the front tier's idle objects are subtracted as well — same basis as IdleObjectCount,
+        // so the alarm's utilization matches what the pool reports.
+        var borrowed = TrackedObjectCount - _shards.Sum(s => s.Count) - FrontSlotIdleCount;
         if (borrowed < 0) borrowed = 0;
         var ratio = (double)borrowed / max;
 
@@ -2870,6 +3264,61 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         }
     }
 
+    /// <summary>
+    /// G-10: runs the eviction rule over the objects parked in the front tiers.
+    /// </summary>
+    /// <param name="now">The run's single clock read, shared with the per-shard sweep.</param>
+    /// <param name="minIdlePerShard">The soft-minimum-idle floor, computed once per run.</param>
+    /// <returns>The number of objects claimed and destroyed.</returns>
+    /// <remarks>
+    /// A parked object is marked Borrowed — the borrow path hands it over without ever putting it back
+    /// into a shard, and that mark is what stops a shard from accepting the same wrapper twice — so the
+    /// per-shard sample can only skip it. Reaching it means walking the tier's own slots, which is the
+    /// other half of why they are enumerable. The rule and the claim are the ones the shard sweep uses:
+    /// the eviction policy decides, and only the caller that exchanges the wrapper out of its slot owns
+    /// the destruction — so a borrow that wins the same exchange simply keeps the object.
+    /// </remarks>
+    private int EvictFrontTiers(long now, int minIdlePerShard)
+    {
+        var slots = _frontSlots;
+        if (slots is null) return 0;
+
+        var evicted = 0;
+        var shards = _shards;
+
+        foreach (var slot in slots.Values)
+        {
+            if (slot is null) continue;
+
+            var parked = slot.Parked;
+            if (parked is null) continue;
+
+            var shardIndex = (uint)parked.ShardIndex < (uint)shards.Length ? parked.ShardIndex : 0;
+            var candidate = new HayateEvictionCandidate<T>(
+                parked.Value,
+                TimeSpan.FromSeconds((now - parked.CreatedAt) / (double)Stopwatch.Frequency),
+                TimeSpan.FromSeconds((now - parked.LastReleasedAt) / (double)Stopwatch.Frequency),
+                parked.LeaseCount,
+                IdleObjectCount(),
+                minIdlePerShard,
+                _options.MaxLifeTime,
+                _options.MaxIdleTime,
+                _options.SoftMinEvictableIdleTime,
+                shardIndex);
+
+            if (!_evictionPolicy.ShouldEvict(in candidate)) continue;
+            if (!ReferenceEquals(parked, Interlocked.CompareExchange(ref slot.Parked, null, parked))) continue;
+
+            Interlocked.Decrement(ref _frontSlotIdleCount);
+            Destroy(parked);
+            evicted++;
+
+            LogEviction(shardIndex, candidate);
+        }
+
+        return evicted;
+    }
+
     #endregion
 
     #region Background Tasks
@@ -2887,6 +3336,17 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             // The shard's share of the minimum pool size: the floor the soft-minimum-idle rule compares
             // the idle count against, computed once per run rather than per candidate.
             var minIdlePerShard = _options.MinPoolSize / _shards.Length;
+
+            // G-10: the front tier is swept too — see EvictFrontTiers for why it cannot come out of the
+            // per-shard sample below.
+            if (_frontSlots is not null)
+            {
+                var tierEvicted = EvictFrontTiers(now, minIdlePerShard);
+                if (tierEvicted > 0)
+                {
+                    _logger.LogInformation("Evicted {Count} objects from the thread-local front tier", tierEvicted);
+                }
+            }
 
             foreach (var shard in _shards)
             {
@@ -3073,7 +3533,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         if (!_enableAutoScaling) return;
         try
         {
-            var totalIdle = _shards.Sum(s => s.Count);
+            var totalIdle = _shards.Sum(s => s.Count) + FrontSlotIdleCount;
             var currentTotal = TrackedObjectCount;
             if (currentTotal == 0) return;
 
@@ -3216,7 +3676,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         // No longer holds a global _statsLock — statistics fields are read atomically one by one (an eventually-consistent snapshot);
         // the shard-count read semantics are the same as the original (whose in-lock read also did not constitute shard-level consistency).
-        int totalIdle = _shards.Sum(s => s.Count);
+        int totalIdle = _shards.Sum(s => s.Count) + FrontSlotIdleCount;
         int totalObjects = TrackedObjectCount; // True total object count (idle + borrowed)
 
         long waitSum = Volatile.Read(ref _waitTimeSum);
@@ -3239,7 +3699,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         return new HayatePoolStats
         {
-            PooledCount = _shards.Sum(s => s.Count),
+            PooledCount = _shards.Sum(s => s.Count) + FrontSlotIdleCount,
             TotalCreated = Interlocked.Read(ref _totalCreated),
             TotalReleased = Interlocked.Read(ref _totalReleased),
             TotalMissed = Interlocked.Read(ref _totalMissed),
@@ -3337,7 +3797,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             }
         }
 
-        var pooledCount = _shards.Sum(s => s.Count);
+        var pooledCount = _shards.Sum(s => s.Count) + FrontSlotIdleCount;
 
         // The borrowed count is derived from "total live wrapper count - in-pool idle count" (consistent with GetStats'
         // totalObjects - totalIdle basis), rather than relying on Shard.BorrowedCount.
@@ -3431,6 +3891,25 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     $"HayatePool [{_name}] cannot change SoftCapacity at runtime: the ceiling is applied by the return path from a value fixed when the pool was built (in lean mode it also fixes the buffer's slot limit). Rebuild the pool to change it.");
             }
 
+            // G-9: the lock-free store's slot arrays are sized when the shards are built and are never
+            // replaced — that is what keeps a slot index valid for a wrapper's whole life. A reload that
+            // raised the ceiling past them would leave the pool unable to hold the objects its
+            // configuration allows, so it is rejected with the original value restored instead of being
+            // accepted and silently clamped. Lowering the ceiling stays allowed: the store's capacity
+            // decision clamps to the smaller of the two, which is exactly what the option now says.
+            //
+            // The comparison is in the units the arrays were sized in, not the units the option is
+            // expressed in: the ceiling is per shard, while MaxPoolSize is per pool, so a reload is
+            // measured by the per-shard maximum it implies. Comparing the pool total against the
+            // per-shard ceiling would refuse to reload a sharded pool to the size it already has.
+            if (_enableLockFreeStorage &&
+                _options.MaxPoolSize / _shards.Length + (_options.MaxPoolSize % _shards.Length > 0 ? 1 : 0) > _lockFreeSlotCeiling)
+            {
+                _options.MaxPoolSize = previousMaxPoolSize;
+                throw new InvalidOperationException(
+                    $"HayatePool [{_name}] uses the lock-free shard store, whose slot arrays are sized at construction ({_lockFreeSlotCeiling} per shard) and cannot grow. Rebuild the pool to raise MaxPoolSize above that size.");
+            }
+
             // `{Config}`, not `{@Config}`: the `@` destructuring operator belongs to Serilog's template
             // parser, and this message never reaches one — it goes through Microsoft.Extensions.Logging,
             // which copies the hole verbatim into a structured property literally named "@Config". A sink
@@ -3453,6 +3932,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             ClearLean();
             return;
         }
+
+        // G-10: hand everything the front tiers hold back to the shards first, so the per-shard clear
+        // below destroys it on exactly the terms it destroys the objects that were already there. The
+        // same call bumps the tier generation, which is what makes a park still in flight lose to this
+        // clear and destroy its object instead of leaving it parked.
+        DrainFrontTiersIntoShards();
 
         foreach (var shard in _shards)
         {
@@ -3493,6 +3978,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         // Release the return-signal gate (same precondition as the timers: no in-flight Acquire waiters at Dispose time)
         _blockGate.Dispose();
+
+        // G-10: the front tier's slots are per-thread state held by this pool instance. Clear() above
+        // has already drained them, so this only releases the thread-local bookkeeping.
+        _frontSlots?.Dispose();
 
 #if NET6_0_OR_GREATER
         // O-D: hand the rented slot array back to the shared pool. Clear() already emptied every
@@ -3539,6 +4028,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         // Release the return-signal gate (same precondition as the timers: no in-flight Acquire waiters at Dispose time)
         _blockGate.Dispose();
 
+        // G-10: same as the synchronous dispose — the awaited drain has already emptied the slots.
+        _frontSlots?.Dispose();
+
         // O-D: hand the rented slot array back to the shared pool. The drain already emptied every
         // slot, so the array is clean to reuse.
         if (_enableArrayPoolStorage && _apSlots.Length > 0)
@@ -3566,6 +4058,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             await ClearLeanAsync().ConfigureAwait(false);
             return;
         }
+
+        // G-10: same as the synchronous clear — the front tiers are handed back to the shards first, so
+        // the shard drain below tears their objects down through the same awaited path.
+        DrainFrontTiersIntoShards();
 
         foreach (var shard in _shards)
         {

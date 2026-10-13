@@ -178,6 +178,23 @@ public class HayateObject<T> where T : class
     internal LinkedListNode<HayateObject<T>>? Node;
 
     /// <summary>
+    /// The slot this wrapper owns in its shard's lock-free store (G-9), or <c>-1</c> when it owns no
+    /// slot. The index is what makes that store a slot array rather than a link-following structure: a
+    /// parked wrapper is found by looking at a slot instead of walking a list, so there is no link to
+    /// go stale and no pointer that has to carry a version on its back. Two facts follow from it —
+    /// a wrapper writes straight into its own slot on a return (nobody else was ever handed that slot
+    /// index), and the take / claim paths exchange the wrapper out of a slot they name by index and
+    /// validate by identity.
+    /// </summary>
+    /// <remarks>
+    /// A wrapper keeps the index for as long as it holds the slot: a borrow leaves it in place, so the
+    /// return goes back to the same slot, and the shard gets the index back only when the wrapper is
+    /// claimed for destruction or when the shard is drained. The lock-free store is the only reader —
+    /// with the backend off the field stays <c>-1</c> and the locked path never touches it.
+    /// </remarks>
+    internal int SlotIndex = -1;
+
+    /// <summary>
     /// The node reference of the object within its shard's borrowed-object list (only maintained when
     /// abandoned recovery is enabled); <c>null</c> means the object is not currently borrowed or the
     /// feature is off. May only be read/written inside the Shard spin lock; the list drives the
@@ -228,6 +245,9 @@ public class HayateObject<T> where T : class
         LeaseTimeMs = 0;
         ShardIndex = shardIndex;
         Node = null;
+        // The shard hands the slot index back before it parks the wrapper for recycling (see
+        // Shard.ReleaseSlot), so a recycled wrapper starts out owning no slot, exactly as a new one does.
+        SlotIndex = -1;
         BorrowedNode = null;
         Location = HayateObjectLocation.None;
         Interlocked.Exchange(ref Destroyed, 0);

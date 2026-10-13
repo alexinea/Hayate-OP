@@ -162,7 +162,9 @@ public class CacheLinePaddingTests
     /// <summary>
     /// The shard's field set without the padding: the same field names and types in the same order, a
     /// constructor of the shard's exact shape, and a body that allocates exactly what the shard's body
-    /// allocates — the three collections its field initialisers create.
+    /// allocates — the three collections its field initialisers create, plus the lock-free store's two
+    /// arrays, which the shard's constructor fills with the shared empty-array singletons when the
+    /// backend is off (so they add a field each and not a byte).
     /// </summary>
     private sealed class UnpaddedShardShape
     {
@@ -175,6 +177,19 @@ public class CacheLinePaddingTests
         private readonly ConcurrentDictionary<object, object> _objects;
         private SpinLock _lock;
         private int _maxSize;
+
+        // G-9: the lock-free slot store's fields, declared here because the shard declares them. With
+        // the switch off — the default the options below construct — the shard's constructor takes the
+        // empty-array branch, so mirroring them costs the control no allocation and the paired
+        // difference still measures the padding alone.
+        private readonly bool _useLockFreeStore;
+        private readonly object?[] _slots;
+        private readonly int[] _freeNext;
+        private long _freeHead;
+        private int _scanCursor;
+        private int _idleCount;
+        private int _lockFreeTakes;
+
         private readonly bool _prefersAsyncDisposal;
         private SpinLock _spareLock;
         private object? _spareHead;
@@ -192,6 +207,15 @@ public class CacheLinePaddingTests
             _trackBorrowed = options.RemoveAbandonedOnBorrow || options.RemoveAbandonedOnMaintenance;
             _enableDiagnostics = options.EnableDiagnostics;
             _takeNewest = options.BorrowStrategy == HayateBorrowStrategy.Lifo;
+            // Mirror the shard's off-path exactly: the switch is off, so both arrays are the shared
+            // empty-array singletons — the same two the shard assigns, and the same zero bytes.
+            _useLockFreeStore = options.EnableLockFreeStorage;
+            _slots = Array.Empty<object>();
+            _freeNext = Array.Empty<int>();
+            _freeHead = 0;
+            _scanCursor = 0;
+            _idleCount = 0;
+            _lockFreeTakes = 0;
             _list = new LinkedList<object>();
             _borrowed = new LinkedList<object>();
             _objects = new ConcurrentDictionary<object, object>();
@@ -206,6 +230,13 @@ public class CacheLinePaddingTests
             _ = _prefersAsyncDisposal;
             _ = _spareCount;
             _ = _spareHead;
+            _ = _useLockFreeStore;
+            _ = _slots;
+            _ = _freeNext;
+            _ = _freeHead;
+            _ = _scanCursor;
+            _ = _idleCount;
+            _ = _lockFreeTakes;
         }
     }
 }

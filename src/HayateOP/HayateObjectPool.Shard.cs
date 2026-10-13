@@ -87,6 +87,65 @@ public partial class HayatePoolBasic<T>
 
         private int _maxSize;
 
+        // ---------------------------------------------------------------------------------------------
+        // G-9: the optional lock-free slot store.
+        //
+        // With EnableLockFreeStorage off (the default) every field below keeps its default value,
+        // _useLockFreeStore is a readonly false, and the borrow / return / claim paths run exactly the
+        // statements they always ran behind one predicted branch.
+        //
+        // With it on, _list and _lock stop being the storage: an idle wrapper sits in a slot it owns,
+        // and a borrow or a claim exchanges it out of that slot with a single CompareExchange. The
+        // fields below are the whole of that store. The shard's cache-line padding covers them like
+        // every other field: the leading half is in CacheLinePadded, the trailing half in _trailingPad.
+        // ---------------------------------------------------------------------------------------------
+
+        /// <summary>Whether this shard holds idle objects in the lock-free slot store (G-9), snapshotted at construction.</summary>
+        private readonly bool _useLockFreeStore;
+
+        /// <summary>The slot array: one entry per slot, holding the parked wrapper that owns it.</summary>
+        private readonly HayateObject<T>?[] _slots;
+
+        /// <summary>
+        /// Intrusive free-slot stack: <c>_freeNext[i]</c> is the next free index after slot <c>i</c>,
+        /// threaded through this array so a push and a pop cost no allocation. Only the <b>head</b>
+        /// needs a version. Indices are genuinely recycled here — a popped index can legitimately
+        /// return to the head between a reader's load and its compare-exchange — so the version is
+        /// what tells the two apart. Slot ownership needs none: a slot's writers are only "the
+        /// wrapper that owns it" and "the thread that just exchanged it out", never a third party
+        /// arriving through a followed link, so there is no ABA to defend against there.
+        /// </summary>
+        private readonly int[] _freeNext;
+
+        /// <summary>The packed (version, index) head of the free-slot stack; an index of -1 means empty.</summary>
+        private long _freeHead;
+
+        /// <summary>
+        /// The round-robin scan cursor. A <i>shared</i> starting point, not an affinity: its job is to
+        /// spread concurrent scanners across the shard's slots, not to claim that a thread owns one.
+        /// The pool already routes a borrow through a ring scan from an affinity start, and a second
+        /// private affinity here would be a second mechanism for the same job.
+        /// </summary>
+        private int _scanCursor;
+
+        /// <summary>
+        /// The number of idle wrappers the store holds. A counter rather than a walk, because a slot
+        /// array has no cheap way to be counted, and it is the input to the capacity decision on the
+        /// return path. Reads are volatile: <see cref="Count"/> and the pool's idle derivation both
+        /// go through it.
+        /// </summary>
+        private int _idleCount;
+
+        /// <summary>
+        /// How many takes the lock-free store served without entering the shard lock. It exists so
+        /// "the lock is gone" is asserted through a counter rather than through a wall-clock reading,
+        /// which is the only way that claim can be pinned in a test.
+        /// </summary>
+        private int _lockFreeTakes;
+
+        /// <summary>The number of takes served by the lock-free store without entering the shard lock (diagnostic use).</summary>
+        internal int LockFreeTakes => Volatile.Read(ref _lockFreeTakes);
+
         // A2 (docs/async-policy.md §5): the destroy sites prefer IAsyncDisposable for a pool whose
         // policy implements the asynchronous contract. Constant false for every other pool, so the
         // SafeDispose branch that reads it is dead code the JIT removes.
@@ -103,6 +162,16 @@ public partial class HayatePoolBasic<T>
         {
             get
             {
+                // G-9: the store keeps its own idle count, so the lock-free backend answers this with a
+                // volatile read instead of a walk (and without taking the lock the backend exists to
+                // avoid). The clamped read is defensive: the count is only ever moved atomically, but a
+                // negative value would break the pool's idle derivation if it ever appeared.
+                if (_useLockFreeStore)
+                {
+                    var idle = Volatile.Read(ref _idleCount);
+                    return idle > 0 ? idle : 0;
+                }
+
                 var taken = false;
                 try
                 {
@@ -186,6 +255,106 @@ public partial class HayatePoolBasic<T>
             // Options are normalized before the shards are built, so an unrecognised value has already
             // fallen back to Fifo and "not Lifo" is the complete test.
             _takeNewest = options.BorrowStrategy == HayateBorrowStrategy.Lifo;
+
+            // G-9: the lock-free store. The slot array is sized here — one slot per idle object the
+            // shard may hold — and is never replaced, which is what keeps a slot index valid for the
+            // wrapper's whole life and removes every array-swap race from the store. A pool with the
+            // backend on therefore refuses a ReloadConfig that would raise MaxPoolSize past this size,
+            // the same rejection lean makes for its own construction-sized retention buffer.
+            _useLockFreeStore = options.EnableLockFreeStorage;
+            if (_useLockFreeStore && maxSize > 0)
+            {
+                _slots = new HayateObject<T>?[maxSize];
+                _freeNext = new int[maxSize];
+                for (var i = 0; i < maxSize - 1; i++) _freeNext[i] = i + 1;
+                _freeNext[maxSize - 1] = -1;
+                _freeHead = PackHead(0, 0);
+            }
+            else
+            {
+                _slots = Array.Empty<HayateObject<T>>();
+                _freeNext = Array.Empty<int>();
+                _freeHead = PackHead(0, -1);
+            }
+        }
+
+        /// <summary>
+        /// Packs a version and a slot index into the free-stack head. An index of -1 marks the empty
+        /// stack; the version occupies the high half and is what makes a recycled index
+        /// distinguishable from the one a reader loaded.
+        /// </summary>
+        private static long PackHead(int version, int index) => ((long)version << 32) | (uint)index;
+
+        /// <summary>
+        /// Pops a free slot index off the intrusive stack, or returns <c>false</c> when every slot is
+        /// owned by a wrapper.
+        /// </summary>
+        /// <remarks>
+        /// The classic Treiber stack, with the head carrying a version: the link is read before the
+        /// exchange, and the version is what makes a stale read of that link harmless when the same
+        /// index is recycled in between. Without the version, a reader whose compare-exchange lands
+        /// after the index left and returned to the head would take the wrong successor.
+        /// </remarks>
+        private bool TryPopSlot(out int index)
+        {
+            while (true)
+            {
+                var head = Volatile.Read(ref _freeHead);
+                var candidate = (int)head;
+                if (candidate < 0)
+                {
+                    index = -1;
+                    return false;
+                }
+
+                var next = _freeNext[candidate];
+                if (Interlocked.CompareExchange(ref _freeHead, PackHead((int)(head >> 32) + 1, next), head) == head)
+                {
+                    index = candidate;
+                    return true;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Pushes a slot index back onto the free stack.
+        /// </summary>
+        /// <remarks>
+        /// The caller owns the index — it was popped for a wrapper that is now being destroyed, or it
+        /// belonged to a wrapper the shard has just exchanged out — so nothing else can be writing this
+        /// link while the push is in flight, and a retry after a lost compare-exchange simply rewrites
+        /// it for the new head.
+        /// </remarks>
+        private void PushSlot(int index)
+        {
+            while (true)
+            {
+                var head = Volatile.Read(ref _freeHead);
+                _freeNext[index] = (int)head;
+                if (Interlocked.CompareExchange(ref _freeHead, PackHead((int)(head >> 32) + 1, index), head) == head) return;
+            }
+        }
+
+        /// <summary>
+        /// Hands a wrapper's slot index back to the shard, or does nothing when the wrapper owns no
+        /// slot. Called from the pool's destroy path (the single place a wrapper is torn down) and from
+        /// the store's own claim path.
+        /// </summary>
+        /// <remarks>
+        /// The index is cleared with a compare-exchange rather than a plain store, so the release is
+        /// idempotent: destruction is already guarded by <see cref="HayateObject{T}.Destroyed"/>, and
+        /// this closes the same door for the slot — an index returns to the free stack exactly once,
+        /// however many destroy attempts race for the wrapper.
+        /// </remarks>
+        internal void ReleaseSlot(HayateObject<T> w)
+        {
+            if (!_useLockFreeStore || w is null) return;
+
+            var index = w.SlotIndex;
+            if (index < 0) return;
+            if (Interlocked.CompareExchange(ref w.SlotIndex, -1, index) != index) return;
+
+            PushSlot(index);
         }
 
         public void UpdateMaxSize(int newMaxSize)
@@ -207,6 +376,10 @@ public partial class HayatePoolBasic<T>
         public bool Add(HayateObject<T> w)
         {
             if (w is null) throw new ArgumentNullException(nameof(w));
+
+            // G-9: with the lock-free store on, the shard's storage is the slot array and the free list
+            // below is never touched.
+            if (_useLockFreeStore) return AddLockFree(w);
 
             var currentMax = Volatile.Read(ref _maxSize);
             HayateObject<T>? overflow = null;
@@ -269,8 +442,94 @@ public partial class HayatePoolBasic<T>
             return accepted;
         }
 
+        /// <summary>
+        /// The lock-free store's half of <see cref="Add"/>: reserves one idle slot against the shard's
+        /// capacity and writes the wrapper into the slot it owns.
+        /// </summary>
+        /// <returns>
+        /// The same two answers <see cref="Add"/> gives — <c>true</c> when the object was parked;
+        /// <c>false</c> when it must not be handed out again (it was already claimed by eviction /
+        /// validation / destroy) or when the shard is at capacity. As on the locked path the object is
+        /// not disposed here: the single real caller (<c>Release</c> -&gt; <c>Destroy</c>) runs the
+        /// full destruction, so <c>OnDestroy</c> still fires exactly once.
+        /// </returns>
+        /// <remarks>
+        /// The reservation is a compare-exchange loop rather than a bare increment, so concurrent
+        /// returns cannot overshoot the shard's capacity — the same shape the lean buffer uses for its
+        /// own ceiling. The store into the slot is a plain write, not an exchange: the index was handed
+        /// to this wrapper alone (popped fresh for a create, or kept from the wrapper's last park), so
+        /// there is no competing writer to lose to.
+        /// </remarks>
+        private bool AddLockFree(HayateObject<T> w)
+        {
+            // Only accept the two states "just created" or "returned after borrow", exactly as the
+            // locked path does: an object already claimed by eviction / validation / destroy
+            // (Removing / Destroyed) must never be placed back into the pool.
+            var location = w.Location;
+            if (location != HayateObjectLocation.None && location != HayateObjectLocation.Borrowed)
+                return false;
+
+            var slots = _slots;
+            var currentMax = Volatile.Read(ref _maxSize);
+            if (currentMax > slots.Length) currentMax = slots.Length;
+
+            var size = 0;
+            while (true)
+            {
+                var idle = Volatile.Read(ref _idleCount);
+                if (idle >= currentMax)
+                {
+                    size = idle;
+                    _logger.LogWarning("[Shard {Index}] capacity exceeded, object rejected and will be destroyed by caller (shard size: {Size}, max: {Max})",
+                        Index, size, currentMax);
+                    return false;
+                }
+
+                if (Interlocked.CompareExchange(ref _idleCount, idle + 1, idle) == idle)
+                {
+                    size = idle + 1;
+                    break;
+                }
+            }
+
+            var index = w.SlotIndex;
+            if (index < 0 || index >= slots.Length)
+            {
+                if (!TryPopSlot(out index))
+                {
+                    // Unreachable while every reserved slot belongs to a live wrapper — the reservation
+                    // above already proved there is room — but a lost index must never turn into a
+                    // silent capacity leak, so the reservation is rolled back and the object is refused.
+                    Interlocked.Decrement(ref _idleCount);
+                    _logger.LogWarning("[Shard {Index}] lock-free store has no free slot although capacity is not reached (shard size: {Size}, max: {Max}); object rejected and will be destroyed by caller",
+                        Index, size, currentMax);
+                    return false;
+                }
+
+                w.SlotIndex = index;
+            }
+
+            slots[index] = w;
+            w.Location = HayateObjectLocation.InPool;
+
+            // The object is no longer borrowed: unlink it from the borrowed list (K2). That list is
+            // lock-guarded on every backend, and the toggles that maintain it are off by default, so a
+            // pool that does not use abandoned recovery never takes the shard lock here.
+            if (_trackBorrowed) UnmarkBorrowed(w);
+
+            if (DebugTraceEnabled)
+            {
+                _logger.LogDebug("[Shard {Index}] Object added to shard (current size: {Size})", Index, size);
+            }
+
+            return true;
+        }
+
         public bool TryTake(out HayateObject<T> w)
         {
+            // G-9: the lock-free store serves a take by exchanging a wrapper out of a slot.
+            if (_useLockFreeStore) return TryTakeLockFree(out w);
+
             w = null!;
 
             var taken = false;
@@ -308,6 +567,67 @@ public partial class HayatePoolBasic<T>
                 return true;
             }
             finally { if (taken) _lock.Exit(); }
+        }
+
+        /// <summary>
+        /// The lock-free store's half of <see cref="TryTake"/>: scans the slots from a shared round-robin
+        /// start and exchanges the first idle wrapper it finds out of its slot. Pure <c>Interlocked</c> —
+        /// no lock, no allocation, no list walk.
+        /// </summary>
+        /// <remarks>
+        /// The claim is the same pattern the lean fast path uses: read the slot, then compare-exchange it
+        /// to <c>null</c>. The exchange returns the previous value, so a reference match proves this
+        /// thread was the one that won the object. Nothing is followed through a link — the slot names
+        /// the wrapper directly — so there is nothing that can have gone stale between the read and the
+        /// exchange, which is why this form needs no version on the slot itself.
+        /// </remarks>
+        private bool TryTakeLockFree(out HayateObject<T> w)
+        {
+            // The idle count is a cheap pre-filter, not a reservation: it can only be stale by the width
+            // of a concurrent take, and the exchange below is the real claim. Reading it first keeps a
+            // take on an empty store from scanning the slots at all.
+            if (Volatile.Read(ref _idleCount) <= 0)
+            {
+                w = null!;
+                return false;
+            }
+
+            var slots = _slots;
+            var limit = slots.Length;
+            var start = limit == 0 ? 0 : (int)((uint)Interlocked.Increment(ref _scanCursor) - 1) % limit;
+
+            for (var n = 0; n < limit; n++)
+            {
+                var i = start + n;
+                if (i >= limit) i -= limit;
+
+                var slot = slots[i];
+                if (slot is not null &&
+                    ReferenceEquals(slot, Interlocked.CompareExchange(ref slots[i], null, slot)))
+                {
+                    Interlocked.Decrement(ref _idleCount);
+                    Interlocked.Increment(ref _lockFreeTakes);
+
+                    w = slot;
+                    // The wrapper keeps its slot index on purpose: the return goes back to the same slot,
+                    // so no index has to be allocated on the way in.
+                    w.Location = HayateObjectLocation.Borrowed;
+
+                    // Appended at the tail, so the borrowed list stays FIFO: the head is always the
+                    // oldest borrow — the first candidate the abandoned scan (K2) examines.
+                    if (_trackBorrowed) MarkBorrowed(w);
+
+                    if (DebugTraceEnabled)
+                    {
+                        _logger.LogDebug("[Shard {Index}] Object taken from shard (current size: {Size})", Index, Volatile.Read(ref _idleCount));
+                    }
+
+                    return true;
+                }
+            }
+
+            w = null!;
+            return false;
         }
 
         /// <summary>
@@ -443,6 +763,9 @@ public partial class HayatePoolBasic<T>
         {
             if (w == null) return false;
 
+            // G-9: the same exchange a take performs, which is what keeps this method's meaning intact.
+            if (_useLockFreeStore) return RemoveLockFree(w);
+
             var claimed = false;
             var size = 0;
 
@@ -477,8 +800,68 @@ public partial class HayatePoolBasic<T>
             return claimed;
         }
 
+        /// <summary>
+        /// The lock-free store's half of <see cref="Remove"/>: claims an idle object for destruction by
+        /// exchanging it out of the slot its index names, and hands the slot index back to the shard.
+        /// </summary>
+        /// <returns>
+        /// The same single-winner contract: <c>true</c> only for the caller that won the exchange, which
+        /// then owns the destruction. <c>false</c> means the object is borrowed, has already been
+        /// claimed, or no longer sits in the slot its index names — and the caller MUST NOT destroy it.
+        /// </returns>
+        /// <remarks>
+        /// This is the reason the slot form was chosen over a linked one. A lock-free structure cannot
+        /// physically unlink an arbitrary interior node without a tombstone and a new identity model for
+        /// every cold path that walks the storage; exchanging the wrapper out of a slot it names itself
+        /// keeps "claim and unlink" exactly what it always was, so the three <c>Remove</c> call sites and
+        /// the six other cold paths that read the store need no changes at all.
+        /// </remarks>
+        private bool RemoveLockFree(HayateObject<T> w)
+        {
+            // Double-check, as the locked path does: the object is only in a "safe to destroy" position
+            // while it is InPool. A borrowed or already-claimed object fails here.
+            if (w.Location != HayateObjectLocation.InPool) return false;
+
+            var slots = _slots;
+            var index = w.SlotIndex;
+            if (index < 0 || index >= slots.Length) return false;
+
+            if (!ReferenceEquals(w, Interlocked.CompareExchange(ref slots[index], null, w))) return false;
+
+            Interlocked.Decrement(ref _idleCount);
+            w.Location = HayateObjectLocation.Removing;
+
+            // Unlike a take, this one does hand the index back: the wrapper is on its way out and would
+            // otherwise take the slot with it, shrinking the shard a little on every eviction.
+            ReleaseSlot(w);
+
+            if (DebugTraceEnabled)
+            {
+                _logger.LogDebug("[Shard {Index}] Object removed from shard (current size: {Size})", Index, Volatile.Read(ref _idleCount));
+            }
+
+            return true;
+        }
+
         public IEnumerable<HayateObject<T>> GetAll()
         {
+            // G-9: a sweep of the slots. The array is not a list, so this is a snapshot with exactly the
+            // guarantee its callers need rather than an atomic copy: every entry it reports is only a
+            // hint, and the caller's claim (Remove) exchanges the wrapper out of its slot, so a wrapper
+            // taken from under the sweep makes that claim fail instead of destroying a borrowed object.
+            if (_useLockFreeStore)
+            {
+                var slots = _slots;
+                var found = new List<HayateObject<T>>(slots.Length);
+                for (var i = 0; i < slots.Length; i++)
+                {
+                    var slot = Volatile.Read(ref slots[i]);
+                    if (slot is not null) found.Add(slot);
+                }
+
+                return found;
+            }
+
             var taken = false;
             try
             {
@@ -497,12 +880,31 @@ public partial class HayatePoolBasic<T>
         /// "Head" is the oldest-returned end of the list. That end does not follow
         /// <see cref="HayatePoolOptions.BorrowStrategy"/>: LIFO changes which object is served next,
         /// not the order the list is kept in, so a sampler that wants the coldest objects keeps
-        /// getting them under either strategy.
+        /// getting them under either strategy.<br />
+        /// On the lock-free store (G-9) there is no age order to name: a wrapper owns its slot, so the
+        /// run this copies is a contiguous run of slots rather than the coldest objects. The sample is
+        /// still a fair sample and the retirement criteria are unchanged — an object past its idle or
+        /// lifetime limit is reclaimed whenever it is sampled — but "the oldest are sampled first" is
+        /// gone, which is one of the two things that backend gives up.
         /// </remarks>
         public int SnapshotHead(HayateObject<T>[] buffer, int count)
         {
             if (buffer is null) throw new ArgumentNullException(nameof(buffer));
             if (count < 0) throw new ArgumentOutOfRangeException(nameof(count));
+
+            if (_useLockFreeStore)
+            {
+                var slots = _slots;
+                var slotLimit = Math.Min(count, buffer.Length);
+                var copiedFromSlots = 0;
+                for (var i = 0; i < slots.Length && copiedFromSlots < slotLimit; i++)
+                {
+                    var slot = Volatile.Read(ref slots[i]);
+                    if (slot is not null) buffer[copiedFromSlots++] = slot;
+                }
+
+                return copiedFromSlots;
+            }
 
             var taken = false;
             try
@@ -543,6 +945,9 @@ public partial class HayatePoolBasic<T>
         /// </summary>
         internal HayateObject<T>[] DrainForClear()
         {
+            // G-9: the lock-free store drains by exchanging each slot out one at a time.
+            if (_useLockFreeStore) return DrainForClearLockFree();
+
             HayateObject<T>[] drained;
 
             var taken = false;
@@ -577,6 +982,64 @@ public partial class HayatePoolBasic<T>
             finally { if (taken) _lock.Exit(); }
 
             return drained;
+        }
+
+        /// <summary>
+        /// The lock-free store's half of <see cref="DrainForClear"/>: exchanges every occupied slot out
+        /// and returns the wrappers it won, with each wrapper marked destroyed exactly as the locked
+        /// drain does.
+        /// </summary>
+        /// <remarks>
+        /// The per-slot exchange is what keeps this correct without a lock. A wrapper the drain wins
+        /// belongs to the drain and is destroyed; a wrapper a concurrent take wins is borrowed and
+        /// correctly left alone — and no wrapper can fall to both, because the exchange is the same
+        /// single-winner claim <see cref="RemoveLockFree"/> makes. A wrapper lost this way is not a leak:
+        /// it is out on loan, not idle, so the drain was never going to see it. The slot index goes back
+        /// to the shard with each wrapper it retires, so a cleared shard can fill its slots again.
+        /// </remarks>
+        private HayateObject<T>[] DrainForClearLockFree()
+        {
+            var slots = _slots;
+            var drained = new List<HayateObject<T>>(slots.Length);
+
+            for (var i = 0; i < slots.Length; i++)
+            {
+                var slot = slots[i];
+                if (slot is null) continue;
+                if (!ReferenceEquals(slot, Interlocked.CompareExchange(ref slots[i], null, slot))) continue;
+
+                Interlocked.Decrement(ref _idleCount);
+                slot.Node = null;
+                Interlocked.Exchange(ref slot.Destroyed, 1);
+                slot.Location = HayateObjectLocation.Destroyed;
+                ReleaseSlot(slot);
+                drained.Add(slot);
+            }
+
+            // Drain the borrowed list too (K2): the pool clears the registry right after this call, so a
+            // stale borrowed link would let a later abandoned scan claim a wrapper whose registry entry is
+            // already gone. Borrowed values are not disposed here — consistent with the registry-clear
+            // semantics documented at the Clear call site. That list is lock-guarded on every backend.
+            if (_trackBorrowed)
+            {
+                var taken = false;
+                try
+                {
+                    _lock.Enter(ref taken);
+                    var node = _borrowed.First;
+                    while (node != null)
+                    {
+                        var borrowed = node.Value;
+                        var next = node.Next;
+                        _borrowed.Remove(node);
+                        borrowed.BorrowedNode = null;
+                        node = next;
+                    }
+                }
+                finally { if (taken) _lock.Exit(); }
+            }
+
+            return drained.ToArray();
         }
 
         /// <summary>

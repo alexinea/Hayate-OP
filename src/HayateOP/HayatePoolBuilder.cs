@@ -110,6 +110,66 @@ public class HayatePoolBuilder<T> where T : class
     }
 
     /// <summary>
+    /// Switches the general-purpose engine's shard free list to the lock-free slot store (G-9): an
+    /// idle object is held in a slot the wrapper owns and is taken, or claimed for destruction, by a
+    /// single compare-exchange on that slot, so a hit never enters the shard's spin lock.
+    /// </summary>
+    /// <param name="enable">Whether to use the lock-free shard store; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <remarks>
+    /// Retrieval order stops being return order — a slot array keeps no order — and the eviction
+    /// sampler's "oldest idle first" preference goes with it. For that reason
+    /// <see cref="Build"/> refuses the combination with
+    /// <see cref="WithBorrowStrategy"/> = <c>Lifo</c> instead of silently downgrading it. The store
+    /// is sized when the shard is built, so a built pool also refuses a
+    /// <see cref="IHayateObjectPool.ReloadConfig"/> that would raise the ceiling past it. This is
+    /// a general-purpose backend and has no effect in lean mode, which forces it off during
+    /// normalization. See <see cref="HayatePoolOptions.EnableLockFreeStorage"/>.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithLockFreeStorage()
+    ///     .WithMaxSize(64)
+    ///     .Build();
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithLockFreeStorage(bool enable = true)
+    {
+        _options.EnableLockFreeStorage = enable;
+        return this;
+    }
+
+    /// <summary>
+    /// Keeps one idle object per thread in a front slot ahead of the shard scan (G-10), so the
+    /// steady-state "take the object I just returned" cycle costs one compare-exchange on a field
+    /// only this thread touches. A miss falls through to the unchanged shard path.
+    /// </summary>
+    /// <param name="enable">Whether to keep the per-thread front slot; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <remarks>
+    /// Only a thread that has borrowed may park a return in its own slot; a thread that never borrows
+    /// (an I/O completion callback, a hand-off worker) takes the ordinary shard path, so it cannot
+    /// strand objects in a slot nobody reads. The front tier is per pool instance, so named pools of
+    /// one element type do not share it, and <c>Clear</c> / <c>Dispose</c> reach it. This is a
+    /// general-purpose tier and has no effect in lean mode, which forces it off during normalization.
+    /// See <see cref="HayatePoolOptions.EnableThreadLocalFrontSlot"/>.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithThreadLocalFrontSlot()
+    ///     .WithMaxSize(64)
+    ///     .Build();
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithThreadLocalFrontSlot(bool enable = true)
+    {
+        _options.EnableThreadLocalFrontSlot = enable;
+        return this;
+    }
+
+    /// <summary>
     /// Applies the lean profile: the wrapper-free fast path with every bookkeeping feature switched off,
     /// so a pure pooling workload runs at the reference <c>DefaultObjectPool</c> cost.
     /// </summary>
@@ -1810,6 +1870,20 @@ public class HayatePoolBuilder<T> where T : class
             throw new InvalidOperationException(
                 "HayatePool: BorrowStrategy was set to Lifo via WithBorrowStrategy(), but the pool runs the lean fast path (UseLeanProfile/WithLean), which keeps no ordered idle list and cannot honour a borrow order. " +
                 "Remove the WithBorrowStrategy() call, or leave the lean fast path.");
+        }
+
+        // The same fail-fast rule for the lock-free shard store (G-9): a slot array keeps no order,
+        // because a wrapper owns its slot for as long as it is parked, so an explicit LIFO request
+        // cannot be honoured on that backend either. Fifo is the default a pool that never asked for
+        // anything holds, so simply turning the store on still builds — the guard fires only on a
+        // request the backend cannot satisfy, which is what keeps the switch from being accepted and
+        // then ignored. (Lean mode forces the store off during normalization, so the two guards can
+        // never both apply.)
+        if (_options.EnableLockFreeStorage && _options.BorrowStrategy != HayateBorrowStrategy.Fifo)
+        {
+            throw new InvalidOperationException(
+                "HayatePool: BorrowStrategy was set to Lifo via WithBorrowStrategy(), but the lock-free shard store (WithLockFreeStorage/EnableLockFreeStorage) keeps no ordered idle list and cannot honour a borrow order. " +
+                "Remove the WithBorrowStrategy() call, or leave the lock-free store.");
         }
 
         // Resolve the logger by pool name (explicit WithLogger takes precedence -> factory ->

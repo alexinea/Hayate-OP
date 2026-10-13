@@ -259,6 +259,88 @@ public class HayatePoolOptions
 
     #endregion
 
+    #region Storage backend (G-9 / G-10)
+
+    /// <summary>
+    /// Whether the general-purpose engine holds idle objects in a lock-free per-shard slot store
+    /// instead of the per-shard <c>SpinLock</c> + linked free list (G-9).<br />
+    /// Default value: <c>false</c> (the spin-lock free list, which is what every release before the
+    /// switch did).
+    /// </summary>
+    /// <remarks>
+    /// Purpose: the shard free list is the one lock the general-purpose borrow and return paths
+    /// take, and one <c>SpinLock</c> per shard is what a burst of borrowers landing on the same
+    /// shard contends on. With this switch on, an idle object sits in a slot the wrapper owns and is
+    /// taken, or claimed for destruction, by a single <c>Interlocked.CompareExchange</c> on that
+    /// slot — so a borrow or a return that finds the object never enters the shard lock, and neither
+    /// does the eviction / idle-validation claim.<br />
+    /// Special case: <b>retrieval order is no longer return order.</b> A slot array has no order to
+    /// keep — a wrapper owns its slot for as long as it is parked — so the sequence a borrow walks is
+    /// the slot layout, not the sequence the returns happened in. The eviction sampler's
+    /// "oldest idle first" preference goes the same way: an object past
+    /// <see cref="MaxIdleTime"/> or <see cref="MaxLifeTime"/> is still reclaimed when it is
+    /// sampled, but the sample is no longer age-ordered. Correctness of both limits is unchanged.<br />
+    /// For that reason the combination with <see cref="BorrowStrategy"/> = <c>Lifo</c> is
+    /// <i>refused</i> at build time rather than silently downgraded to <c>Fifo</c>: an explicit
+    /// request for an order the backend cannot honour fails the build, exactly as the lean fast path
+    /// refuses a borrow order it cannot honour. A pool that never asked for anything holds the
+    /// default <c>Fifo</c> and simply builds.<br />
+    /// Special case: the slot array is sized when the shard is built, so a pool with this backend on
+    /// refuses a <c>ReloadConfig</c> that would raise <see cref="MaxPoolSize"/> past that size —
+    /// lowering it stays allowed. The same rejection the lean fast path makes for its own
+    /// construction-sized retention buffer.<br />
+    /// This is a storage shape, not a bookkeeping switch, so the feature profiles leave it alone;
+    /// lean mode does force it off, because lean has its own storage and a switch that is on but
+    /// cannot apply is the failure mode this option set exists to avoid.<br />
+    /// Boundary: boolean switch. Off by default; with it off the borrow and return paths gain one
+    /// predicted branch and nothing else.<br />
+    /// Recommended range: enable for a pool whose borrow/return rate makes shard-lock contention
+    /// measurable and whose consumers do not depend on the idle set ageing in return order. Requires
+    /// the default <see cref="BorrowStrategy"/> (<c>Fifo</c>) and the general-purpose mode.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var options = new HayatePoolOptions { EnableLockFreeStorage = true, MaxPoolSize = 64 };
+    /// </code>
+    /// </example>
+    public bool EnableLockFreeStorage { get; set; } = false;
+
+    /// <summary>
+    /// Whether the general-purpose engine keeps a per-thread front slot that holds one idle object
+    /// ahead of the shard scan (G-10).<br />
+    /// Default value: <c>false</c> (every borrow starts at a shard).
+    /// </summary>
+    /// <remarks>
+    /// Purpose: the steady-state borrow/return cycle of a single thread is "take the object I
+    /// returned a moment ago". A per-thread slot turns that cycle into one compare-exchange on a
+    /// field only this thread touches, and skips the shard walk entirely; a miss falls through to
+    /// the unchanged shard path, which is the lock-free store when
+    /// <see cref="EnableLockFreeStorage"/> is on and the spin-lock free list when it is not.<br />
+    /// Special case (<i>the non-obvious part</i>): <b>only a thread that has borrowed may park a
+    /// return in its own slot.</b> Without that rule a thread that never borrows — an I/O completion
+    /// callback, a hand-off worker — parks objects in a slot nobody will ever read, and those objects
+    /// are unreachable to every other borrower while still counting as live. The shared layer then
+    /// starves with objects sitting in it. A slot therefore records whether its thread has borrowed,
+    /// and a return from a thread that has not takes the ordinary shard path.<br />
+    /// Special case: an object parked in a front slot is idle but lives in no shard, so
+    /// <c>Clear</c> and the eviction sweep reach it through the per-thread slots as well, and the
+    /// pool's idle and borrowed counts include it.<br />
+    /// This is a storage shape, not a bookkeeping switch, so the feature profiles leave it alone;
+    /// lean mode does force it off, for the same reason as <see cref="EnableLockFreeStorage"/>.<br />
+    /// Boundary: boolean switch. Off by default; each parked object costs one atomic on the return
+    /// path and one on the borrow that hits it, in exchange for skipping the shard path.<br />
+    /// Recommended range: enable together with <see cref="EnableLockFreeStorage"/> for a pool whose
+    /// borrowing threads also return, so the slot is read by the thread that filled it.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var options = new HayatePoolOptions { EnableThreadLocalFrontSlot = true, MaxPoolSize = 64 };
+    /// </code>
+    /// </example>
+    public bool EnableThreadLocalFrontSlot { get; set; } = false;
+
+    #endregion
+
     #region Sharding strategy
 
     /// <summary>
@@ -1258,6 +1340,12 @@ public class HayatePoolOptions
         options.EnableLean = this.EnableLean;
         options.EnableArrayPoolStorage = this.EnableArrayPoolStorage;
 
+        // Storage backend (G-9 / G-10). Both are storage shapes rather than bookkeeping switches, so
+        // they travel with the execution mode for the same reason the ArrayPool switch does: a copy
+        // that dropped one would silently rebuild the pool on the default backend.
+        options.EnableLockFreeStorage = this.EnableLockFreeStorage;
+        options.EnableThreadLocalFrontSlot = this.EnableThreadLocalFrontSlot;
+
         // Sharding
         options.EnableSharding = this.EnableSharding;
         options.ShardCount = this.ShardCount;
@@ -1414,6 +1502,13 @@ public class HayatePoolOptions
             WarnAtRatio = 0;
             CriticalAtRatio = 0;
             ShardAffinityMode = HayateShardAffinityMode.None;
+            // The general-purpose storage backends below are the shape of the *shard* free list and
+            // of the pre-shard front tier. Lean has neither — it stores the pooled value directly in
+            // a bounded array — so a switch left on here would be accepted and never applied, which
+            // is exactly the failure this normalization exists to prevent. Unlike the ArrayPool
+            // switch, these two do not change lean's own storage, so they are not preserved.
+            EnableLockFreeStorage = false;
+            EnableThreadLocalFrontSlot = false;
         }
 
         // Diagnostics master switch normalization. Closing it closes the whole bookkeeping surface, so
