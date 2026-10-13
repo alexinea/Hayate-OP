@@ -16,6 +16,11 @@ objects may be out on loan at once (G-5), a value-type lease so a scoped borrow 
 side of the cycle to the borrow side (G-7). All three are pure additions — every default is the
 behaviour of the release before them, so a pool that asks for none of them is unchanged.
 
+The line also closes the one gap the reset switches exposed (G-20). A pool built through the
+DependencyInjection or Configuration package ignored the two switches while `GetOptions()` reported
+them; the fix is in the two extension packages rather than in the switches, and is recorded under
+Fixed.
+
 ### Added
 
 - **A ceiling on concurrent borrows** (G-5): `MaxActiveObjects` caps how many objects may be lent out
@@ -59,6 +64,25 @@ behaviour of the release before them, so a pool that asks for none of them is un
   [`docs/hot-path-costs.md`](docs/hot-path-costs.md): the reset moves rather than multiplies — roughly
   3 ns of hook cost, with a 4 KB reset shifting a 3% round trip from the return path to the borrow
   path.
+
+### Fixed
+
+- **The DependencyInjection and Configuration paths now honour the reset-timing switches** (G-20): a
+  pool registered through `AddNamedPool<T>` / `RegisterHayatePool<T>` or through the configuration
+  bindings ignored `ResetOnReturn` and `ResetOnBorrow` — the container seeded the library's default
+  policy and the pool pinned it, so the policy kept the historical timing while `GetOptions()` reported
+  the configured values. That is the worst shape of a silent failure: a pool reporting a timing it does
+  not run, which is why it is fixed in the window that introduced the switches rather than left as a
+  documented limit. A pool whose resolved policy is the library's own default is now built without
+  pinning it, so the builder derives the policy from that pool's options — once per pool, so two names
+  of one element type can run different timings. A policy the caller registered, in either order
+  relative to the pool, and one a registered `IHayateObjectPolicyFactory<T>` returns, are pinned
+  exactly as before, and the switches still never move a caller's own reset. The element-type
+  registration and its resolution are unchanged, so
+  [`docs/named-pool-policies.md`](docs/named-pool-policies.md) §5 and its second acceptance anchor
+  still hold; §8 records what the pool now does differently with the policy that path resolves. The
+  fallback is recognised by instance identity rather than by a "did we seed it?" flag, so a policy
+  registered after the pool is honoured rather than replaced by the library's own.
 
 ## [3.0.0] - 2026-09-24
 
