@@ -16,6 +16,12 @@ objects may be out on loan at once (G-5), a value-type lease so a scoped borrow 
 side of the cycle to the borrow side (G-7). All three are pure additions — every default is the
 behaviour of the release before them, so a pool that asks for none of them is unchanged.
 
+The line also lands the two storage backends the plan evaluated as a pair (G-9, G-10) — a lock-free
+store for a shard's idle set, and a per-thread slot in front of it. Both default off, and both are pure
+additions for the same reason as the three above: a pool that turns neither on runs the statements it
+ran before. They are switched independently, so a measurement can attribute each gain on its own rather
+than forcing a pairwise configuration.
+
 The line also closes the one gap the reset switches exposed (G-20). A pool built through the
 DependencyInjection or Configuration package ignored the two switches while `GetOptions()` reported
 them; the fix is in the two extension packages rather than in the switches, and is recorded under
@@ -64,6 +70,47 @@ Fixed.
   [`docs/hot-path-costs.md`](docs/hot-path-costs.md): the reset moves rather than multiplies — roughly
   3 ns of hook cost, with a 4 KB reset shifting a 3% round trip from the return path to the borrow
   path.
+- **A lock-free store for a shard's idle set** (G-9): `EnableLockFreeStorage` /
+  `WithLockFreeStorage()` replace the per-shard spin lock and its linked idle list with a slot array
+  whose entries are claimed by compare-exchange, so a borrow no longer takes the shard lock to take an
+  object. A wrapper owns one slot for as long as it lives, and the claim is
+  `ReferenceEquals(slot, Interlocked.CompareExchange(ref slots[i], null, slot))` — the read *is* the
+  exchange, and a slot holds nothing but `null` or the one wrapper that owns it, so there is no link to
+  follow and therefore none to go stale. That is why the slot itself needs no version: the
+  version-packed head of the design's free-slot stack is the one place a version is needed, because slot
+  *indices* are recycled even though wrappers are not. Off by default — with the switch off every field
+  keeps its default value and the borrow path runs the statements it always ran. The form gives up two
+  things, and both are refused rather than silently dropped: a slot array keeps no order, so a
+  `BorrowStrategy` other than the default `Fifo` fails the build with the reason (a pool that never
+  asked for an order holds `Fifo` and simply builds), and the array is sized when the shard is built, so
+  `ReloadConfig` rejects a `MaxPoolSize` above it while still accepting one below. The eviction sampler
+  now walks a contiguous run of slots instead of the coldest end, so `MaxIdleTime` and `MaxLifeTime`
+  still reclaim every object past its limit, but the sample is no longer age-ordered. Nothing else moves:
+  claiming an idle object is the same exchange a borrow performs, so the three `Remove` call sites,
+  `Count` at its ten, `GetAll`, `SnapshotHead` and `DrainForClear` keep their meaning — which is exactly
+  why this slot form was chosen over the index-addressed linked store the blueprint uses. Lean forces
+  both this switch and the front slot off: lean has its own storage, and a switch that cannot take effect
+  must not be silently ignored.
+- **A per-thread slot in front of the shard path** (G-10): `EnableThreadLocalFrontSlot` /
+  `WithThreadLocalFrontSlot()` keep one idle object per borrowing thread on the pool instance and check
+  it before any shard, so a thread that has borrowed gets its own object back without touching a shard.
+  Depth is one slot — the shape the lean fast path already proves out — so a thread cycling through
+  several objects in sequence will not hit it every time. A return is parked only when the returning
+  thread has already borrowed from this pool, the blueprint's `Rents` rule ported as-is: without it a
+  thread that never borrows — an I/O completion callback, a hand-off worker — parks objects into a slot
+  nobody will ever read, and those objects are unreachable to every other borrower while still counting
+  as live. The count is taken where a borrow is *handed over* rather than where an object is taken, so a
+  take the active-object ceiling refuses and retries does not count as a borrow this thread made. A
+  parked object is still idle and still reachable: the pool's idle and borrowed counts carry the tier's
+  own count, the eviction sweep reads the tier's slots, and `Clear` / `Dispose` drain the tier back into
+  the shards before sweeping, so a cleared pool behaves the same whether an object was idle in a shard or
+  in a slot. A clear wins a race against a park in flight — the generation counter is read before the
+  park and checked after it, and an object that lost is destroyed rather than left parked. The park also
+  unlinks the wrapper from the borrowed list (it is idle, not in flight) and the slot hit links it back,
+  because answering only one half would let an object borrowed out of the slot and then abandoned fall
+  outside `K2` silently. Both the synchronous and the asynchronous borrow read the slot first, since the
+  release half is shared. The tier is per pool instance, so two named pools of one element type keep
+  separate front slots.
 
 ### Fixed
 
