@@ -244,6 +244,10 @@ public class HayatePreparationPoolTests
         // The timeout reaches the inner pool instead of being dropped, so the wait converges on the
         // supplied budget rather than running into the inner pool's 5 s default acquire timeout.
         Assert.Contains("timed out acquiring an object asynchronously", ex.Message);
+        // G-16: the suspected-leak hint is appended after the original sentence, so the substring
+        // above — the documented contract, pinned by four Assert.Contains across both trees — stays
+        // byte-identical.
+        Assert.Contains("check for a suspected leak", ex.Message);
         Assert.True(stopwatch.ElapsedMilliseconds < 3_000,
             $"The borrow must converge on the supplied timeout, but it took {stopwatch.ElapsedMilliseconds} ms.");
 
@@ -265,6 +269,61 @@ public class HayatePreparationPoolTests
             $"The borrow must converge on the supplied timeout, but it took {stopwatch.ElapsedMilliseconds} ms.");
 
         inner.Release(taken);
+    }
+
+    [Fact(Timeout = 30_000)]
+    public void SyncTimeoutMessage_ShouldCarryTheSuspectedLeakHint()
+    {
+        using var pool = TakeTheOnlyWaitingPool(out var taken, HayatePoolRejectPolicy.BlockTimeout);
+
+        var ex = Assert.Throws<TimeoutException>(() => pool.Acquire(TimeSpan.FromMilliseconds(200)));
+
+        // The original sentence is preserved; G-16 only appends the hint after it.
+        Assert.Contains("timed out acquiring an object after", ex.Message);
+        Assert.Contains("check for a suspected leak", ex.Message);
+
+        pool.Release(taken);
+    }
+
+    [Fact(Timeout = 30_000)]
+    public void LeanTimeoutMessage_ShouldCarryTheSuspectedLeakHint()
+    {
+        using var pool = TakeTheOnlyWaitingPool(out var taken, HayatePoolRejectPolicy.BlockTimeout, lean: true);
+
+        var ex = Assert.Throws<TimeoutException>(() => pool.Acquire(TimeSpan.FromMilliseconds(200)));
+
+        // Lean mode runs its own slow path and therefore its own message site; the hint is pinned here too.
+        Assert.Contains("timed out acquiring an object after", ex.Message);
+        Assert.Contains("check for a suspected leak", ex.Message);
+
+        pool.Release(taken);
+    }
+
+    /// <summary>
+    /// The same single-slot setup as <see cref="TakeTheOnlyObject"/>, but with the reject policy (and
+    /// optionally the lean storage mode) chosen by the caller: the second borrow waits the timeout out
+    /// and throws, which is the deterministic setup the timeout-message tests need.
+    /// </summary>
+    private static IHayateObjectPool<Connection> TakeTheOnlyWaitingPool(
+        out Connection taken, HayatePoolRejectPolicy policy, bool lean = false)
+    {
+        var builder = new HayatePoolBuilder<Connection>()
+            .WithMinSize(1)
+            .WithMaxSize(1)
+            .WithShardCount(1)
+            .WithRejectPolicy(policy)
+            .WithEnableAutoScaling(false)
+            .WithEnableEviction(false)
+            .WithEnableGenerationOptimization(false)
+            .WithEnableLeakDetection(false)
+            .WithValidateOnBorrow(false)
+            .WithValidateOnReturn(false);
+
+        if (lean) builder = builder.WithLean();
+
+        var pool = builder.Build();
+        taken = pool.Acquire();
+        return pool;
     }
 
     /// <summary>
