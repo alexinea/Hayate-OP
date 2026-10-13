@@ -34,6 +34,7 @@ under the `/samples/` solution folder.
 | [Validation](HayateOP.Samples.Validation) | Validate on borrow/return/idle; destroy unhealthy objects | Object Validation |
 | [Preparation](HayateOP.Samples.Preparation) | Repair/reconnect objects before delivery via `IHayatePreparationStrategy<T>` | — (preparation strategy) |
 | [ResetTiming](HayateOP.Samples.ResetTiming) | Choose which side of the cycle the automatic `IHayateResettable` reset runs on | — (reset timing) |
+| [CancellationTokenSourcePool](HayateOP.Samples.CancellationTokenSourcePool) | Reuse a `CancellationTokenSource` safely; reuse is runtime-dependent | Specialized pools |
 | [Resilience](HayateOP.Samples.Resilience) | Pool-level circuit breaker + reject-policy backpressure | Multiple Reject Policies |
 | [Lease](HayateOP.Samples.Lease) | Zero-allocation value-type `HayatePoolLease<T>` on the hot path | High Performance Core |
 | [Scoped](HayateOP.Samples.Scoped) | Class-based `HayatePoolScope<T>` crossing frames / fields / `await` | High Performance Core |
@@ -67,6 +68,14 @@ under the `/samples/` solution folder.
 - **[BucketedBuffer](HayateOP.Samples.BucketedBuffer)** — `HayateBufferPool<T>` is an optional fixed
   ladder of size buckets (256 / 1024 / 4096 …). `Rent(size)` rounds **up** to the smallest fitting
   bucket; a request above the largest bucket is rejected with `ArgumentException`.
+
+### Specialized pools
+- **[CancellationTokenSourcePool](HayateOP.Samples.CancellationTokenSourcePool)** — the
+  `DotNetCore.HayateOP.Extensions.Specialized` pool of `CancellationTokenSource` instances: `Rent()`
+  returns a source whose `Dispose` puts it back, `RentLinked(token)` makes a rental follow an upstream
+  token, and a canceled source is dropped rather than parked. Reuse depends on the runtime —
+  `IsReuseSupported` is `true` from .NET 6.0 (`CancellationTokenSource.TryReset()`), `false` on .NET
+  Framework 4.8, where a returned source is destroyed instead of reused.
 
 ### Health, validation & lifecycle
 - **[Validation](HayateOP.Samples.Validation)** — `IsValid()` gates reuse on borrow, return, and idle;

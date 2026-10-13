@@ -27,6 +27,7 @@
     <Project Path="samples/HayateOP.Samples.AbandonedRecovery/HayateOP.Samples.AbandonedRecovery.csproj" />
     <Project Path="samples/HayateOP.Samples.RejectPolicies/HayateOP.Samples.RejectPolicies.csproj" />
     <Project Path="samples/HayateOP.Samples.ResetTiming/HayateOP.Samples.ResetTiming.csproj" />
+    <Project Path="samples/HayateOP.Samples.CancellationTokenSourcePool/HayateOP.Samples.CancellationTokenSourcePool.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/HayateOP.Extensions.Configuration/HayateOP.Extensions.Configuration.csproj" Id="197d2007-2165-43c8-b7d5-eb26153b7185" />
