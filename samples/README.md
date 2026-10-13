@@ -33,6 +33,7 @@ under the `/samples/` solution folder.
 | [Presets](HayateOP.Samples.Presets) | Start from a tuned `HayatePoolPreset`, override individual knobs | Configuration Presets |
 | [Validation](HayateOP.Samples.Validation) | Validate on borrow/return/idle; destroy unhealthy objects | Object Validation |
 | [Preparation](HayateOP.Samples.Preparation) | Repair/reconnect objects before delivery via `IHayatePreparationStrategy<T>` | — (preparation strategy) |
+| [ResetTiming](HayateOP.Samples.ResetTiming) | Choose which side of the cycle the automatic `IHayateResettable` reset runs on | — (reset timing) |
 | [Resilience](HayateOP.Samples.Resilience) | Pool-level circuit breaker + reject-policy backpressure | Multiple Reject Policies |
 | [Lease](HayateOP.Samples.Lease) | Zero-allocation value-type `HayatePoolLease<T>` on the hot path | High Performance Core |
 | [Scoped](HayateOP.Samples.Scoped) | Class-based `HayatePoolScope<T>` crossing frames / fields / `await` | High Performance Core |
@@ -80,6 +81,9 @@ under the `/samples/` solution folder.
   returned objects past `RemoveAbandonedTimeout`; **off by default**, opt in deliberately.
 - **[Preparation](HayateOP.Samples.Preparation)** — `WithPreparation` runs a reconnect/repair strategy before
   delivery so callers never receive a broken object.
+- **[ResetTiming](HayateOP.Samples.ResetTiming)** — `WithResetOnReturn` / `WithResetOnBorrow` move the
+  `IHayateResettable` reset between the return side (the default) and the borrow side; lean pins it back to
+  the return side, and a custom policy keeps its own hooks.
 
 ### Capacity, scaling & backpressure
 - **[Sharding](HayateOP.Samples.Sharding)** — `WithShardCount` splits capacity into independent free-list
