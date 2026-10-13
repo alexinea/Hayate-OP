@@ -27,6 +27,10 @@ DependencyInjection or Configuration package ignored the two switches while `Get
 them; the fix is in the two extension packages rather than in the switches, and is recorded under
 Fixed.
 
+The line also adds a ready-to-use pool for one of the objects asynchronous code pools most often (G-8):
+a `CancellationTokenSource` pool in the `Specialized` extension package, whose reuse depends on the
+runtime the process is on and which reports that rather than hiding it.
+
 ### Added
 
 - **A ceiling on concurrent borrows** (G-5): `MaxActiveObjects` caps how many objects may be lent out
@@ -111,6 +115,37 @@ Fixed.
   outside `K2` silently. Both the synchronous and the asynchronous borrow read the slot first, since the
   release half is shared. The tier is per pool instance, so two named pools of one element type keep
   separate front slots.
+- **A pool of `CancellationTokenSource` instances** (G-8): `CancellationTokenSourcePool` in the
+  `Specialized` extension package, aligned with Reservoir's pool of the same name — `Rent()` costs one
+  line, `using` on the rented source returns it, and `RentLinked(CancellationToken)` makes the rental
+  follow an upstream token. A `CancellationTokenSource` is one of the most frequently pooled objects in
+  asynchronous code — the per-operation timeout or cancellation scope that would otherwise be allocated
+  and collected on every request — and it is also one of the few that cannot be reused naively: a used
+  source carries the timer and the callbacks its renter left behind, and the one call that clears them,
+  `CancellationTokenSource.TryReset()`, is documented as unsafe while the source is still in use. The
+  pool therefore owns the whole lifetime: a source is handed out exclusively, and its reset runs on the
+  return path, after the rental has ended, so a reset can never race a renter still using the source.
+  The rented instance is a `PooledCancellationTokenSource` — a `CancellationTokenSource` that knows its
+  pool, so disposing it returns it through the pool's ordinary return path and a second dispose of the
+  same rental is a no-op rather than a duplicate return. Reuse is runtime-dependent, and the pool says
+  so rather than hiding it: `TryReset()` does not exist on .NET Framework 4.8, and without it a returned
+  source cannot be cleaned — its stale callbacks and timer would fire during the next rental — so rather
+  than fork its source per target framework the pool locates the method at run time and exposes the
+  answer as `IsReuseSupported` (`false` on .NET Framework 4.8, `true` on .NET 6.0 and later). Where reuse
+  is unsupported the pool still hands out a correct source every time — it destroys a returned source
+  instead of parking it and creates a fresh one for the next rental — so the same call site runs on
+  every target framework, with only the allocation profile differing. Validation is what keeps a
+  canceled source out of the pool: a source whose cancellation has been requested, or whose timer has
+  already fired, is destroyed on return and caught on borrow, because no reset can make it usable again.
+  `RentLinked` registers the link on the pooled source — with `useSynchronizationContext: false`, so the
+  callback cannot be posted back to a UI context the renter happened to be on — rather than creating a
+  linked source through `CancellationTokenSource.CreateLinkedTokenSource`, so the rental is still a
+  pooled instance that returns on disposal; disposal drops the link and waits for an upstream callback
+  that is already running before the source can be handed out again, so an upstream token canceled after
+  the return can no longer reach the reused source, and a token that cannot be canceled produces an
+  ordinary rental. Clearing or disposing the pool drops the sources it holds rather than releasing them,
+  and costs nothing: a parked source has already been reset — its timer disarmed and its callbacks
+  dropped — so it holds nothing that needs releasing.
 
 ### Fixed
 
