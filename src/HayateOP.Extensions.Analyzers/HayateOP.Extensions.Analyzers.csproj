@@ -1,0 +1,76 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <Configurations>Debug;Release</Configurations>
+        <Platforms>AnyCPU</Platforms>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <AssemblyName>DotNetCore.HayateOP.Extensions.Analyzers</AssemblyName>
+        <PackageId>DotNetCore.HayateOP.Extensions.Analyzers</PackageId>
+        <Description>DotNetCore Hayate Object Pool Roslyn analyzers and code fixes</Description>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <RootNamespace />
+    </PropertyGroup>
+
+    <Import Project="..\..\common.props" />
+
+    <!-- Roslyn host constraint: an analyzer must be a netstandard2.0 assembly, because that is the
+         reference the compiler host loads it as. This is the one src project whose TFM is not the
+         family list, so it overrides what common.props set — everything else (the zero-warning gate,
+         the package metadata, the version, LICENSE/icon packing) is inherited unchanged.
+
+         The Roslyn floor is 3.8.0 on purpose: it is the oldest reference the current host line-up
+         shares (VS2019 16.8+, .NET SDK 5.0.100+, Unity 2021.3+), which is the same "oldest workable"
+         rule the library's own TFM list follows. See docs/analyzers.md section 4. -->
+    <PropertyGroup>
+        <TargetFrameworks>netstandard2.0</TargetFrameworks>
+        <IsRoslynComponent>true</IsRoslynComponent>
+        <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+        <!-- Nothing runs in the consumer's output: the assembly ships only under analyzers/dotnet/cs. -->
+        <IncludeBuildOutput>false</IncludeBuildOutput>
+        <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+        <!-- No symbol package here, unlike every other src project. A .snupkg holds only pdbs, and with
+             no lib/ output in this package there is nothing for one to hold: it would be empty, and
+             NuGet rejects an empty symbol package with NU5017 — verified against this SDK (10.0.400)
+             with a scratch project, which packs cleanly without IncludeSymbols and fails with it. The
+             pdb ships inside the main package instead, next to the analyzer it belongs to, which is
+             where the compiler host looks for it when it reports an analyzer failure. -->
+        <IncludeSymbols>false</IncludeSymbols>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="3.8.0" PrivateAssets="all" />
+        <!-- CodeFixProvider lives in Workspaces. The IDE already has these assemblies loaded; they must
+             not become a package dependency, hence PrivateAssets="all". -->
+        <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="3.8.0" PrivateAssets="all" />
+    </ItemGroup>
+
+    <!-- Rule release tracking. Without these the compiler reports RS2008 for every descriptor, and this
+         repository's gate is zero warnings: registering the rules is the fix, NoWarn would hide the next
+         ID collision instead of preventing it (there is an O8 collision in this repository's history). -->
+    <ItemGroup>
+        <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+        <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
+    </ItemGroup>
+
+    <!-- The rules are exercised by a dedicated test project that compiles code in memory. It drives the
+         analyzers and the CodeFix rewrites directly, so it needs the internal facts and the rewrite
+         entry points. Nothing else is granted visibility. -->
+    <ItemGroup>
+        <InternalsVisibleTo Include="HayateOP.Tests.Analyzers" />
+    </ItemGroup>
+
+    <!-- Single TFM, so the output path is deterministic and can be written at evaluation time. The pdb
+         is listed next to the dll for the reason given above: this project's symbols ship where the
+         assembly does, and the IDE resolves them from there. -->
+    <ItemGroup>
+        <None Include="bin\$(Configuration)\netstandard2.0\$(AssemblyName).dll"
+              Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+        <None Include="bin\$(Configuration)\netstandard2.0\$(AssemblyName).pdb"
+              Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    </ItemGroup>
+
+</Project>

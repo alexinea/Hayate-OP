@@ -39,6 +39,7 @@
     <Project Path="src/HayateOP.Extensions.ObjectPoolCompat/HayateOP.Extensions.ObjectPoolCompat.csproj" />
     <Project Path="src/HayateOP.Extensions.Specialized/HayateOP.Extensions.Specialized.csproj" />
     <Project Path="src/HayateOP.Extensions.Buffers/HayateOP.Extensions.Buffers.csproj" />
+    <Project Path="src/HayateOP.Extensions.Analyzers/HayateOP.Extensions.Analyzers.csproj" />
     <Project Path="src/HayateOP/HayateOP.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -52,6 +53,7 @@
     <Project Path="tests/HayateOP.Tests.OpenTelemetry/HayateOP.Tests.OpenTelemetry.csproj" />
     <Project Path="tests/HayateOP.Tests.Compat/HayateOP.Tests.Compat.csproj" />
     <Project Path="tests/HayateOP.Tests/HayateOP.Tests.csproj" />
+    <Project Path="tests/HayateOP.Tests.Analyzers/HayateOP.Tests.Analyzers.csproj" />
     <!-- legacy 世代 (net6/net7, xunit v2 + VSTest)：与上方 future 项目用例同步维护 -->
     <Project Path="tests/legacy/HayateOP.Tests.Legacy/HayateOP.Tests.Legacy.csproj" />
     <Project Path="tests/legacy/HayateOP.Tests.Configuration.Legacy/HayateOP.Tests.Configuration.Legacy.csproj" />
