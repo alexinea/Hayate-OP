@@ -31,6 +31,10 @@ The line also adds a ready-to-use pool for one of the objects asynchronous code 
 a `CancellationTokenSource` pool in the `Specialized` extension package, whose reuse depends on the
 runtime the process is on and which reports that rather than hiding it.
 
+The line also lands a compiler-side surface (G-12), in a separate optional package so the core stays
+free of a Roslyn dependency: six analyzers that report pool misuse where it is written, and three code
+fixes. The one Error among them is a deliberate decision, explained in its entry below.
+
 ### Added
 
 - **A ceiling on concurrent borrows** (G-5): `MaxActiveObjects` caps how many objects may be lent out
@@ -146,6 +150,20 @@ runtime the process is on and which reports that rather than hiding it.
   ordinary rental. Clearing or disposing the pool drops the sources it holds rather than releasing them,
   and costs nothing: a parked source has already been reset — its timer disarmed and its callbacks
   dropped — so it holds nothing that needs releasing.
+- **Six Roslyn analyzers and three code fixes** (G-12): a new optional package,
+  `DotNetCore.HayateOP.Extensions.Analyzers`, that reports pool misuse at build time. `HYO009` reports a
+  discarded lease or scope as an **Error** — `HayatePoolScope<T>` has no finalizer and
+  `HayatePoolLease<T>` is a `struct`, so a dropped lease is a permanent leak that nothing will ever
+  notice, and the compiler refusing the build is the honest signal; `HYO001` (a pooled object dropped
+  without release), `HYO003` (an acquire on a pool disposed earlier in the same method) and `HYO006`
+  (`OnRelease` disposing the item the pool still owns) are Warnings, while `HYO004` (a blocking acquire
+  in an `async` method) and `HYO005` (an async acquire ignoring a `CancellationToken` in scope) are
+  Info, so nothing else blocks a build. Three code fixes ship with it — wrap an acquire in a `using`,
+  switch a blocking acquire to `AcquireAsync`, forward the surrounding token — each offered only for the
+  rule it belongs to. The rules key on the containing namespace rather than on the method name, so a
+  project that does not use the library gets no diagnostic at all. Targets `netstandard2.0` against
+  Roslyn 3.8, the oldest host the current line-up shares, and is a pure addition: nothing in the core,
+  the extensions or the samples references it.
 
 ### Fixed
 
