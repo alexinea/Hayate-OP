@@ -46,7 +46,7 @@ wrong.
 | `DotNetCore.HayateOP.Extensions.HealthCheck`         | Health Checks integration (`Microsoft.Extensions.Diagnostics.HealthChecks`) to monitor pool status.  |
 | `DotNetCore.HayateOP.Extensions.Endpoints`           | Built-in management endpoints for monitoring and configuration.                                      |
 | `DotNetCore.HayateOP.Extensions.Diagnostics`         | Integration with System.Diagnostics for advanced performance monitoring and telemetry.               |
-| `DotNetCore.HayateOP.Extensions.Specialized`         | Ready-to-use specialized pools for `MemoryStream` and `StringBuilder`, with `using`-based returns.    |
+| `DotNetCore.HayateOP.Extensions.Specialized`         | Ready-to-use specialized pools for `MemoryStream`, `StringBuilder` and `CancellationTokenSource`.    |
 | `DotNetCore.HayateOP.Extensions.Buffers`             | Bucketed array pool (`HayateBufferPool<T>`) with round-up-to-nearest-size routing over declared buckets. |
 
 #### Supported Target Frameworks
@@ -506,8 +506,9 @@ overload forwards the timeout as well); the six policy hooks are unchanged.
 ### Specialized pools
 
 The optional [`DotNetCore.HayateOP.Extensions.Specialized`](https://www.nuget.org/packages/DotNetCore.HayateOP.Extensions.Specialized)
-package ships the ready-to-use `MemoryStream` / `StringBuilder` pools that generic engines leave to you
-(aligned with P89OP's `CodeProject.ObjectPool.Specialized`):
+package ships the ready-to-use `MemoryStream` / `StringBuilder` / `CancellationTokenSource` pools that
+generic engines leave to you (the first two aligned with P89OP's `CodeProject.ObjectPool.Specialized`,
+the third with Reservoir's `CancellationTokenSourcePool`):
 
 ```csharp
 using DotNetCore.HayateOP.Specialized;
@@ -576,6 +577,31 @@ allocations, at the price of serialising all users, so hold it briefly:
 ```csharp
 var message = SharedStringBuilder.Build(b => b.Append("hello, ").Append(name));
 ```
+
+**Cancellation-source pool.** `CancellationTokenSourcePool` covers the object asynchronous code pools
+most often — the per-operation timeout or cancellation scope that would otherwise be allocated and
+collected on every request — and it is the one specialized pool whose reuse depends on the runtime it
+runs on. `CancellationTokenSource.TryReset()`, the only call that clears a used source's timer and
+callbacks, does not exist on .NET Framework 4.8, so rather than fork its source per target framework
+the pool locates the method at run time and reports the answer as `IsReuseSupported` (`true` on .NET 6.0
+and later, `false` on .NET Framework 4.8). Where it is missing, every returned source is destroyed
+instead of parked — the pool still hands out a correct source every time, it just creates a new one
+rather than reusing:
+
+```csharp
+using var cts = CancellationTokenSourcePool.Instance.Rent();
+cts.CancelAfter(TimeSpan.FromSeconds(5));
+await httpClient.GetAsync(url, cts.Token);   // the source is back in the pool after the block
+
+// A rental that follows the caller's token, for as long as the rental lives.
+using var linked = CancellationTokenSourcePool.Instance.RentLinked(requestAborted);
+await Task.Delay(TimeSpan.FromSeconds(30), linked.Token);
+```
+
+The rented instance is a `PooledCancellationTokenSource` — a `CancellationTokenSource` that knows its
+pool, so `using` returns it instead of ending its life and a second dispose of the same rental is a
+no-op. A canceled source, or one whose timer has already fired, is destroyed on return rather than
+parked, because no reset can make it usable again.
 
 ### Bucketed buffer pool (declared size buckets)
 

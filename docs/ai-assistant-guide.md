@@ -16,7 +16,7 @@ Almost every mistake starts with the wrong pool shape. Ask these in order:
 | Does the resource handle concurrency itself (a lock, a `SemaphoreSlim`)? | yes | **Not a pool** — use striped lookup. See [`docs/hot-path-costs.md`](hot-path-costs.md#the-third-option-striped-lookup) |
 | Is creation more expensive than a round trip? | no | **Not a pool** — plain `new` is faster. See [`docs/hot-path-costs.md`](hot-path-costs.md#5-when-pooling-is-the-wrong-tool) |
 | Must the resource be **exclusive** for the lease? | yes | A borrow/return pool — keep reading |
-| Is the element a `StringBuilder` / `MemoryStream`? | yes | The specialized package's pools (`StringBuilderPool`, `MemoryStreamPool`) |
+| Is the element a `StringBuilder` / `MemoryStream` / `CancellationTokenSource`? | yes | The specialized package's pools (`StringBuilderPool`, `MemoryStreamPool`, `CancellationTokenSourcePool`) |
 | Is it a `T[]` of a few known sizes? | yes | `HayateBufferPool<T>` (rounds up to the nearest bucket) |
 | Does a borrow ever need an async connect / handshake? | yes | `HayatePreparationPool<T>` |
 | Do you need a ceiling on concurrent leases? | yes | The bounded general pool |
