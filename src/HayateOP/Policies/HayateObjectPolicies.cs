@@ -31,7 +31,10 @@ public static class HayateObjectPolicies
     /// <see cref="IHayateResettable"/>, and its validity follows <see cref="IHayateValidatable"/>.
     /// </summary>
     /// <typeparam name="T">The pooled object type.</typeparam>
-    /// <returns>A new default policy. It holds no state, so the caller owns it and may share it.</returns>
+    /// <returns>A new default policy carrying the historical reset timing — reset on release, nothing on
+    /// borrow. It is immutable after construction, so the caller owns it and may share it; note that a
+    /// pool built this way keeps that timing whatever its <c>ResetOnReturn</c> / <c>ResetOnBorrow</c>
+    /// options say, because the switches reach only the policy the pool resolves for itself.</returns>
     /// <exception cref="InvalidOperationException"><typeparamref name="T"/> has no public parameterless
     /// constructor, so the default policy cannot create objects of it; supply a policy that can.</exception>
     /// <example>

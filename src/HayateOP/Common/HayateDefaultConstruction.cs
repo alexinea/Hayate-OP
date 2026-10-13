@@ -29,18 +29,38 @@ internal static class HayateDefaultConstruction
 
     /// <summary>
     /// Creates the default policy for <typeparamref name="T"/>, so a builder or container that no longer
-    /// requires a parameterless constructor can still fall back to it.
+    /// requires a parameterless constructor can still fall back to it. The policy keeps its historical
+    /// reset timing: an <see cref="IHayateResettable"/> object is reset on release.
     /// </summary>
     /// <typeparam name="T">The pooled object type.</typeparam>
     /// <returns>A new default policy.</returns>
     /// <exception cref="InvalidOperationException"><typeparamref name="T"/> has no public parameterless
     /// constructor, so the default policy cannot create objects of it.</exception>
     internal static IHayateObjectPolicy<T> Policy<T>() where T : class
+        => Policy<T>(true, false);
+
+    /// <summary>
+    /// Creates the default policy for <typeparamref name="T"/> with an explicit reset timing, for the
+    /// builder that resolves a pool's policy after its options have been normalized.
+    /// </summary>
+    /// <remarks>
+    /// This is the only route by which the pool-level reset switches reach a policy. A custom
+    /// <see cref="IHayateObjectPolicy{T}"/> supplied through <c>WithPolicy</c> never comes through here and
+    /// therefore keeps whatever timing its own <c>OnRelease</c> / <c>OnAcquire</c> implement — the switches
+    /// govern the library default, not a caller's policy.
+    /// </remarks>
+    /// <typeparam name="T">The pooled object type.</typeparam>
+    /// <param name="resetOnReturn">Whether the policy resets on release.</param>
+    /// <param name="resetOnBorrow">Whether the policy resets on acquire.</param>
+    /// <returns>A new default policy.</returns>
+    /// <exception cref="InvalidOperationException"><typeparamref name="T"/> has no public parameterless
+    /// constructor, so the default policy cannot create objects of it.</exception>
+    internal static IHayateObjectPolicy<T> Policy<T>(bool resetOnReturn, bool resetOnBorrow) where T : class
     {
         RequireParameterlessConstructor<T>();
 
         var closed = typeof(DefaultHayateObjectPolicy<>).MakeGenericType(typeof(T));
-        return (IHayateObjectPolicy<T>)Activator.CreateInstance(closed)!;
+        return (IHayateObjectPolicy<T>)Activator.CreateInstance(closed, resetOnReturn, resetOnBorrow)!;
     }
 
     /// <summary>

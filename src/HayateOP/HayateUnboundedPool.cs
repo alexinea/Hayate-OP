@@ -31,7 +31,11 @@ namespace DotNetCore.HayateOP;
 /// (<c>AcquireScoped()</c>), statistics and the DI surface work unchanged. Objects implementing
 /// <see cref="IHayateResettable"/> are reset on return; objects implementing
 /// <see cref="IHayateValidatable"/> are validated on return, and a failed validation destroys the
-/// object instead of parking it. <see cref="AcquireAsync(System.Threading.CancellationToken)"/> completes synchronously (there is
+/// object instead of parking it. That reset timing is fixed rather than configurable: the 3.1
+/// <see cref="HayatePoolOptions.ResetOnReturn"/> / <see cref="HayatePoolOptions.ResetOnBorrow"/> pair
+/// belongs to the options-driven pool, and this model takes no options object for them to travel in —
+/// the defaults <see cref="GetOptions"/> reports are therefore a true statement about the behavior, not
+/// a placeholder. <see cref="AcquireAsync(System.Threading.CancellationToken)"/> completes synchronously (there is
 /// nothing to wait for), and <see cref="Acquire(TimeSpan)"/> ignores the timeout for the same
 /// reason. There is no circuit breaker: <see cref="CheckAvailable"/> reflects the manual
 /// availability flag only.
@@ -61,6 +65,11 @@ public class HayateUnboundedPool<T> : IHayateObjectPool<T>
     private readonly ConcurrentQueue<T> _idle = new();
     private readonly Func<T> _factory;
     private readonly string _name;
+
+    // Type-capability caches, not HayatePoolOptions switches: each records that T actually implements the
+    // marker interface, so the hot paths skip the type test for a T that could never satisfy it. The names
+    // read like the reset/validate timing options of 3.1 (G-7) but are unrelated — this model has no
+    // options, and its reset timing is fixed to the return side (see the class remarks).
     private readonly bool _resetOnReturn;
     private readonly bool _validateOnReturn;
 

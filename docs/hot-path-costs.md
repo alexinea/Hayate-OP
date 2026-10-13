@@ -63,6 +63,7 @@ Two caveats that matter when reading any absolute number here:
 | `BorrowStrategy` | `Fifo` (the default) reads the end the borrow path has always read — no added cost; `Lifo` reads the tail of the idle list instead | One predicted branch on a constructor-time flag inside the shard lock. The list is not reordered, so the strategy changes the order of borrows only |
 | `EnableGenerationOptimization` | One extra `Stopwatch.GetTimestamp()`, a ticks-to-milliseconds division and a compare, plus a `ValidationSkipCount` write for old-generation objects | This is the only switch that adds a QPC read to the borrow path |
 | `ValidateOnBorrow` | One `IHayateObjectPolicy.Validate` call per borrow, plus `Destroy` on a failed verdict | Only consulted when `EnableValidation` is also on. The cost is the policy's own work — often a connection-health probe |
+| `ResetOnBorrow` | One `IHayateResettable.Reset` call per borrow, for a pooled type that implements the marker | Off by default, so the historical configuration pays one predicted-false branch. `EnableLean` forces it off, so the lean path never pays it at all. Governs the reset the *default* policy drives only — a custom `IHayateObjectPolicy<T>` owns its `OnAcquire` and is untouched. This is where the cost of `ResetOnReturn = false` lands — see the relocation measurement below the two tables |
 | `EnableLeakDetection` | Two predicted branches when `LeakTraceCaptureMode.Off` | The scan itself runs in `TakeSnapshot()`, not here (§ diagnostic paths) |
 | `LeakTraceCaptureMode` | `Off` nothing; `Sampled` one `Interlocked.Increment` plus a modulo every N borrows; `EveryAcquire` **one call-stack capture per borrow** | The dominant cost of the whole leak-detection surface: tens of microseconds and 10-40 KB per borrow for `EveryAcquire` |
 | `EnableDiagnostics` (**master**) | When off, removes the `TotalAcquired` atomic add, the whole `EnableMetrics` block and the per-borrow debug trace — one branch otherwise | The only switch that stops `TotalAcquired`, which `EnableMetrics` deliberately leaves running. Implied by `EnableLean` |
@@ -88,12 +89,38 @@ it stores the pooled value directly instead of a wrapper.
 | :--- | :--- | :--- |
 | `EnableLean` | Replaces the general engine entirely | No registry probe, no free-list lock |
 | `ValidateOnReturn` | One `Validate` call per return, plus `Destroy` on a failed verdict | Also requires `EnableValidation` |
+| `ResetOnReturn` | One `IHayateResettable.Reset` call per return, for a pooled type that implements the marker | On by default — this row was an unconditional cost of the default policy's `OnRelease` before 3.1 made it a switch. Turning it off moves the cost to the borrow path (`ResetOnBorrow`) or removes it entirely, which is only safe for a stateless payload. `EnableLean` forces it back on. Same jurisdiction limit as `ResetOnBorrow`: the default policy only |
 | `EnableDiagnostics` (**master**) | When off, removes the whole `EnableMetrics` block and the per-return debug trace — one branch otherwise | Implied by `EnableLean` |
 | `EnableMetrics` | A min/max CAS-loop update for the lease time, the `TotalReleased` counter, an `Interlocked.Exchange` stamping `LastActivityTime` and an `IHayateMetrics.RecordObjectReleased` call | Requires `EnableDiagnostics`. The stamp sits at the top of `CompleteReturn`, so it is written on every return branch — parked, dropped by the soft ceiling, rejected by the policy — and on the failure path, because a return that was attempted is still activity |
 | `EnableAllocationTracking` | Two allocation queries plus a counter pair | Requires `EnableDiagnostics` |
 | `WarnAtRatio` / `CriticalAtRatio` | Same shard-walking utilisation probe as on the borrow path | — |
 | `EnableAutoScaling` | A watermark check after a rejected return | Only when `MinPoolSize > 0` and the pool fell below it |
 | `SoftCapacity` | One idle-count read plus one compare per return, then `Destroy` instead of the store when the ceiling is reached | `0` (default) folds the branch away; the unbounded model does not read it (its `MaxIdle` already bounds the queue) |
+
+#### What moving the reset actually costs
+
+`ResetOnReturn` / `ResetOnBorrow` do not add a reset — they move the one the default policy already
+performed. Measured on .NET 10.0, single-threaded, 250 pre-warmed objects, 250 borrows then 250 returns
+per round, 200 warm-up rounds and 200 measured rounds per replicate, median of 9 independent pools:
+
+| Pooled type's `Reset()` | Path | `ResetOnReturn` (default) | `ResetOnBorrow` | Delta |
+| :--- | :--- | ---: | ---: | ---: |
+| `Array.Clear` over 4 KB | borrow | 174.4 ns/op | 293.2 ns/op | **+118.8 ns/op (1.68x)** |
+| | return | 235.6 ns/op | 130.4 ns/op | −105.2 ns/op |
+| | round trip | 410.0 ns/op | 423.6 ns/op | +13.6 ns/op (+3%) |
+| one `int` write | borrow | 168.4 ns/op | 171.2 ns/op | +2.8 ns/op (1.02x) |
+| | return | 138.8 ns/op | 133.6 ns/op | −5.2 ns/op |
+| | round trip | 307.2 ns/op | 304.8 ns/op | −2.4 ns/op |
+
+Two things to read off that. The hook itself is worth about **3 ns/op** — the trivial-reset rows differ by
+less than the replicate spread — so a configuration that leaves the switch off pays essentially nothing for
+the switch existing. And the borrow-side delta (+118.8 ns) is the cost of the `Reset` body, arriving almost
+exactly as the return side gives it up (−105.2 ns): the round trip moves by 3%, inside the noise of the
+harness. The choice is therefore about **which side of the cycle is latency-sensitive**, not about total
+cost — with one exception that is the real argument for the borrow side: an object that is created and
+never borrowed again is never reset at all, so a pool that over-creates pays for reset only on the objects
+it actually hands out. That saving does not show up in a steady-state round trip, which is why the table
+above shows no win.
 
 ### Background workers
 

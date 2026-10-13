@@ -38,6 +38,8 @@ public class LeanFastPathTests
             ValidateOnBorrow = true,
             ValidateOnReturn = true,
             ValidateWhileIdle = true,
+            ResetOnReturn = false,
+            ResetOnBorrow = true,
             EnableEviction = true,
             EnableGenerationOptimization = true,
             EnableLeakDetection = true,
@@ -59,6 +61,10 @@ public class LeanFastPathTests
         Assert.False(options.ValidateOnBorrow);
         Assert.False(options.ValidateOnReturn);
         Assert.False(options.ValidateWhileIdle);
+        // The reset is pinned back to the return side rather than merely having its borrow side cleared: a
+        // caller who had moved it to the borrow side must not be left with no reset at all.
+        Assert.True(options.ResetOnReturn);
+        Assert.False(options.ResetOnBorrow);
         Assert.False(options.EnableEviction);
         Assert.False(options.EnableGenerationOptimization);
         Assert.False(options.EnableLeakDetection);

@@ -49,8 +49,15 @@ public class HayatePoolBuilder<T> where T : class
     /// moved from the generic constraint — which blocked the builder at compile time — to this point, where
     /// it is reported with an actionable message. Nothing is resolved for a builder whose policy was set
     /// explicitly, which is the whole point of the relaxation.
+    /// The lazy form is also what carries the reset-timing switches (3.1, G-7) into the default policy:
+    /// they are read from <c>_options</c> at resolution time, and <c>Build</c> normalizes the
+    /// configuration (<c>IsValid</c> -&gt; <c>ApplyFeatureSwitches</c>) before it ever touches this
+    /// property, so a lean pool hands its policy the already-downgraded value rather than the one the
+    /// builder call sequence happened to leave behind. A policy supplied through <see cref="WithPolicy"/>
+    /// owns its own reset behavior and is never reconfigured here.
     /// </remarks>
-    private IHayateObjectPolicy<T> Policy => _policy ??= HayateDefaultConstruction.Policy<T>();
+    private IHayateObjectPolicy<T> Policy => _policy ??= HayateDefaultConstruction.Policy<T>(
+        _options.ResetOnReturn, _options.ResetOnBorrow);
 
     #region Feature toggles
 
@@ -1078,6 +1085,66 @@ public class HayatePoolBuilder<T> where T : class
         if (_options.EnableValidation)
             _options.GenerationThresholdMs = thresholdMs;
 
+        return this;
+    }
+
+    #endregion
+
+    #region Reset timing
+
+    /// <summary>
+    /// Sets whether an <see cref="IHayateResettable"/> object is reset on its way back into the pool.
+    /// </summary>
+    /// <param name="enable">Whether to reset on return; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <remarks>
+    /// On is the historical behaviour and the default, so calling this changes nothing unless it is turned
+    /// off. Turning it off while <see cref="WithResetOnBorrow"/> stays off means the pool never resets: idle
+    /// objects keep whatever state the borrower left in them, which is only safe for stateless payloads.
+    /// The lean fast path forces this back on (see <see cref="HayatePoolOptions.ApplyFeatureSwitches"/>), so
+    /// on a lean pool the call is normalized away rather than rejected — read the effective value back
+    /// through <see cref="IHayateObjectPool.GetOptions"/>. Only the pool-driven
+    /// <see cref="IHayateResettable"/> reset is governed here; a policy supplied through
+    /// <see cref="WithPolicy"/> owns its hooks and is left alone.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// // Move the reset off the return path entirely.
+    /// var builder = new HayatePoolBuilder&lt;MyBuffer&gt;()
+    ///     .WithResetOnReturn(false)
+    ///     .WithResetOnBorrow(true);
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithResetOnReturn(bool enable = true)
+    {
+        _options.ResetOnReturn = enable;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets whether an <see cref="IHayateResettable"/> object is reset on its way out to a borrower instead
+    /// of on its way back in.
+    /// </summary>
+    /// <param name="enable">Whether to reset on borrow; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <remarks>
+    /// This moves the reset cost from the return path to the borrow path: an object that is never borrowed
+    /// again is never reset at all, so a pool that over-creates pays only for the objects it actually hands
+    /// out. The price is that the borrower waits for it, so measure the borrow latency before adopting it on
+    /// a hot path. Both switches may be on at once, which resets twice per cycle.
+    /// The lean fast path forces this off — a lean pool always resets on return, because the borrow side is
+    /// meant to stay minimal — and the call is normalized away rather than rejected, so read the effective
+    /// value back through <see cref="IHayateObjectPool.GetOptions"/>. As with
+    /// <see cref="WithResetOnReturn"/>, a policy supplied through <see cref="WithPolicy"/> is not affected.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyBuffer&gt;().WithResetOnBorrow();
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithResetOnBorrow(bool enable = true)
+    {
+        _options.ResetOnBorrow = enable;
         return this;
     }
 

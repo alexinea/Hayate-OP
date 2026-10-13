@@ -456,6 +456,59 @@ public class HayatePoolOptions
 
     #endregion
 
+    #region Reset
+
+    /// <summary>
+    /// Whether an object implementing <see cref="IHayateResettable"/> is reset on its way back into the
+    /// pool.<br />
+    /// Default value: <c>true</c>.
+    /// </summary>
+    /// <remarks>
+    /// Purpose: the historical behaviour — state is wiped at return time, so every idle object is already
+    /// clean and the borrow path does no reset work.<br />
+    /// Special case: governs only the reset that the pool and
+    /// <see cref="Policies.DefaultHayateObjectPolicy{T}"/> drive through
+    /// <see cref="IHayateResettable"/>. A custom <see cref="Policies.IHayateObjectPolicy{T}"/> owns its
+    /// <c>OnRelease</c> and <c>OnAcquire</c> hooks and is not affected by either reset switch — setting
+    /// <see cref="ResetOnBorrow"/> does not move a custom policy's own reset.<br />
+    /// Boundary: <see cref="EnableLean"/> forces this back on and <see cref="ResetOnBorrow"/> off (see
+    /// <see cref="ApplyFeatureSwitches"/>), because the lean fast path is meant to stay minimal on the
+    /// borrow side. Both switches may be on at once, which resets twice per cycle — legal, and sometimes
+    /// wanted when borrowers may hand back an object they have already dirtied and the next borrower must
+    /// not see it either.<br />
+    /// Recommended range: keep the default unless the reset is expensive enough to be worth moving.
+    /// </remarks>
+    public bool ResetOnReturn { get; set; } = true;
+
+    /// <summary>
+    /// Whether an object implementing <see cref="IHayateResettable"/> is reset on its way out to a borrower
+    /// instead of on its way back in.<br />
+    /// Default value: <c>false</c>.
+    /// </summary>
+    /// <remarks>
+    /// Purpose: moves the reset cost from the return path to the borrow path. An object that is never
+    /// borrowed again is then never reset at all, so a pool that over-creates pays for reset only on the
+    /// objects it actually hands out.<br />
+    /// Special case: the same jurisdiction limit as <see cref="ResetOnReturn"/> — this switch reaches the
+    /// pool-driven <see cref="IHayateResettable"/> reset only, never a custom
+    /// <see cref="Policies.IHayateObjectPolicy{T}"/>. The hook it drives is the policy's acquire hook, and
+    /// the pool runs that on a create-on-miss hand-out as well as on a borrow from the idle set, so a
+    /// freshly created object is reset once before its first borrower sees it — a reset for state it never
+    /// had, and the one place where this switch costs on an object that was not reused. The research term
+    /// for this mode is <c>Take</c> (YOPSHARP <c>PooledItemInitialization.Take</c>); the property is named
+    /// after <see cref="ValidateOnBorrow"/> so the borrow-side / return-side pairs read alike.<br />
+    /// Boundary: forced off by <see cref="EnableLean"/> — the lean profile and lean normalization both
+    /// clear it, so a lean pool always resets on return. Read the effective value back through
+    /// <c>GetOptions</c> rather than assuming the call took effect.<br />
+    /// Recommended range: off by default. Turn it on when reset is cheap relative to borrowing, or when
+    /// idle objects would otherwise hold onto state (buffers, references) that should not outlive the
+    /// borrow that produced it.
+    /// </remarks>
+    public bool ResetOnBorrow { get; set; }
+
+
+    #endregion
+
     #region Eviction
 
     /// <summary>
@@ -1046,6 +1099,14 @@ public class HayatePoolOptions
         ValidateOnReturn = false;
         ValidateWhileIdle = false;
 
+        // The lean fast path is meant to stay minimal on the borrow side, so the profile pins the reset to
+        // the historical side rather than merely clearing the borrow side: a caller who had moved the reset
+        // to borrow would otherwise be left with no reset at all, which is a silent drop rather than the
+        // downgrade the mode promises. Both values are written out because that is what this profile does
+        // with every switch ApplyFeatureSwitches derives — the collapsed state is visible on the object.
+        ResetOnReturn = true;
+        ResetOnBorrow = false;
+
         EnableEviction = false;
         EnableGenerationOptimization = false;
         EnableLeakDetection = false;
@@ -1076,7 +1137,9 @@ public class HayatePoolOptions
     /// sub-switches keep their documented defaults, so <see cref="WarnAtRatio"/> and
     /// <see cref="CriticalAtRatio"/> stay at 0 (the capacity alarm stays disabled),
     /// <see cref="ValidateOnBorrow"/>, <see cref="ValidateOnReturn"/> and
-    /// <see cref="ValidateWhileIdle"/> stay <c>false</c>, and sizing plus reject semantics are untouched.
+    /// <see cref="ValidateWhileIdle"/> stay <c>false</c>, <see cref="ResetOnBorrow"/> stays <c>false</c>
+    /// (so the reset stays on the return side, where <see cref="ResetOnReturn"/> already puts it), and
+    /// sizing plus reject semantics are untouched.
     /// The profile is the exact opposite of <see cref="UseLeanProfile"/>: it clears
     /// <see cref="EnableLean"/>, so applying it after the lean profile leaves a full-featured pool — and it
     /// re-opens <see cref="EnableDiagnostics"/>, which the lean profile closed.<br />
@@ -1219,6 +1282,10 @@ public class HayatePoolOptions
         options.ValidateWhileIdle = this.ValidateWhileIdle;
         options.ValidateIntervalMs = this.ValidateIntervalMs;
 
+        // Reset timing
+        options.ResetOnReturn = this.ResetOnReturn;
+        options.ResetOnBorrow = this.ResetOnBorrow;
+
         // Eviction
         options.EnableEviction = this.EnableEviction;
         options.MaxLifeTime = this.MaxLifeTime;
@@ -1325,6 +1392,14 @@ public class HayatePoolOptions
             ValidateOnBorrow = false;
             ValidateOnReturn = false;
             ValidateWhileIdle = false;
+            // Reset timing is not a storage problem — the lean borrow path does call the policy's
+            // OnAcquire, so it could honour a borrow-side reset. It is pinned back to the return side
+            // anyway, because a minimal borrow path is the whole point of the mode and a reset there works
+            // against it. This is a deliberate choice, not a structural impossibility.
+            // Both halves are written: clearing only the borrow side would leave a caller who had moved the
+            // reset there with no reset at all, which is a silent drop rather than a downgrade.
+            ResetOnReturn = true;
+            ResetOnBorrow = false;
             EnableEviction = false;
             EnableGenerationOptimization = false;
             EnableLeakDetection = false;

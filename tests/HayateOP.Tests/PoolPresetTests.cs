@@ -131,6 +131,9 @@ public class PoolPresetTests
                 {
                     "EnableLean", "EnableSharding", "EnableAutoScaling",
                     "EnableValidation", "ValidateOnBorrow", "ValidateOnReturn", "ValidateWhileIdle",
+                    // The lean profile pins the reset to the return side rather than merely clearing the
+                    // borrow side, so it owns both halves of the pair (see UseLeanProfile).
+                    "ResetOnReturn", "ResetOnBorrow",
                     "EnableEviction", "EnableGenerationOptimization", "EnableLeakDetection",
                     "RemoveAbandonedOnBorrow", "RemoveAbandonedOnMaintenance",
                     "EnableDiagnostics", "EnableMetrics", "EnableAllocationTracking",
@@ -215,6 +218,7 @@ public class PoolPresetTests
                 {
                     "EnableLean", "EnableSharding", "EnableAutoScaling",
                     "EnableValidation", "ValidateOnBorrow", "ValidateOnReturn", "ValidateWhileIdle",
+                    "ResetOnReturn", "ResetOnBorrow",
                     "EnableEviction", "EnableGenerationOptimization", "EnableLeakDetection",
                     "RemoveAbandonedOnBorrow", "RemoveAbandonedOnMaintenance",
                     "EnableDiagnostics", "EnableMetrics", "EnableAllocationTracking",

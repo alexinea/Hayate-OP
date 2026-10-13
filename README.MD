@@ -873,6 +873,10 @@ var options = new HayatePoolOptions
     ValidateWhileIdle = false,
     ValidateIntervalMs = 30000,
 
+    // Reset timing (3.1)
+    ResetOnReturn = true,    // reset an IHayateResettable object on its way back into the pool
+    ResetOnBorrow = false,   // ... or on its way out to a borrower instead; EnableLean forces this off
+
     // Eviction
     EnableEviction = true,
     MaxLifeTime = TimeSpan.FromMinutes(10),
@@ -928,6 +932,7 @@ The short version of how to trim:
 | `BorrowStrategy` | `Fifo` (the default) reads the end the borrow path has always read — no added cost; `Lifo` costs one predicted branch on a constructor-time flag |
 | `EnableGenerationOptimization` | One extra `Stopwatch.GetTimestamp()` per borrow — the only switch that adds a QPC read to the borrow path |
 | `ValidateOnBorrow` / `ValidateOnReturn` | One `IHayateObjectPolicy.Validate` call per borrow / return; the policy's own work (often a health probe) dominates |
+| `ResetOnReturn` / `ResetOnBorrow` | One `IHayateResettable.Reset` call per return / per borrow, on the default policy only. Return-side is the default (before 3.1 it was unconditional); borrow-side is off by default and forced off by `EnableLean`. Moving the reset relocates it rather than adding one — measured with a 4 KB-clearing `Reset`, ~119 ns/op shifts from the return path to the borrow path (borrow 174 → 293 ns/op) and the round trip moves by 3%. The case for the borrow side is the object that is created and never borrowed again: it is then never reset at all |
 | `LeakTraceCaptureMode` | The real cost of the leak-detection surface: `EveryAcquire` captures a call stack on every borrow; `Off` (the default) costs two branches |
 | `RemoveAbandonedOnBorrow` | One bounded oldest-borrow scan per borrow when enabled; off by default → constant branch, zero cost |
 | `RemoveAbandonedOnMaintenance` | Background only: drives the shared timer, never touches the borrow or return path |

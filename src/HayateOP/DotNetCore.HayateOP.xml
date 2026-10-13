@@ -192,9 +192,28 @@
         <member name="M:DotNetCore.HayateOP.Common.HayateDefaultConstruction.Policy``1">
             <summary>
             Creates the default policy for <typeparamref name="T"/>, so a builder or container that no longer
-            requires a parameterless constructor can still fall back to it.
+            requires a parameterless constructor can still fall back to it. The policy keeps its historical
+            reset timing: an <see cref="T:DotNetCore.HayateOP.IHayateResettable"/> object is reset on release.
             </summary>
             <typeparam name="T">The pooled object type.</typeparam>
+            <returns>A new default policy.</returns>
+            <exception cref="T:System.InvalidOperationException"><typeparamref name="T"/> has no public parameterless
+            constructor, so the default policy cannot create objects of it.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Common.HayateDefaultConstruction.Policy``1(System.Boolean,System.Boolean)">
+            <summary>
+            Creates the default policy for <typeparamref name="T"/> with an explicit reset timing, for the
+            builder that resolves a pool's policy after its options have been normalized.
+            </summary>
+            <remarks>
+            This is the only route by which the pool-level reset switches reach a policy. A custom
+            <see cref="T:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1"/> supplied through <c>WithPolicy</c> never comes through here and
+            therefore keeps whatever timing its own <c>OnRelease</c> / <c>OnAcquire</c> implement — the switches
+            govern the library default, not a caller's policy.
+            </remarks>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="resetOnReturn">Whether the policy resets on release.</param>
+            <param name="resetOnBorrow">Whether the policy resets on acquire.</param>
             <returns>A new default policy.</returns>
             <exception cref="T:System.InvalidOperationException"><typeparamref name="T"/> has no public parameterless
             constructor, so the default policy cannot create objects of it.</exception>
@@ -1956,6 +1975,12 @@
             moved from the generic constraint — which blocked the builder at compile time — to this point, where
             it is reported with an actionable message. Nothing is resolved for a builder whose policy was set
             explicitly, which is the whole point of the relaxation.
+            The lazy form is also what carries the reset-timing switches (3.1, G-7) into the default policy:
+            they are read from <c>_options</c> at resolution time, and <c>Build</c> normalizes the
+            configuration (<c>IsValid</c> -&gt; <c>ApplyFeatureSwitches</c>) before it ever touches this
+            property, so a lean pool hands its policy the already-downgraded value rather than the one the
+            builder call sequence happened to leave behind. A policy supplied through <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithPolicy(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0})"/>
+            owns its own reset behavior and is never reconfigured here.
             </remarks>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLean(System.Boolean)">
@@ -2696,6 +2721,54 @@
             <example>
             <code>
             var builder = new HayatePoolBuilder&lt;MyResource&gt;().WithGenerationThreshold(30000);
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithResetOnReturn(System.Boolean)">
+            <summary>
+            Sets whether an <see cref="T:DotNetCore.HayateOP.IHayateResettable"/> object is reset on its way back into the pool.
+            </summary>
+            <param name="enable">Whether to reset on return; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <remarks>
+            On is the historical behaviour and the default, so calling this changes nothing unless it is turned
+            off. Turning it off while <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithResetOnBorrow(System.Boolean)"/> stays off means the pool never resets: idle
+            objects keep whatever state the borrower left in them, which is only safe for stateless payloads.
+            The lean fast path forces this back on (see <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/>), so
+            on a lean pool the call is normalized away rather than rejected — read the effective value back
+            through <see cref="M:DotNetCore.HayateOP.IHayateObjectPool.GetOptions"/>. Only the pool-driven
+            <see cref="T:DotNetCore.HayateOP.IHayateResettable"/> reset is governed here; a policy supplied through
+            <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithPolicy(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0})"/> owns its hooks and is left alone.
+            </remarks>
+            <example>
+            <code>
+            // Move the reset off the return path entirely.
+            var builder = new HayatePoolBuilder&lt;MyBuffer&gt;()
+                .WithResetOnReturn(false)
+                .WithResetOnBorrow(true);
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithResetOnBorrow(System.Boolean)">
+            <summary>
+            Sets whether an <see cref="T:DotNetCore.HayateOP.IHayateResettable"/> object is reset on its way out to a borrower instead
+            of on its way back in.
+            </summary>
+            <param name="enable">Whether to reset on borrow; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <remarks>
+            This moves the reset cost from the return path to the borrow path: an object that is never borrowed
+            again is never reset at all, so a pool that over-creates pays only for the objects it actually hands
+            out. The price is that the borrower waits for it, so measure the borrow latency before adopting it on
+            a hot path. Both switches may be on at once, which resets twice per cycle.
+            The lean fast path forces this off — a lean pool always resets on return, because the borrow side is
+            meant to stay minimal — and the call is normalized away rather than rejected, so read the effective
+            value back through <see cref="M:DotNetCore.HayateOP.IHayateObjectPool.GetOptions"/>. As with
+            <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithResetOnReturn(System.Boolean)"/>, a policy supplied through <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithPolicy(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0})"/> is not affected.
+            </remarks>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyBuffer&gt;().WithResetOnBorrow();
             </code>
             </example>
         </member>
@@ -4034,6 +4107,54 @@
             Recommended range: 10000~60000ms.
             </remarks>
         </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.ResetOnReturn">
+            <summary>
+            Whether an object implementing <see cref="T:DotNetCore.HayateOP.IHayateResettable"/> is reset on its way back into the
+            pool.<br />
+            Default value: <c>true</c>.
+            </summary>
+            <remarks>
+            Purpose: the historical behaviour — state is wiped at return time, so every idle object is already
+            clean and the borrow path does no reset work.<br />
+            Special case: governs only the reset that the pool and
+            <see cref="T:DotNetCore.HayateOP.Policies.DefaultHayateObjectPolicy`1"/> drive through
+            <see cref="T:DotNetCore.HayateOP.IHayateResettable"/>. A custom <see cref="T:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1"/> owns its
+            <c>OnRelease</c> and <c>OnAcquire</c> hooks and is not affected by either reset switch — setting
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ResetOnBorrow"/> does not move a custom policy's own reset.<br />
+            Boundary: <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLean"/> forces this back on and <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ResetOnBorrow"/> off (see
+            <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.ApplyFeatureSwitches"/>), because the lean fast path is meant to stay minimal on the
+            borrow side. Both switches may be on at once, which resets twice per cycle — legal, and sometimes
+            wanted when borrowers may hand back an object they have already dirtied and the next borrower must
+            not see it either.<br />
+            Recommended range: keep the default unless the reset is expensive enough to be worth moving.
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.ResetOnBorrow">
+            <summary>
+            Whether an object implementing <see cref="T:DotNetCore.HayateOP.IHayateResettable"/> is reset on its way out to a borrower
+            instead of on its way back in.<br />
+            Default value: <c>false</c>.
+            </summary>
+            <remarks>
+            Purpose: moves the reset cost from the return path to the borrow path. An object that is never
+            borrowed again is then never reset at all, so a pool that over-creates pays for reset only on the
+            objects it actually hands out.<br />
+            Special case: the same jurisdiction limit as <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ResetOnReturn"/> — this switch reaches the
+            pool-driven <see cref="T:DotNetCore.HayateOP.IHayateResettable"/> reset only, never a custom
+            <see cref="T:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1"/>. The hook it drives is the policy's acquire hook, and
+            the pool runs that on a create-on-miss hand-out as well as on a borrow from the idle set, so a
+            freshly created object is reset once before its first borrower sees it — a reset for state it never
+            had, and the one place where this switch costs on an object that was not reused. The research term
+            for this mode is <c>Take</c> (YOPSHARP <c>PooledItemInitialization.Take</c>); the property is named
+            after <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ValidateOnBorrow"/> so the borrow-side / return-side pairs read alike.<br />
+            Boundary: forced off by <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLean"/> — the lean profile and lean normalization both
+            clear it, so a lean pool always resets on return. Read the effective value back through
+            <c>GetOptions</c> rather than assuming the call took effect.<br />
+            Recommended range: off by default. Turn it on when reset is cheap relative to borrowing, or when
+            idle objects would otherwise hold onto state (buffers, references) that should not outlive the
+            borrow that produced it.
+            </remarks>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableEviction">
             <summary>
             Enables idle-object eviction. When disabled, no eviction logic runs and all eviction-related
@@ -4587,7 +4708,9 @@
             sub-switches keep their documented defaults, so <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.WarnAtRatio"/> and
             <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.CriticalAtRatio"/> stay at 0 (the capacity alarm stays disabled),
             <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ValidateOnBorrow"/>, <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ValidateOnReturn"/> and
-            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ValidateWhileIdle"/> stay <c>false</c>, and sizing plus reject semantics are untouched.
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ValidateWhileIdle"/> stay <c>false</c>, <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ResetOnBorrow"/> stays <c>false</c>
+            (so the reset stays on the return side, where <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ResetOnReturn"/> already puts it), and
+            sizing plus reject semantics are untouched.
             The profile is the exact opposite of <see cref="M:DotNetCore.HayateOP.HayatePoolOptions.UseLeanProfile"/>: it clears
             <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableLean"/>, so applying it after the lean profile leaves a full-featured pool — and it
             re-opens <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.EnableDiagnostics"/>, which the lean profile closed.<br />
@@ -6208,7 +6331,11 @@
              (<c>AcquireScoped()</c>), statistics and the DI surface work unchanged. Objects implementing
              <see cref="T:DotNetCore.HayateOP.IHayateResettable"/> are reset on return; objects implementing
              <see cref="T:DotNetCore.HayateOP.IHayateValidatable"/> are validated on return, and a failed validation destroys the
-             object instead of parking it. <see cref="M:DotNetCore.HayateOP.HayateUnboundedPool`1.AcquireAsync(System.Threading.CancellationToken)"/> completes synchronously (there is
+             object instead of parking it. That reset timing is fixed rather than configurable: the 3.1
+             <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ResetOnReturn"/> / <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ResetOnBorrow"/> pair
+             belongs to the options-driven pool, and this model takes no options object for them to travel in —
+             the defaults <see cref="M:DotNetCore.HayateOP.HayateUnboundedPool`1.GetOptions"/> reports are therefore a true statement about the behavior, not
+             a placeholder. <see cref="M:DotNetCore.HayateOP.HayateUnboundedPool`1.AcquireAsync(System.Threading.CancellationToken)"/> completes synchronously (there is
              nothing to wait for), and <see cref="M:DotNetCore.HayateOP.HayateUnboundedPool`1.Acquire(System.TimeSpan)"/> ignores the timeout for the same
              reason. There is no circuit breaker: <see cref="M:DotNetCore.HayateOP.HayateUnboundedPool`1.CheckAvailable"/> reflects the manual
              availability flag only.
@@ -6787,11 +6914,20 @@
         </member>
         <member name="T:DotNetCore.HayateOP.IHayateResettable">
             <summary>
-            Marks an object whose state can be automatically reset when it is returned to the pool.
+            Marks an object whose state the pool can reset automatically, so a borrower never sees what the
+            previous one left behind.
             </summary>
+            <remarks>
+            <i>When</i> the reset runs is the pool's choice, not the marker's. The default policy resets on
+            release, and <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ResetOnReturn"/> / <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ResetOnBorrow"/>
+            move that (3.1, G-7); <see cref="T:DotNetCore.HayateOP.HayateUnboundedPool`1"/> always resets on release, because it takes
+            no options object for the switches to travel in. An implementation must therefore be safe to call
+            from either side of the cycle, and must not assume it runs exactly once per borrow — both switches
+            may be on at once, which resets twice.
+            </remarks>
         </member>
         <member name="M:DotNetCore.HayateOP.IHayateResettable.Reset">
-            <summary>Resets the object to a reusable initial state before it is handed back to a caller.</summary>
+            <summary>Restores the object to a reusable initial state.</summary>
         </member>
         <member name="M:DotNetCore.HayateOP.Logging.DefaultHayateLogger.IsEnabled(DotNetCore.HayateOP.Logging.HayateLogLevel)">
             <summary>
@@ -7443,7 +7579,37 @@
             <summary>
             The default object-pool policy.
             </summary>
+            <remarks>
+            <para>
+            Objects are created with <c>new T()</c>, validity follows <see cref="T:DotNetCore.HayateOP.IHayateValidatable"/>, and an
+            object implementing <see cref="T:DotNetCore.HayateOP.IHayateResettable"/> is reset — but <i>when</i> it is reset is a choice,
+            fixed at construction. The parameterless constructor keeps the historical timing (reset on release);
+            the two-flag constructor takes the timing from
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ResetOnReturn"/> / <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ResetOnBorrow"/>, which is
+            what <see cref="T:DotNetCore.HayateOP.HayatePoolBuilder`1"/> passes when it resolves the default policy for a pool.
+            </para>
+            <para>
+            The flags are read-only, so a policy's timing cannot change underneath a running pool. Both may be set,
+            which resets on both sides of the cycle; neither is set only if the caller asks for that explicitly, and
+            then the pooled type is simply never reset by this policy.
+            </para>
+            </remarks>
             <typeparam name="T"></typeparam>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Policies.DefaultHayateObjectPolicy`1.#ctor">
+            <summary>
+            Creates the policy with its historical reset timing: an <see cref="T:DotNetCore.HayateOP.IHayateResettable"/> object is
+            reset when it is released, and the borrow-side hook does nothing.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Policies.DefaultHayateObjectPolicy`1.#ctor(System.Boolean,System.Boolean)">
+            <summary>
+            Creates the policy with an explicit reset timing.
+            </summary>
+            <param name="resetOnReturn">Whether <see cref="M:DotNetCore.HayateOP.Policies.DefaultHayateObjectPolicy`1.OnRelease(`0)"/> resets an
+            <see cref="T:DotNetCore.HayateOP.IHayateResettable"/> object.</param>
+            <param name="resetOnBorrow">Whether <see cref="M:DotNetCore.HayateOP.Policies.DefaultHayateObjectPolicy`1.OnAcquire(`0)"/> resets an
+            <see cref="T:DotNetCore.HayateOP.IHayateResettable"/> object.</param>
         </member>
         <member name="T:DotNetCore.HayateOP.Policies.HayateObjectPolicies">
             <summary>
@@ -7474,7 +7640,10 @@
             <see cref="T:DotNetCore.HayateOP.IHayateResettable"/>, and its validity follows <see cref="T:DotNetCore.HayateOP.IHayateValidatable"/>.
             </summary>
             <typeparam name="T">The pooled object type.</typeparam>
-            <returns>A new default policy. It holds no state, so the caller owns it and may share it.</returns>
+            <returns>A new default policy carrying the historical reset timing — reset on release, nothing on
+            borrow. It is immutable after construction, so the caller owns it and may share it; note that a
+            pool built this way keeps that timing whatever its <c>ResetOnReturn</c> / <c>ResetOnBorrow</c>
+            options say, because the switches reach only the policy the pool resolves for itself.</returns>
             <exception cref="T:System.InvalidOperationException"><typeparamref name="T"/> has no public parameterless
             constructor, so the default policy cannot create objects of it; supply a policy that can.</exception>
             <example>
