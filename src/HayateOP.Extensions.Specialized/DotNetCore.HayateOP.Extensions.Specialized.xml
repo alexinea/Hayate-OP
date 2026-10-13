@@ -4,6 +4,230 @@
         <name>DotNetCore.HayateOP.Extensions.Specialized</name>
     </assembly>
     <members>
+        <member name="T:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool">
+             <summary>
+             A ready-to-use pool of <see cref="T:System.Threading.CancellationTokenSource"/> instances, aligned with Reservoir's
+             <c>CancellationTokenSourcePool</c>: renting costs one line, <c>using</c> on the rented source returns
+             it, and <see cref="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.RentLinked(System.Threading.CancellationToken)"/> makes the rental follow an upstream token.
+             </summary>
+             <remarks>
+             A <see cref="T:System.Threading.CancellationTokenSource"/> is one of the most frequently pooled objects in asynchronous
+             code — the per-operation timeout or cancellation scope that would otherwise be allocated and collected
+             on every request — and it is also one of the few that cannot be reused naively: a used source carries
+             the timer and the callbacks its renter left behind, and
+             <c>CancellationTokenSource.TryReset()</c>, the one call that clears them, is documented as unsafe to
+             use while the source is still in use. The pool therefore owns the whole lifetime: a source is handed
+             out exclusively, and its reset happens only after the rental has ended, on the return path.<br />
+             <b>Reuse is runtime-dependent, and the pool says so.</b> <c>TryReset()</c> does not exist on .NET
+             Framework 4.8, and without it a returned source cannot be cleaned — its stale callbacks and timer would
+             fire during the next rental. Rather than fork its source per target framework, the pool locates the
+             method at run time (see <c>CancellationTokenSourceReset</c>): where it is missing,
+             <see cref="P:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.IsReuseSupported"/> is <c>false</c> and every returned source is destroyed instead of
+             parked, so the pool still hands out a correct source every time — it just creates a new one rather
+             than reusing. On .NET 6.0 and later reuse is on.<br />
+             The pool is built on the ordinary HayateOP engine, configured the way a small single-purpose pool
+             wants it: nothing is pre-created, a miss inside the pool size is served by creating a source on
+             demand, and the background features it has no use for (sharding, auto-scaling, eviction) are switched
+             off. Validation stays on, and is what keeps a canceled source out of the pool: a source whose
+             cancellation has been requested is destroyed on return rather than parked, because no reset can make
+             it usable again.<br />
+             Disposal routes exactly one return per rental, so <c>using</c> replaces the manual
+             <see cref="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.Release(DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource)"/> without risking a double return — see <see cref="T:DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource"/>.
+             </remarks>
+             <example>
+             <code>
+             // A per-operation cancellation scope that allocates nothing after the first few operations.
+             using var cts = CancellationTokenSourcePool.Instance.Rent();
+             cts.CancelAfter(TimeSpan.FromSeconds(5));
+             await httpClient.GetAsync(url, cts.Token);
+            
+             // A rental that follows the caller's token, for as long as the rental lives.
+             using var linked = CancellationTokenSourcePool.Instance.RentLinked(requestAborted);
+             await Task.Delay(TimeSpan.FromSeconds(30), linked.Token);
+             </code>
+             </example>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.DefaultPoolMaximumSize">
+            <summary>
+            The default maximum pool size (16), the same value the other specialized pools use.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.Instance">
+            <summary>
+            A shared, thread-safe pool instance for callers that do not want to manage a pool's lifetime.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.IsReuseSupported">
+            <summary>
+            Whether this runtime can reset a returned source and hand it out again.
+            </summary>
+            <remarks>
+            <c>true</c> on .NET 6.0 and later, where <c>CancellationTokenSource.TryReset()</c> exists;
+            <c>false</c> on .NET Framework 4.8, where the pool creates a fresh source for every rental and
+            destroys it on return, so it retains nothing between rentals. The value is fixed for the process —
+            it describes the runtime, not the pool — and is exposed so a caller can tell the two modes apart
+            instead of inferring them from a source identity it happens to observe.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.#ctor">
+            <summary>
+            Builds a pool holding at most <see cref="F:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.DefaultPoolMaximumSize"/> sources.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.#ctor(System.Int32)">
+            <summary>
+            Builds a pool holding at most <paramref name="maxPoolSize"/> sources.
+            </summary>
+            <param name="maxPoolSize">The maximum number of sources the pool keeps and lends out.</param>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="maxPoolSize"/> is not greater than
+            zero.</exception>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.Rent">
+            <summary>
+            Rents a source that returns to this pool when disposed — the cancellation-source name for
+            <see cref="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.Acquire"/>.
+            </summary>
+            <returns>A source the caller owns until it is disposed, canceled, or released.</returns>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.RentLinked(System.Threading.CancellationToken)">
+            <summary>
+            Rents a source that is canceled when <paramref name="upstreamToken"/> is canceled, and that returns
+            to this pool when disposed.
+            </summary>
+            <param name="upstreamToken">The token the rental follows. A token that cannot be canceled produces
+            an ordinary rental.</param>
+            <returns>A source the caller owns until it is disposed, canceled, or released.</returns>
+            <remarks>
+            The link is registered on the pooled source rather than by creating a source through
+            <c>CancellationTokenSource.CreateLinkedTokenSource</c>, so the rental is still a pooled instance
+            that returns to the pool on disposal. Disposal drops the link and waits for an upstream callback
+            that is already running before the source can be handed out again, and an upstream token canceled
+            after the return can no longer reach the reused source.<br />
+            A rental whose upstream token is already canceled comes back canceled — and a canceled source is
+            destroyed on return rather than parked, so it never reaches a later renter.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.Acquire">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.Acquire(System.TimeSpan)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.AcquireAsync(System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.AcquireAsync(System.TimeSpan,System.Threading.CancellationToken)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.Release(DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource)">
+            <summary>
+            Returns a source to the pool it came from. Rentals normally return themselves when disposed; this is
+            the explicit form, and it is what the engine's own contract requires.
+            </summary>
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.Evict(DotNetCore.HayateOP.HayateEvictReason)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.PreWarm(System.Int32)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.GetStats">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.TakeSnapshot">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.ReloadConfig(System.Action{DotNetCore.HayateOP.HayatePoolOptions})">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.Clear">
+            <summary>
+            Drops every source currently held by the pool, so the next rental creates a fresh one.
+            </summary>
+            <remarks>
+            Rentals already handed out are not touched; they are destroyed when they come back, because the
+            pool no longer tracks them. A dropped source has already been reset — its timer disarmed and its
+            callbacks dropped — so nothing is left running and there is no resource to release: the object is
+            simply collected.
+            </remarks>
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.GetOptions">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.CheckAvailable">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.SetUnavailable(System.String)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.SetAvailable">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.Dispose">
+            <inheritdoc />
+        </member>
+        <member name="T:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePoolPolicy">
+            <summary>
+            The policy behind <see cref="T:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool"/>: creates sources bound to the pool,
+            refuses to park a source that has been canceled, and resets a returned source so it can serve an
+            unrelated rental.
+            </summary>
+            <remarks>
+            The reset is the interesting half, and it is what makes the pool worth having: a
+            <see cref="T:System.Threading.CancellationTokenSource"/> that has been used carries the timer and the
+            callbacks its renter left behind, and handing it to the next renter unchanged would let the previous
+            renter's cancellation reach the new one. <see cref="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePoolPolicy.Validate(DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource)"/> rejects a canceled source before the
+            return path can park it — a source whose cancellation has been requested can never be made fit again —
+            and <see cref="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePoolPolicy.OnRelease(DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource)"/> then performs the reset that drops the callbacks and disarms the timer. On
+            a runtime without <c>CancellationTokenSource.TryReset()</c> — that is, .NET Framework 4.8 — that reset
+            cannot be performed at all, so <see cref="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePoolPolicy.OnRelease(DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource)"/> answers <c>false</c> and every returned source
+            is destroyed: the pool retains nothing and the next rental creates a fresh source. The pool reports
+            that through <see cref="P:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.IsReuseSupported"/> rather than leaving it to be
+            discovered.
+            </remarks>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Specialized.CancellationTokenSourceReset">
+            <summary>
+            Locates <c>CancellationTokenSource.TryReset()</c> once and caches it as a delegate, so the pool can be
+            written the same way for every target framework it ships to.
+            </summary>
+            <remarks>
+            <c>TryReset()</c> is the only way to make a returned <see cref="T:System.Threading.CancellationTokenSource"/> fit for an
+            unrelated rental: it disarms the timer the previous renter may have started, drops the callbacks it
+            registered, and refuses to reset a source whose cancellation has already been requested. The method
+            does not exist on .NET Framework 4.8, and rather than fork the pool's source per target the lookup is
+            done at run time: where the method is missing the lookup yields <c>null</c>, <see cref="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourceReset.TryReset(System.Threading.CancellationTokenSource)"/>
+            answers <c>false</c>, and the pool destroys a returned source instead of parking it — a source the pool
+            cannot clean is a source it must not hand out again, because the previous renter's timer and callbacks
+            would otherwise fire during the next rental.<br />
+            The lookup runs once per process, on the first use of a pool, and its result is cached as an open
+            delegate, so a later return pays a delegate call rather than a reflection call. A trimmed or
+            native-AOT application may have removed the method from the metadata; the lookup then yields
+            <c>null</c> and the pool degrades exactly as it does on .NET Framework — still correct, only without
+            reuse.
+            </remarks>
+        </member>
+        <member name="F:DotNetCore.HayateOP.Specialized.CancellationTokenSourceReset.s_tryReset">
+            <summary>
+            The cached <c>TryReset()</c> call, or <c>null</c> when this runtime does not have one.
+            </summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.Specialized.CancellationTokenSourceReset.IsSupported">
+            <summary>
+            Whether this runtime's <see cref="T:System.Threading.CancellationTokenSource"/> can be reset and reused at all.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourceReset.TryReset(System.Threading.CancellationTokenSource)">
+            <summary>
+            Attempts to reset <paramref name="source"/> so it can serve an unrelated rental.
+            </summary>
+            <param name="source">The source being returned to the pool.</param>
+            <returns><c>true</c> when the source is clean and may be parked; <c>false</c> when this runtime
+            cannot reset one at all, or when the source has already been canceled or has a cancellation in
+            flight.</returns>
+        </member>
         <member name="T:DotNetCore.HayateOP.Specialized.FormatWriter">
             <summary>
             The shared fast-append writer behind the specialized package's generic <c>Append&lt;T&gt;</c>
@@ -577,6 +801,101 @@
             request, never more than twice it), clamped to <see cref="F:System.Int32.MaxValue"/> if the ladder
             overflows.
             </summary>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource">
+            <summary>
+            A <see cref="T:System.Threading.CancellationTokenSource"/> that knows the pool it came from: disposing it returns it to
+            that pool instead of ending its life, so a rental can be written as
+            <c>using var cts = CancellationTokenSourcePool.Instance.Rent();</c>.
+            </summary>
+            <remarks>
+            Disposing a source that sits in a <see cref="T:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool"/> hands it back through the
+            pool's ordinary return path, so the cleanup a returned source needs — dropping the upstream link a
+            <see cref="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.RentLinked(System.Threading.CancellationToken)"/> rental added, and the reset
+            that makes the source fit for an unrelated rental — behaves exactly as it does for a manual
+            <see cref="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.Release(DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource)"/>. The source stays alive: it is released for good
+            only when the pool destroys it, which happens for a canceled source, for any source returned on a
+            runtime that cannot reset one (see <see cref="P:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.IsReuseSupported"/>), and
+            for a source that comes back after the pool has been cleared or disposed. Clearing or disposing the
+            pool drops the sources it holds rather than releasing them, and costs nothing here: a parked source
+            has already been reset — its timer disarmed and its callbacks dropped — so it holds nothing that
+            needs releasing, and it is collected like any other garbage.<br />
+            Disposal is once-per-rental: a second <c>Dispose()</c> of the same rental is a no-op rather
+            than a duplicate return, because returning the same source twice would let two renters share it later.
+            After the pool has destroyed a source, using it throws <see cref="T:System.ObjectDisposedException"/>, like any
+            disposed source.<br />
+            A source created directly (never handed out by a pool) owns nobody and behaves like an ordinary
+            <see cref="T:System.Threading.CancellationTokenSource"/>: disposing it releases it.
+            </remarks>
+            <example>
+            <code>
+            using var cts = CancellationTokenSourcePool.Instance.Rent();
+            var task = LongRunningAsync(cts.Token);   // the source is back in the pool after the block
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource.#ctor">
+            <summary>
+            Creates a standalone source: it belongs to no pool, and disposing it releases it.
+            </summary>
+            <remarks>
+            The parameterless constructor exists so the pool engine's builder — which requires a default
+            constructor on the pooled type — can create the source; <see cref="T:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool"/>
+            binds the owning pool immediately afterwards. Only that pool produces pooled instances.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource.Dispose(System.Boolean)">
+            <summary>
+            Disposing a pooled source returns it to its pool (the source stays usable, ready for the next
+            renter); disposing a standalone, pool-destroyed, or collected source releases it for good. Called
+            automatically at the end of a <c>using</c> block.
+            </summary>
+            <remarks>
+            The return goes through the pool's ordinary return path, so the upstream link is dropped and the
+            reset that makes the source reusable runs exactly as for a manual
+            <see cref="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.Release(DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource)"/>. The return happens exactly once per rental;
+            every later call is a no-op.
+            </remarks>
+            <param name="disposing"><c>true</c> when called from <c>Dispose()</c>; <c>false</c> from the
+            finalizer, where the source is unreachable and must be released rather than returned.</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource.RegisterUpstream(System.Threading.CancellationToken)">
+            <summary>
+            Links this source to <paramref name="upstreamToken"/>, so canceling the upstream token cancels the
+            source and everything listening to it. Called by
+            <see cref="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.RentLinked(System.Threading.CancellationToken)"/>.
+            </summary>
+            <param name="upstreamToken">The token to follow; a token that cannot be canceled is not registered.</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource.OnBorrowed">
+            <summary>Marks the source as rented so the next dispose performs the return.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource.MarkIdle">
+            <summary>
+            Marks the source as idle; called by the pool on every successful return, including a manual
+            <see cref="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.Release(DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource)"/>, so a dispose after a manual release cannot route
+            a second return.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource.UnlinkUpstream">
+            <summary>
+            Drops the upstream link before the source is parked or destroyed.
+            </summary>
+            <remarks>
+            Disposing the registration waits for an upstream callback that is already running, so a source
+            cannot be handed to the next renter while the previous renter's cancellation is still executing,
+            and an upstream token that is canceled after the return can no longer reach the source.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource.OnDetachedFromPool">
+            <summary>
+            Detaches the pool before the pool destroys the source, so the disposal that follows is a real
+            release instead of another routed return, and drops the upstream link for the same reason a return
+            does.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource.BindOwner(DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool)">
+            <summary>Registers the owning pool; called by the pool's policy at creation time.</summary>
         </member>
         <member name="T:DotNetCore.HayateOP.Specialized.PooledMemoryStream">
             <summary>
