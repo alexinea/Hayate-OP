@@ -4,6 +4,35 @@
         <name>DotNetCore.HayateOP.Extensions.DependencyInjection</name>
     </assembly>
     <members>
+        <member name="T:DotNetCore.HayateOP.DependencyInjection.HayateDefaultPolicyHolder`1">
+            <summary>
+            Records the object policy the container seeders registered when the caller supplied none, so
+            <c>BuildPool&lt;T&gt;</c> can tell that fallback apart from a policy the caller registered and
+            leave the pool to derive its own policy instead of pinning this one.
+            </summary>
+            <remarks>
+            The fallback is recognised by <b>identity</b>, not by type. A caller may register
+            <see cref="M:DotNetCore.HayateOP.Policies.HayateObjectPolicies.Default``1"/> itself, or reach it through
+            <c>HayatePoolBuilder&lt;T&gt;.WithPolicy</c>; that is the caller's policy, and it is pinned like
+            any other, even though it is an instance of the type the library would have seeded itself.<br />
+            Nothing is recorded until the container resolves the seeded registration, so a container where the
+            caller's own policy won leaves this holder empty, and <see cref="M:DotNetCore.HayateOP.DependencyInjection.HayateDefaultPolicyHolder`1.IsFallback(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0})"/> answers
+            <see langword="false"/> for that policy — which is the answer that pins it.
+            </remarks>
+            <typeparam name="T">The pooled object type.</typeparam>
+        </member>
+        <member name="M:DotNetCore.HayateOP.DependencyInjection.HayateDefaultPolicyHolder`1.Record(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0})">
+            <summary>Remembers the policy the seeded registration handed to the container.</summary>
+            <param name="policy">The fallback policy the container is now the owner of.</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.DependencyInjection.HayateDefaultPolicyHolder`1.IsFallback(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0})">
+            <summary>
+            Whether <paramref name="policy"/> is the fallback this holder recorded — that is, whether the
+            policy the container resolved for the pool being built is the library's own.
+            </summary>
+            <param name="policy">The policy the pool is about to be built with.</param>
+            <returns><see langword="true"/> when there is nothing of the caller's to pin.</returns>
+        </member>
         <member name="T:DotNetCore.HayateOP.DependencyInjection.HayateMicrosoftLoggerAdapter">
             <summary>
             Routes HayateOP's log surface onto a Microsoft.Extensions.Logging <see cref="T:Microsoft.Extensions.Logging.ILogger"/>.
@@ -416,7 +445,11 @@
             creates objects with their public parameterless constructor; a type that does not have one needs
             <see cref="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.RegisterHayatePool``1(DotNetCore.HayateOP.IHayateServiceCollection,System.Func{System.IServiceProvider,DotNetCore.HayateOP.Policies.IHayateObjectPolicy{``0}},System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/>
             or a policy registered directly in the container, which this overload honours rather than
-            replaces.
+            replaces. The default policy takes its reset timing from the pool's
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ResetOnReturn"/> / <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ResetOnBorrow"/>
+            options, so the pool runs the timing the options ask for; a policy registered directly in the
+            container is pinned instead and keeps whatever reset its own <c>OnRelease</c> / <c>OnAcquire</c>
+            implement.
             </remarks>
             <example>
             <code>
@@ -466,9 +499,11 @@
             The policy registration deliberately differs between the two callers. A factory the caller passed
             explicitly is appended (<c>AddSingleton</c>), so it wins over anything registered earlier, matching
             the "last declaration wins" rule repeated registrations follow. The built-in default only fills the
-            gap (<c>TryAddSingleton</c>), so a policy registered directly in the container is honoured instead
-            of being silently replaced by the library's own — before 2.9 the default was appended
-            unconditionally, which made registering a policy yourself an order-dependent no-op.
+            gap (<see cref="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.SeedDefaultPolicy``1(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Func{System.IServiceProvider,DotNetCore.HayateOP.Policies.IHayateObjectPolicy{``0}})"/>), so a policy registered directly in the container is
+            honoured instead of being silently replaced by the library's own — before 2.9 the default was
+            appended unconditionally, which made registering a policy yourself an order-dependent no-op. The
+            seeded default is marked as well, so a pool built with it derives its policy from its own options
+            instead of pinning that instance — see <see cref="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.SeedDefaultPolicy``1(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Func{System.IServiceProvider,DotNetCore.HayateOP.Policies.IHayateObjectPolicy{``0}})"/>.
             </remarks>
         </member>
         <member name="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.AddHayatePolicyFactory``1(DotNetCore.HayateOP.IHayateServiceCollection,DotNetCore.HayateOP.DependencyInjection.IHayateObjectPolicyFactory{``0})">
@@ -542,7 +577,12 @@
             <see cref="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.AddPool``2(DotNetCore.HayateOP.IHayateServiceCollection,System.String,System.Action{DotNetCore.HayateOP.HayatePoolOptions})"/>)
             rather than as <see cref="T:DotNetCore.HayateOP.IHayateObjectPool`1"/>, which stays reserved for the unnamed
             pool.<br />
-            Declaring the same name twice keeps the last declaration, as repeated DI registrations do.
+            Declaring the same name twice keeps the last declaration, as repeated DI registrations do.<br />
+            The pool's policy is the library default, a policy registered directly in the container, or the
+            one a registered <see cref="T:DotNetCore.HayateOP.DependencyInjection.IHayateObjectPolicyFactory`1"/> returns. When it is the library
+            default the pool takes its reset timing from this name's
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ResetOnReturn"/> / <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ResetOnBorrow"/>
+            options, so two names of one element type can run different timings.
             </remarks>
             <example>
             <code>
@@ -596,6 +636,28 @@
                     .AddPool&lt;MyConnection, MyClient&gt;(o =&gt; o.MaxPoolSize = 64);
             </code>
             </example>
+        </member>
+        <member name="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.SeedDefaultPolicy``1(Microsoft.Extensions.DependencyInjection.IServiceCollection,System.Func{System.IServiceProvider,DotNetCore.HayateOP.Policies.IHayateObjectPolicy{``0}})">
+            <summary>
+            Seeds <see cref="T:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1"/> with <paramref name="create"/> — the library default —
+            but only when the container has no policy for the element type yet, and marks the instance so
+            <see cref="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.BuildPool``1(System.IServiceProvider,System.String)"/> can leave a pool built with it to derive its own policy.
+            </summary>
+            <remarks>
+            The seeding keeps the effect the <c>TryAddSingleton</c> it replaces had: when a descriptor already
+            exists — the caller registered a policy, in either order relative to this call — nothing is added
+            and nothing is replaced.<br />
+            What it adds is the record of the instance it seeded. A pool whose policy turns out to be that
+            fallback is built <b>without</b> <c>WithPolicy</c>, so the builder derives the policy from the
+            pool's own options — the only route the <c>ResetOnReturn</c> / <c>ResetOnBorrow</c> switches have
+            into a policy. A policy the caller registered, or one a factory produced, is pinned as before, and
+            its own reset is never moved by the switches.<br />
+            The policy is created on first request rather than here, so a type the default policy cannot
+            construct still reports that when its pool is built, not when it is declared.
+            </remarks>
+            <typeparam name="T">The pooled object type.</typeparam>
+            <param name="services">The service collection the pool is being registered in.</param>
+            <param name="create">Builds the fallback policy.</param>
         </member>
         <member name="M:Microsoft.Extensions.DependencyInjection.ServiceCollectionExtensions.BuildPool``1(System.IServiceProvider,System.String)">
             <summary>

@@ -1,5 +1,6 @@
 ﻿using DotNetCore.HayateOP;
 using DotNetCore.HayateOP.DependencyInjection;
+using DotNetCore.HayateOP.Extensions.Configuration;
 using DotNetCore.HayateOP.Metrics;
 using DotNetCore.HayateOP.Policies;
 using DotNetCore.HayateOP.Scaling;
@@ -38,6 +39,13 @@ public static class ConfigurationExtensions
     /// <param name="poolName">Optional logical pool name; defaults to the type name of <typeparamref name="T"/>.</param>
     /// <param name="configSectionPath">Configuration section path; defaults to "HayatePool".</param>
     /// <typeparam name="T">The pooled object type.</typeparam>
+    /// <remarks>
+    /// The pool's object policy is the library default, or a policy registered directly in the
+    /// container, which this overload honours rather than replaces. The default policy takes its reset
+    /// timing from the merged configuration's <c>ResetOnReturn</c> / <c>ResetOnBorrow</c> values, so
+    /// setting them in appsettings reaches the pool; a policy registered directly in the container is
+    /// pinned instead and keeps whatever reset its own <c>OnRelease</c> / <c>OnAcquire</c> implement.
+    /// </remarks>
     /// <exception cref="InvalidOperationException">Thrown when the merged pool configuration is invalid.</exception>
     /// <example>
     /// <code>
@@ -58,7 +66,7 @@ public static class ConfigurationExtensions
         // Register the pool's named configuration (overrides the global configuration).
         services.Services.Configure<HayatePoolOptions>(poolName, poolConfigSection);
 
-        services.Services.TryAddSingleton<IHayateObjectPolicy<T>>(sp => HayateObjectPolicies.Default<T>());
+        SeedDefaultPolicy<T>(services.Services, sp => HayateObjectPolicies.Default<T>());
 
         // Register the pool instance.
         services.Services.AddSingleton<IHayateObjectPool<T>>(sp =>
@@ -85,7 +93,9 @@ public static class ConfigurationExtensions
     /// with <c>AddNamedPool</c> does. Section merging and hot reload behave as they do for
     /// <see cref="RegisterHayatePool{T}(IHayateServiceCollection, IConfiguration, string?, string)"/>:
     /// the global section is applied first and only the keys present in the pool's own section
-    /// override it.
+    /// override it. Its object policy is the library default, or a policy registered directly in the
+    /// container; when it is the default, this name's <c>ResetOnReturn</c> / <c>ResetOnBorrow</c>
+    /// values reach it, so two names of one element type can run different timings.
     /// </remarks>
     /// <example>
     /// <code>
@@ -107,7 +117,7 @@ public static class ConfigurationExtensions
         // user writes in appsettings.
         services.Services.Configure<HayatePoolOptions>(key.RegistryName, poolConfigSection);
         services.Services.TryAddSingleton<IHayateObjectPoolRegistry, HayateObjectPoolRegistry>();
-        services.Services.TryAddSingleton<IHayateObjectPolicy<T>>(sp => HayateObjectPolicies.Default<T>());
+        SeedDefaultPolicy<T>(services.Services, sp => HayateObjectPolicies.Default<T>());
         services.Services.AddSingleton<HayatePoolConfigurationCleanup>();
 
         services.Services.TryAddSingleton<HayateNamedPoolCollection<T>>();
@@ -117,6 +127,42 @@ public static class ConfigurationExtensions
             new HayateNamedPoolAccessor(sp, sp.GetService<IHayateObjectPoolRegistry>()));
 
         return services;
+    }
+
+    /// <summary>
+    /// Seeds <see cref="IHayateObjectPolicy{T}"/> with <paramref name="create"/> — the library default —
+    /// but only when the container has no policy for the element type yet, and marks the instance so
+    /// <see cref="BuildConfiguredPool{T}"/> can leave a pool built with it to derive its own policy.
+    /// </summary>
+    /// <remarks>
+    /// The seeding keeps the effect the <c>TryAddSingleton</c> it replaces had: when a descriptor already
+    /// exists — the caller registered a policy, in either order relative to this call — nothing is added
+    /// and nothing is replaced.<br />
+    /// What it adds is the record of the instance it seeded. A pool whose policy turns out to be that
+    /// fallback is built <b>without</b> <c>WithPolicy</c>, so the builder derives the policy from the
+    /// pool's own options — the only route the <c>ResetOnReturn</c> / <c>ResetOnBorrow</c> switches have
+    /// into a policy, and the route an appsettings file sets those switches through. A policy the caller
+    /// registered is pinned as before, and its own reset is never moved by the switches.<br />
+    /// The policy is created on first request rather than here, so a type the default policy cannot
+    /// construct still reports that when its pool is built, not when it is declared.
+    /// </remarks>
+    /// <typeparam name="T">The pooled object type.</typeparam>
+    /// <param name="services">The service collection the pool is being registered in.</param>
+    /// <param name="create">Builds the fallback policy.</param>
+    private static void SeedDefaultPolicy<T>(IServiceCollection services,
+        Func<IServiceProvider, IHayateObjectPolicy<T>> create)
+        where T : class
+    {
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(IHayateObjectPolicy<T>))) return;
+
+        var holder = new HayateDefaultPolicyHolder<T>();
+        services.AddSingleton<IHayateObjectPolicy<T>>(sp =>
+        {
+            var policy = create(sp);
+            holder.Record(policy);
+            return policy;
+        });
+        services.AddSingleton(holder);
     }
 
     /// <summary>
@@ -131,6 +177,16 @@ public static class ConfigurationExtensions
         // Resolve dependencies.
         var optionsMonitor = sp.GetRequiredService<IOptionsMonitor<HayatePoolOptions>>();
         var policy = sp.GetRequiredService<IHayateObjectPolicy<T>>();
+
+        // G-20: the library's own fallback is deliberately not pinned onto the pool. Leaving WithPolicy
+        // off lets the builder derive the policy from this pool's options, which is the only route the
+        // ResetOnReturn / ResetOnBorrow switches have into a policy; a policy the caller registered is
+        // pinned exactly as before, so a custom policy's own reset is never moved by the switches. The
+        // test is by identity, not by type: a caller may register HayateObjectPolicies.Default<T>()
+        // itself, and that is the caller's policy.
+        var defaultPolicyHolder = sp.GetService<HayateDefaultPolicyHolder<T>>();
+        var pinsPolicy = defaultPolicyHolder is null || !defaultPolicyHolder.IsFallback(policy);
+
         var scalingStrategy = sp.GetRequiredService<IHayateScalingStrategy>();
         var metrics = sp.GetRequiredService<IHayateMetrics>();
         var loggerFactory = sp.GetService<ILoggerFactory>();
@@ -154,8 +210,14 @@ public static class ConfigurationExtensions
         // otherwise keep the v2.1 semantics (the custom instance has no effect) to avoid Build()
         // fast-failing and wrongly affecting Configuration users.
         var builder = new HayatePoolBuilder<T>()
-            .WithPoolName(poolName)
-            .WithPolicy(policy)
+            .WithPoolName(poolName);
+
+        if (pinsPolicy)
+        {
+            builder = builder.WithPolicy(policy);
+        }
+
+        builder = builder
             .WithScalingStrategy(scalingStrategy)
             .WithLoggerFactory(hayateLoggerFactory);
 

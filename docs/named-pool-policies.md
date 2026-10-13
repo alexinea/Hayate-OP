@@ -196,7 +196,8 @@ the hot path.
    `AddNamedPool<MyConnection>("replica")` resolve **different** policy instances, and the policy
    each pool uses is the one the factory returned for that name.
 2. With no factory registered, the existing `IHayateObjectPolicy<T>` registration path behaves
-   **bit for bit** as before — covered by targeted cases, not by inspection.
+   **bit for bit** as before — covered by targeted cases, not by inspection. (3.1's `G-20` revised what
+   the *pool* does with the policy that path resolves, not the path itself — see §8.)
 3. `src` 10 projects, Release and Debug, `--no-incremental`: **0 warnings, 0 errors**.
 4. No `docs/BREAKING-CHANGES.md` section and no `breaking_registry.json` entry: form ① is additive,
    so there is nothing to migrate.
@@ -209,3 +210,33 @@ All four hold. Anchors 1 and 2 are covered by `NamedPoolPolicyFactoryTests`
 12 cases fail**, and the three that still pass are exactly the ones that must not depend on it —
 which is what makes them evidence rather than decoration. Anchor 3 is the `src` gate; anchor 4 needs
 no work, because nothing was added to the breaking surface.
+
+## 8. Revision: `G-20` (3.1) — the seeded policy is no longer pinned onto the pool
+
+**`B8`'s invariants are intact; one of their consequences is not.** §5's second bullet and §7's
+anchor 2 hold as written: the element-type registration is still seeded, in the same order, with the
+same `AddSingleton` / `TryAddSingleton` semantics, and it is still what
+`GetRequiredService<IHayateObjectPolicy<T>>()` resolves. Anchor 2's "bit for bit" was about *that
+path*, and that path is unchanged — `SeededDefaultPolicy_ShouldStillBeResolvableAndASingleton` and
+`TheSeededDefaultPolicy_ShouldStillBeTheOnlyPolicy`-style cases pin it.
+
+What 3.1's `G-20` changed is what `BuildPool<T>` does with the policy it resolved. When that policy is
+the library's own seeded fallback, the pool is now built **without** `WithPolicy`, so the builder
+derives the policy from the pool's own options. That derivation is the only route `G-7`'s
+`ResetOnReturn` / `ResetOnBorrow` switches have into a policy; a pinned fallback ignored them while
+`GetOptions()` reported them, which is the gap `G-20` closed. A policy the caller registered — directly
+in the container, in either order relative to the pool — and one this item's `IHayateObjectPolicyFactory<T>`
+returns, are both pinned exactly as before, so a caller's policy keeps its own reset and the switches
+never move it.
+
+The fallback is recognised by **identity**, not by type or by a "did we seed?" flag: a caller may
+register `HayateObjectPolicies.Default<T>()` itself, and a policy registered *after* the pool is a
+second descriptor the container hands out. Both are the caller's policy, and both are pinned;
+`ResetTimingDependencyInjectionTests` covers the ordering case, which is the one a flag gets wrong.
+
+**Revised invariant.** A pool resolves a policy per element type as §1–§5 describe; a pool whose policy
+is the library's seeded fallback derives its own from its options instead of pinning that instance.
+
+The revision is delivered by the two extension packages, each keeping its own internal marker (the
+DependencyInjection package's `HayateDefaultPolicyHolder<T>` and the Configuration package's), because
+each owns the registration and the pool build it pairs with. Neither marker is public.
