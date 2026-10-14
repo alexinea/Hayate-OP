@@ -30,6 +30,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private readonly IHayateAsyncObjectPolicy<T>? _asyncPolicy;
 #endif
 
+    // G-22: the policy seen as its optional lifecycle-observer contract, resolved once at construction
+    // so a notification is a null test on a readonly field and a policy that does not implement the
+    // interface pays nothing. Probed on the policy itself rather than on the asynchronous contract:
+    // the two hooks are synchronous by design, so an asynchronous policy is observed through this one
+    // as well.
+    private readonly IHayateObjectLifecycleObserver<T>? _lifecycleObserver;
+
     // A2 (docs/async-policy.md §5): the destroy paths prefer the object's IAsyncDisposable
     // teardown when the policy implements the asynchronous contract. Assigned true only on
     // net6.0 and later — netstandard2.0 / net48 have no IAsyncDisposable, so the flag stays
@@ -259,7 +266,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 Interlocked.Decrement(ref _frontSlotIdleCount);
             }
 
-            Destroy(w);
+            Destroy(w, HayateDestroyReason.PoolCleared);
             return true;
         }
 
@@ -350,7 +357,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             {
                 // The shard has no room for it — a slot store whose capacity shrank under it. The object
                 // cannot be left reachable from nowhere, so it is destroyed outright.
-                Destroy(parked);
+                Destroy(parked, HayateDestroyReason.PoolCleared);
             }
         }
     }
@@ -772,6 +779,9 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _asyncPolicy = policy as IHayateAsyncObjectPolicy<T>;
         _prefersAsyncDisposal = _asyncPolicy is not null;
 #endif
+        // G-22: the optional lifecycle-observer contract. Null for a policy that does not implement it,
+        // which is the overwhelmingly common case — every notification below is then a null test.
+        _lifecycleObserver = policy as IHayateObjectLifecycleObserver<T>;
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _scalingStrategy = scalingStrategy ?? throw new ArgumentNullException(nameof(scalingStrategy));
         _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
@@ -984,7 +994,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     // Register into the target shard. If the shard rejects (capacity is clamped, theoretically unreachable), destroy as fallback,
                     // to avoid orphaned entries that are registered but in no free list.
                     var w = CreateWrappedObject(shard);
-                    if (!shard.Add(w)) Destroy(w);
+                    if (!shard.Add(w)) Destroy(w, HayateDestroyReason.CapacityOverflow);
                     else SignalAvailability();
                     totalPreWarmed++;
                 }
@@ -1066,7 +1076,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 }
                 else
                 {
-                    Destroy(w);
+                    Destroy(w, HayateDestroyReason.CapacityOverflow);
                     skipped++;
                 }
             }
@@ -1501,7 +1511,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         // G-5: the object never reaches the caller, so the loan it would have started
                         // ends here instead.
                         ReleaseActiveSlot();
-                        Destroy(w);
+                        Destroy(w, HayateDestroyReason.ValidationFailed);
                         continue;
                     }
 
@@ -1892,7 +1902,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         // G-5: the object never reaches the caller, so the loan it would have started
                         // ends here instead.
                         ReleaseActiveSlot();
-                        Destroy(w);
+                        Destroy(w, HayateDestroyReason.ValidationFailed);
                         continue;
                     }
 
@@ -2141,7 +2151,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             }
 
             _logger.LogWarning("Returned object does not belong to pool. Disposing. Type: {Type}", typeof(T).Name);
-            Destroy(item);
+            Destroy(item, HayateDestroyReason.Misuse);
 
             if (_enableMetrics)
             {
@@ -2173,7 +2183,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             _logger.LogWarning("Object returned to pool. Disposing. Type: {Type}", typeof(T).Name);
             // G-5: this return destroys the object without reaching CompleteReturn, so the loan ends here.
             ReleaseActiveSlot();
-            Destroy(w);
+            Destroy(w, HayateDestroyReason.ValidationFailed);
 
             if (_enableMetrics)
             {
@@ -2205,7 +2215,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 "Policy rejected object on release. Disposing. Type: {Type}",
                 typeof(T).Name);
 
-            Destroy(w);
+            Destroy(w, HayateDestroyReason.ReturnRejected);
 
             if (_enableMetrics)
             {
@@ -2240,7 +2250,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         typeof(T).Name, idle, _softCapacity);
                 }
 
-                Destroy(w);
+                Destroy(w, HayateDestroyReason.CapacityOverflow);
                 return;
             }
         }
@@ -2287,7 +2297,16 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         {
             _logger.LogWarning("Object rejected by shard on release. Removing from pool. Type: {Type}, shard: {ShardIndex}",
                 typeof(T).Name, shardIndex);
-            Destroy(w);
+
+            // G-22: the append guard refuses two different things -- a shard with no room, and a wrapper
+            // the shard already holds (the second-return case). The guard leaves the store consistent
+            // either way, so the only thing left to decide is what to report to the lifecycle observer.
+            // The wrapper's location separates the two, and it survives the guard: the second-return
+            // branch unlinks the node but leaves Location at InPool. Read here rather than before the
+            // call so the common return path pays nothing.
+            var alreadyHeld = w.Location == HayateObjectLocation.InPool || IsParkedInSomeFrontSlot(w);
+
+            Destroy(w, alreadyHeld ? HayateDestroyReason.Misuse : HayateDestroyReason.CapacityOverflow);
 
             if (_enableAutoScaling && _options.MinPoolSize > 0 &&
                 TrackedObjectCount < _options.MinPoolSize)
@@ -2318,7 +2337,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _logger.LogError(ex, "Error during object return validation. Disposing. Type: {Type}", typeof(T).Name);
         // G-1: a return that threw is still a return attempt, so it counts as activity.
         TouchActivity();
-        Destroy(w);
+        Destroy(w, HayateDestroyReason.ReturnRejected);
 
         if (_enableMetrics)
         {
@@ -2396,7 +2415,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 if (!ReferenceEquals(parked, Interlocked.CompareExchange(ref slot.Parked, null, parked))) continue;
 
                 Interlocked.Decrement(ref _frontSlotIdleCount);
-                Destroy(parked);
+                Destroy(parked, HayateDestroyReason.Evicted);
                 evicted++;
             }
         }
@@ -2431,7 +2450,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 // Only the caller that successfully claims may destroy (if the object is currently borrowed, Remove returns false)
                 if (shard.Remove(w))
                 {
-                    Destroy(w);
+                    Destroy(w, HayateDestroyReason.Evicted);
                     evicted++;
                 }
             }
@@ -2805,7 +2824,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 var shard = _shards[i % _shards.Length];
                 // Register into the target shard; under concurrency Add may still be filled first by another thread and rejected, so destroy as fallback to prevent orphaned registry entries.
                 var w = CreateWrappedObject(shard);
-                if (!shard.Add(w)) Destroy(w);
+                if (!shard.Add(w)) Destroy(w, HayateDestroyReason.CapacityOverflow);
                 else SignalAvailability();
                 added++;
             }
@@ -3141,13 +3160,19 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     }
 #endif
 
-    private void Destroy(HayateObject<T> w)
+    private void Destroy(HayateObject<T> w, HayateDestroyReason reason)
     {
         if (w == null) return;
 
         // Idempotent protection: eviction, idle validation, and return rejection may concurrently hit the same wrapper,
         // and only the first caller to pass the CAS truly destroys it; the rest return immediately, avoiding a double Dispose.
         if (Interlocked.Exchange(ref w.Destroyed, 1) == 1) return;
+
+        // G-22: the observer is told why, once, before anything is torn down. Sitting behind the claim
+        // above is what makes the notification exactly-once; sitting ahead of DestroyObject is what lets
+        // the observer still see a live value. The two hooks partition the reasons — see
+        // HayateDestroyReason for which value reaches which hook.
+        NotifyDestroyed(w.Value, reason);
 
         // A destroyed wrapper must never stay linked as borrowed (K2): whatever the destroy reason
         // (abandoned reclamation, return rejection, validation failure, overflow), a later abandoned
@@ -3197,9 +3222,14 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         }
     }
 
-    private void Destroy(T o)
+    private void Destroy(T o, HayateDestroyReason reason)
     {
         if (o == null) return;
+
+        // G-22: this overload has no idempotent claim to hide behind — it is reached only for an object
+        // the pool never tracked, so there is exactly one caller and the notification is once by
+        // construction.
+        NotifyDestroyed(o, reason);
 
         try
         {
@@ -3212,6 +3242,40 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             _logger.LogError(ex, "Error during object destruction. Type: {Type}", typeof(T).Name);
         }
     }
+
+    /// <summary>
+    /// G-22: the single notification point for a destruction, called from every destroy site with the
+    /// reason that site can distinguish. The routing lives here rather than at the sites so the
+    /// partition between the two observer hooks is stated exactly once: a validation failure goes to its
+    /// dedicated hook, every other reason to the general one.
+    /// </summary>
+    /// <remarks>
+    /// The observer is invoked before the value is disposed, and a throwing observer is swallowed and
+    /// logged: notification is a courtesy to the policy, never a precondition for a correct teardown,
+    /// and it must not be able to abort a drain that is already in progress.
+    /// </remarks>
+    private void NotifyDestroyed(T item, HayateDestroyReason reason)
+    {
+        var observer = _lifecycleObserver;
+        if (observer is null || item is null) return;
+
+        try
+        {
+            if (reason == HayateDestroyReason.ValidationFailed) observer.OnValidationFailed(item);
+            else observer.OnEvict(item, reason);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Object lifecycle observer failed. Type: {Type}, reason: {Reason}", typeof(T).Name, reason);
+        }
+    }
+
+    /// <summary>
+    /// G-22: the drain's notification, handed to the shard's clear so it is invoked once per drained
+    /// object. A method group rather than a lambda because it is bound once per drain, not once per
+    /// object, and because the wrapper is only ever offered while its value is still live.
+    /// </summary>
+    private void NotifyPoolCleared(HayateObject<T> w) => NotifyDestroyed(w.Value, HayateDestroyReason.PoolCleared);
 
     /// <summary>
     /// G-1: records the highest number of concurrently borrowed objects seen so far. Called only from the
@@ -3473,7 +3537,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         // back; the replacement the caller creates next claims one of its own. Shared by the synchronous
         // and asynchronous rotation paths.
         ReleaseActiveSlot();
-        Destroy(w);
+        Destroy(w, HayateDestroyReason.Rotated);
         Interlocked.Increment(ref _lifetimeRotatedCount);
         if (DebugTraceEnabled)
         {
@@ -3527,7 +3591,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             if (!ReferenceEquals(parked, Interlocked.CompareExchange(ref slot.Parked, null, parked))) continue;
 
             Interlocked.Decrement(ref _frontSlotIdleCount);
-            Destroy(parked);
+            Destroy(parked, HayateDestroyReason.Evicted);
             evicted++;
 
             LogEviction(shardIndex, candidate);
@@ -3598,7 +3662,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         // it must never be destroyed, or it would corrupt the business thread using it.
                         if (shard.Remove(w))
                         {
-                            Destroy(w);
+                            Destroy(w, HayateDestroyReason.Evicted);
                             evictedCount++;
 
                             LogEviction(shard.Index, candidate);
@@ -3693,7 +3757,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     ReleaseActiveSlot();
                     Interlocked.Increment(ref _abandonedRemovedCount);
                     if (_logAbandoned) LogAbandonedObject(w);
-                    Destroy(w);
+                    Destroy(w, HayateDestroyReason.Abandoned);
                     if (reclaimed >= maxCandidates) break;
                 }
 
@@ -3778,7 +3842,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     var shard = _shards[i % _shards.Length];
                     // Register into the target shard; if Add is rejected, destroy as fallback to prevent orphaned registry entries.
                     var w = CreateWrappedObject(shard);
-                    if (!shard.Add(w)) Destroy(w);
+                    if (!shard.Add(w)) Destroy(w, HayateDestroyReason.CapacityOverflow);
                     else SignalAvailability();
                 }
 
@@ -3820,7 +3884,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     {
                         if (shard.TryTake(out var w))
                         {
-                            Destroy(w);
+                            Destroy(w, HayateDestroyReason.ScaledDown);
                             removed++;
                         }
                         else break;
@@ -3860,7 +3924,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         // A failed claim means the object was already borrowed or claimed by another thread; it must not be destroyed then
                         if (shard.Remove(w))
                         {
-                            Destroy(w);
+                            Destroy(w, HayateDestroyReason.ValidationFailed);
                             invalidCount++;
                             _logger.LogWarning("Idle object failed validation and was evicted. Type: {Type}", typeof(T).Name);
                         }
@@ -4173,7 +4237,11 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         foreach (var shard in _shards)
         {
-            shard.Clear();
+            // G-22: the drain reports its reason through the observer hook. It still does not run
+            // OnDestroy — docs/disposal.md §5 states that contract, and this change deliberately leaves it
+            // alone. The two are independent, and the observer exists precisely so a policy can be told
+            // about a drain without that contract having to move.
+            shard.Clear(NotifyPoolCleared);
             // The registry is cleared with the shard (including entries of borrowed objects, consistent with the original pool-level map.Clear semantics).
             shard.ClearTracked();
         }
@@ -4303,6 +4371,10 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             {
                 try
                 {
+                    // G-22: the awaited drain reports the same reason as the synchronous one, and just as
+                    // deliberately does not add OnDestroy to the drain.
+                    NotifyDestroyed(w.Value, HayateDestroyReason.PoolCleared);
+
                     if (_asyncPolicy is not null)
                     {
                         await _asyncPolicy.OnDestroyAsync(w.Value).ConfigureAwait(false);

@@ -1028,13 +1028,22 @@ public partial class HayatePoolBasic<T>
             finally { if (taken) _lock.Exit(); }
         }
 
-        public void Clear()
+        /// <summary>
+        /// Unlinks every idle wrapper, disposes its value, and marks it destroyed.
+        /// </summary>
+        /// <param name="onDestroyed">G-22: offered each drained wrapper immediately before its value is
+        /// disposed, so the pool can notify a lifecycle observer with
+        /// <see cref="HayateDestroyReason.PoolCleared"/>. <c>null</c> skips the notification. The callback
+        /// does not change what this drain does — it still disposes the value directly and still does not
+        /// run <c>IHayateObjectPolicy.OnDestroy</c> (docs/disposal.md §5).</param>
+        public void Clear(Action<HayateObject<T>>? onDestroyed = null)
         {
             var drained = DrainForClear();
 
             var clearedCount = 0;
             foreach (var w in drained)
             {
+                onDestroyed?.Invoke(w);
                 if (SafeDispose(w, "shard clear")) clearedCount++;
             }
 

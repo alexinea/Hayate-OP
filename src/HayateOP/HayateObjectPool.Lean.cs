@@ -385,9 +385,13 @@ public partial class HayatePoolBasic<T>
     /// which lean mode cannot detect (there is no registry to check against) and which the
     /// counter guard below keeps from corrupting the live count.
     /// </summary>
-    private void DestroyLean(T item)
+    private void DestroyLean(T item, HayateDestroyReason reason)
     {
         if (item is null) return;
+
+        // G-22: the lean fast path keeps no per-object state and never validates, so it can only ever
+        // report the reasons a return, a capacity decision or a drain produces — never ValidationFailed.
+        NotifyDestroyed(item, reason);
 
         try
         {
@@ -411,9 +415,11 @@ public partial class HayatePoolBasic<T>
     /// — and the object's disposal prefers <c>IAsyncDisposable</c>, because the caller explicitly
     /// chose the asynchronous drain.
     /// </summary>
-    private async ValueTask DestroyLeanAsync(T item)
+    private async ValueTask DestroyLeanAsync(T item, HayateDestroyReason reason)
     {
         if (item is null) return;
+
+        NotifyDestroyed(item, reason);
 
         try
         {
@@ -462,7 +468,7 @@ public partial class HayatePoolBasic<T>
                 {
                     // Unreachable while the loop bound respects the capacity; kept as a guard so an
                     // object can never leak out of the live count if that invariant is broken later.
-                    DestroyLean(item);
+                    DestroyLean(item, HayateDestroyReason.CapacityOverflow);
                     break;
                 }
 
@@ -501,7 +507,7 @@ public partial class HayatePoolBasic<T>
             if (!TryGrowLean(out var item)) break;
             if (!TryReturnLean(item))
             {
-                DestroyLean(item);
+                DestroyLean(item, HayateDestroyReason.CapacityOverflow);
                 break;
             }
 
@@ -527,7 +533,7 @@ public partial class HayatePoolBasic<T>
         var first = Interlocked.Exchange(ref _leanFirstItem, null);
         if (first is not null)
         {
-            DestroyLean(first);
+            DestroyLean(first, HayateDestroyReason.PoolCleared);
             destroyed++;
         }
 
@@ -538,7 +544,7 @@ public partial class HayatePoolBasic<T>
             var slot = Interlocked.Exchange(ref slots[i], null);
             if (slot is not null)
             {
-                DestroyLean(slot);
+                DestroyLean(slot, HayateDestroyReason.PoolCleared);
                 destroyed++;
             }
         }
@@ -560,7 +566,7 @@ public partial class HayatePoolBasic<T>
         var first = Interlocked.Exchange(ref _leanFirstItem, null);
         if (first is not null)
         {
-            await DestroyLeanAsync(first).ConfigureAwait(false);
+            await DestroyLeanAsync(first, HayateDestroyReason.PoolCleared).ConfigureAwait(false);
             destroyed++;
         }
 
@@ -571,7 +577,7 @@ public partial class HayatePoolBasic<T>
             var slot = Interlocked.Exchange(ref slots[i], null);
             if (slot is not null)
             {
-                await DestroyLeanAsync(slot).ConfigureAwait(false);
+                await DestroyLeanAsync(slot, HayateDestroyReason.PoolCleared).ConfigureAwait(false);
                 destroyed++;
             }
         }
@@ -843,14 +849,14 @@ public partial class HayatePoolBasic<T>
             if (!_policy.OnRelease(item))
             {
                 _logger.LogWarning("Policy rejected object on release. Disposing. Type: {Type}", typeof(T).Name);
-                DestroyLean(item);
+                DestroyLean(item, HayateDestroyReason.ReturnRejected);
                 return;
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during object return validation. Disposing. Type: {Type}", typeof(T).Name);
-            DestroyLean(item);
+            DestroyLean(item, HayateDestroyReason.ReturnRejected);
             return;
         }
 
@@ -879,14 +885,14 @@ public partial class HayatePoolBasic<T>
             if (!await _asyncPolicy.OnReleaseAsync(item).ConfigureAwait(false))
             {
                 _logger.LogWarning("Policy rejected object on release. Disposing. Type: {Type}", typeof(T).Name);
-                DestroyLean(item);
+                DestroyLean(item, HayateDestroyReason.ReturnRejected);
                 return;
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during object return validation. Disposing. Type: {Type}", typeof(T).Name);
-            DestroyLean(item);
+            DestroyLean(item, HayateDestroyReason.ReturnRejected);
             return;
         }
 
@@ -901,7 +907,7 @@ public partial class HayatePoolBasic<T>
             // Buffer already at MaxPoolSize idle objects: drop it. An overflow is a normal
             // steady-state outcome (more objects outstanding than the pool retains), so it is not
             // an error and is not logged on the hot path.
-            DestroyLean(item);
+            DestroyLean(item, HayateDestroyReason.CapacityOverflow);
             return;
         }
 

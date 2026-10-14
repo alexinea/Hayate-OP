@@ -563,6 +563,86 @@
             <param name="candidate">The idle object under test.</param>
             <returns><c>true</c> when the object is expired, idle too long, or softly idle above the minimum.</returns>
         </member>
+        <member name="T:DotNetCore.HayateOP.HayateDestroyReason">
+            <summary>
+            Why the pool destroyed a pooled object, reported to an
+            <see cref="T:DotNetCore.HayateOP.Policies.IHayateObjectLifecycleObserver`1"/> so a policy can tell a teardown it caused
+            from one the pool's own maintenance caused.
+            </summary>
+            <remarks>
+            <para>
+            A value reaches the observer through <c>OnEvict</c>, with one exception:
+            <see cref="F:DotNetCore.HayateOP.HayateDestroyReason.ValidationFailed"/> is delivered to <c>OnValidationFailed</c> instead. The two hooks
+            partition this enum rather than overlapping, so a policy that only wants validation failures never
+            has to filter them out of the general hook.
+            </para>
+            <para>
+            The reasons are the ones the engine can actually distinguish at a destroy site. A pool running the
+            lean fast path keeps no per-object state and never validates, so it can report the reasons it can
+            judge and <see cref="F:DotNetCore.HayateOP.HayateDestroyReason.ValidationFailed"/> is unreachable there.
+            </para>
+            <para>
+            This enum is not the same thing as <see cref="T:DotNetCore.HayateOP.HayateEvictReason"/>: that one categorises what the
+            caller asked a manual <c>Evict</c> to remove, while this one records why the engine removed the
+            object. A manual eviction reports <see cref="F:DotNetCore.HayateOP.HayateDestroyReason.Evicted"/> here, whichever of the three
+            <see cref="T:DotNetCore.HayateOP.HayateEvictReason"/> categories it used.
+            </para>
+            </remarks>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateDestroyReason.ValidationFailed">
+            <summary>
+            <c>Validate</c> answered <c>false</c> -- on borrow, on return, or while the object sat idle.
+            Delivered to <c>OnValidationFailed</c> rather than to <c>OnEvict</c>.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateDestroyReason.Evicted">
+            <summary>
+            The pool's eviction rule retired the object: the background eviction run, or a manual
+            <see cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.Evict(DotNetCore.HayateOP.HayateEvictReason)"/>.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateDestroyReason.CapacityOverflow">
+            <summary>
+            The pool had nowhere to park the object: a shard already at its idle capacity, the return-path
+            soft ceiling, a pre-warm or auto-scaling grow that lost the race for the last slot.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateDestroyReason.ReturnRejected">
+            <summary>
+            <c>OnRelease</c> refused the object, or the release path threw before the object could be
+            parked.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateDestroyReason.PoolCleared">
+            <summary>
+            The pool was drained -- <c>Clear()</c>, <c>Dispose()</c>, or their asynchronous twins -- and the
+            object was idle at that moment.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateDestroyReason.ScaledDown">
+            <summary>
+            The auto-scaling strategy shrank the pool and this object did not survive the shrink.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateDestroyReason.Abandoned">
+            <summary>
+            Abandoned-object recovery reclaimed the object: it had been borrowed and not returned within the
+            configured window.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateDestroyReason.Rotated">
+            <summary>
+            The object outlived <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.MaxLifeTime"/> and was rotated out on the borrow
+            path, a freshly created replacement taking its place.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateDestroyReason.Misuse">
+            <summary>
+            The object was handed back by a caller the pool does not recognise as its owner: a foreign
+            instance, or a second return that the shard rejects because it already holds the wrapper. A
+            <c>null</c> return is a misuse too, but there is no object to destroy, so it never reaches this hook.
+            </summary>
+        </member>
         <member name="T:DotNetCore.HayateOP.HayateEvictionCandidate`1">
             <summary>
             One idle object offered to an <see cref="T:DotNetCore.HayateOP.IHayateEvictionPolicy`1"/>: the pooled instance plus the
@@ -1527,6 +1607,26 @@
             caller opted into even when the policy did not.
             </summary>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.NotifyDestroyed(`0,DotNetCore.HayateOP.HayateDestroyReason)">
+            <summary>
+            G-22: the single notification point for a destruction, called from every destroy site with the
+            reason that site can distinguish. The routing lives here rather than at the sites so the
+            partition between the two observer hooks is stated exactly once: a validation failure goes to its
+            dedicated hook, every other reason to the general one.
+            </summary>
+            <remarks>
+            The observer is invoked before the value is disposed, and a throwing observer is swallowed and
+            logged: notification is a courtesy to the policy, never a precondition for a correct teardown,
+            and it must not be able to abort a drain that is already in progress.
+            </remarks>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.NotifyPoolCleared(DotNetCore.HayateOP.HayateObject{`0})">
+            <summary>
+            G-22: the drain's notification, handed to the shard's clear so it is invoked once per drained
+            object. A method group rather than a lambda because it is bound once per drain, not once per
+            object, and because the wrapper is only ever offered while its value is still live.
+            </summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.UpdatePeakActiveObjects(System.Int32)">
             <summary>
             G-1: records the highest number of concurrently borrowed objects seen so far. Called only from the
@@ -1814,7 +1914,7 @@
             can avoid maintaining one.
             </summary>
         </member>
-        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.DestroyLean(`0)">
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.DestroyLean(`0,DotNetCore.HayateOP.HayateDestroyReason)">
             <summary>
             Destroys a lean-mode object: runs the policy hook, disposes the value and releases its slot
             reservation. Every object reachable from the lean buffer was created by this pool, so the
@@ -1823,9 +1923,9 @@
             counter guard below keeps from corrupting the live count.
             </summary>
         </member>
-        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.DestroyLeanAsync(`0)">
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.DestroyLeanAsync(`0,DotNetCore.HayateOP.HayateDestroyReason)">
             <summary>
-            The awaited twin of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.DestroyLean(`0)"/>, used by <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.ClearLeanAsync"/>: the
+            The awaited twin of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.DestroyLean(`0,DotNetCore.HayateOP.HayateDestroyReason)"/>, used by <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.ClearLeanAsync"/>: the
             destroy hook runs for every policy exactly as the lean clear always has — the asynchronous
             form when the policy provides one, the synchronous form otherwise (docs/async-policy.md §5)
             — and the object's disposal prefers <c>IAsyncDisposable</c>, because the caller explicitly
@@ -1860,7 +1960,7 @@
             <summary>
             The awaited twin of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.ClearLean"/>, used as the lean drain of
             <c>DisposeAsync</c>: the same slot sweep and the same live-count bookkeeping, statement for
-            statement, with each destroy awaited through <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.DestroyLeanAsync(`0)"/> instead of run
+            statement, with each destroy awaited through <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.DestroyLeanAsync(`0,DotNetCore.HayateOP.HayateDestroyReason)"/> instead of run
             synchronously.
             </summary>
         </member>
@@ -2207,9 +2307,19 @@
             gone, which is one of the two things that backend gives up.
             </remarks>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.Clear(System.Action{DotNetCore.HayateOP.HayateObject{`0}})">
+            <summary>
+            Unlinks every idle wrapper, disposes its value, and marks it destroyed.
+            </summary>
+            <param name="onDestroyed">G-22: offered each drained wrapper immediately before its value is
+            disposed, so the pool can notify a lifecycle observer with
+            <see cref="F:DotNetCore.HayateOP.HayateDestroyReason.PoolCleared"/>. <c>null</c> skips the notification. The callback
+            does not change what this drain does — it still disposes the value directly and still does not
+            run <c>IHayateObjectPolicy.OnDestroy</c> (docs/disposal.md §5).</param>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.DrainForClear">
             <summary>
-            The lock-protected half of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.Clear"/>: unlinks every idle wrapper, marks it
+            The lock-protected half of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.Clear(System.Action{DotNetCore.HayateOP.HayateObject{`0}})"/>: unlinks every idle wrapper, marks it
             destroyed, and empties the borrowed links. Shared with the pool's asynchronous drain
             (<c>HayatePoolBasic&lt;T&gt;.ClearAsync</c>), which disposes the drained objects outside this
             lock through the awaited destroy path. No user code runs inside the critical section —
@@ -8533,6 +8643,70 @@
             <summary>Called asynchronously when an object is destroyed (removed from the pool for good).</summary>
             <param name="item">The object being destroyed.</param>
             <param name="cancellationToken">Token that cancels the hook.</param>
+        </member>
+        <member name="T:DotNetCore.HayateOP.Policies.IHayateObjectLifecycleObserver`1">
+            <summary>
+            An optional companion to <see cref="T:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1"/> that is told <i>why</i> the pool
+            destroyed a pooled object. <see cref="M:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1.OnDestroy(`0)"/> says an object was torn
+            down; these hooks say what decided it.
+            </summary>
+            <remarks>
+            <para>
+            The interface is deliberately separate from <see cref="T:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1"/> and is probed with
+            <c>is</c> at construction, exactly as the asynchronous contract is. A policy that does not implement
+            it compiles unchanged and pays one null test on the destroy path, and a policy that does implement it
+            keeps its <see cref="T:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1"/> implementation untouched. Adding the two members to the
+            main interface instead would have forced every implementer in the wild to add them.
+            </para>
+            <para>
+            The two hooks partition the reasons rather than overlapping: a validation failure arrives through
+            <c>OnValidationFailed</c>, and every other destruction arrives through <c>OnEvict</c> with its
+            <see cref="T:DotNetCore.HayateOP.HayateDestroyReason"/>. A policy that wants one entry point can route the first into the
+            second itself.
+            </para>
+            <para>
+            Both hooks run <b>before</b> the object is torn down, so the value is still alive when the observer
+            sees it, and both run exactly once per object: they sit behind the same idempotent claim that makes
+            <see cref="M:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1.OnDestroy(`0)"/> fire once. An exception thrown by either is logged and
+            swallowed -- a misbehaving observer must not turn a destruction into a leak, or abort the drain that
+            was in progress.
+            </para>
+            <para>
+            Different objects can be destroyed concurrently, so these callbacks can run concurrently too. An
+            observer that updates shared state must provide its own synchronization; the pool serializes neither
+            the callbacks nor the policy's other lifecycle methods.
+            </para>
+            <para>
+            The hooks are synchronous by design, on the same reasoning the asynchronous contract uses for
+            <c>Validate</c> and <c>OnAcquire</c>: they are notification and bookkeeping, not I/O. A pool whose
+            policy also implements <c>IHayateAsyncObjectPolicy&lt;T&gt;</c> is still observed through these
+            members.
+            </para>
+            <para>
+            Coverage is the engine's, not a promise: the general-purpose engine reports every reason it can
+            distinguish, while the lean fast path keeps no per-object state and never validates, so it reports
+            the reasons it can judge and never reports <see cref="F:DotNetCore.HayateOP.HayateDestroyReason.ValidationFailed"/>. A
+            drain reports <see cref="F:DotNetCore.HayateOP.HayateDestroyReason.PoolCleared"/> even though it deliberately does not run
+            <see cref="M:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1.OnDestroy(`0)"/> -- the two are independent contracts.
+            </para>
+            <para>
+            This interface is available on every target. The <c>netstandard2.0</c> and <c>net48</c> builds do not
+            support default interface methods, which is why the contract is a separate interface rather than two
+            defaulted members on the main one.
+            </para>
+            </remarks>
+            <typeparam name="T">The pooled object type.</typeparam>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Policies.IHayateObjectLifecycleObserver`1.OnEvict(`0,DotNetCore.HayateOP.HayateDestroyReason)">
+            <summary>Called just before the pool destroys an object, for every reason except
+            <see cref="F:DotNetCore.HayateOP.HayateDestroyReason.ValidationFailed"/>.</summary>
+            <param name="item">The object about to be destroyed; still alive and not yet disposed.</param>
+            <param name="reason">What decided the destruction.</param>
+        </member>
+        <member name="M:DotNetCore.HayateOP.Policies.IHayateObjectLifecycleObserver`1.OnValidationFailed(`0)">
+            <summary>Called just before the pool destroys an object because <c>Validate</c> answered
+            <c>false</c> for it -- the borrow-side, return-side and idle-sweep failures alike.</summary>
+            <param name="item">The object about to be destroyed; still alive and not yet disposed.</param>
         </member>
         <member name="T:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1">
             <summary>
