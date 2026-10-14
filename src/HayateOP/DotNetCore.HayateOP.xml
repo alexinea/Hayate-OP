@@ -2347,7 +2347,9 @@
             configuration (<c>IsValid</c> -&gt; <c>ApplyFeatureSwitches</c>) before it ever touches this
             property, so a lean pool hands its policy the already-downgraded value rather than the one the
             builder call sequence happened to leave behind. A policy supplied through <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithPolicy(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0})"/>
-            owns its own reset behavior and is never reconfigured here.
+            owns its own reset behavior and is never reconfigured here. The same resolution order carries the
+            delegate setters (G-13): one of them ran, and the delegate policy it describes is what the pool is
+            built with — see <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.ResolvePolicy"/>.
             </remarks>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithLean(System.Boolean)">
@@ -3496,10 +3498,94 @@
             <param name="policy">The policy used to create, validate and reset pooled objects.</param>
             <returns>The same builder instance for chaining.</returns>
             <exception cref="T:System.ArgumentNullException"><paramref name="policy"/> is <c>null</c>.</exception>
+            <remarks>
+            The last call on the chain wins: a policy set here replaces the delegate description an earlier
+            <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithFactory(System.Func{`0})"/> / <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithReset(System.Action{`0})"/> / <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithReturnPredicate(System.Func{`0,System.Boolean})"/> left
+            pending, and those three replace a policy set here when they come later. The mechanism is one
+            rule rather than two: the delegate setters clear the policy field, and <see cref="P:DotNetCore.HayateOP.HayatePoolBuilder`1.Policy"/>
+            resolves lazily on the first build, so whichever way of describing a policy ran last is the one
+            the resolution sees.
+            </remarks>
             <example>
             <code>
             var builder = new HayatePoolBuilder&lt;MyResource&gt;()
                 .WithPolicy(new MyResourcePolicy());
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithFactory(System.Func{`0})">
+            <summary>
+            Sets the object factory as a delegate, so a pool's creation can be expressed as a lambda instead of
+            a policy class.
+            </summary>
+            <param name="create">The delegate that builds a new object; its result must not be <c>null</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="create"/> is <c>null</c>.</exception>
+            <remarks>
+            This is the builder-side form of what <see cref="M:DotNetCore.HayateOP.HayatePool.Simple``1(System.Int32,System.Func{``0},System.Action{``0},System.String)"/> does for the one-call
+            pool, with the whole option surface still available: every other
+            <c>With*</c> call on the chain applies to the pool this factory builds, which the one-call factory
+            cannot offer. <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithReset(System.Action{`0})"/> and <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithReturnPredicate(System.Func{`0,System.Boolean})"/> attach to the same
+            delegate policy and need no particular order relative to this call; the last call on the chain
+            wins over an earlier <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithPolicy(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0})"/>.
+            </remarks>
+            <example>
+            <code>
+            var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithFactory(() =&gt; new MyResource())
+                .WithReset(r =&gt; r.Clear())
+                .WithMaxSize(64)
+                .Build();
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithReset(System.Action{`0})">
+            <summary>
+            Sets the reset that runs when a returned object is on its way back into the idle state.
+            </summary>
+            <param name="reset">The delegate invoked with the object being returned.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="reset"/> is <c>null</c>.</exception>
+            <remarks>
+            The delegate is the policy's passivate hook, which runs before the return is accepted — see
+            <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithReturnPredicate(System.Func{`0,System.Boolean})"/>. It is a separate layer from the pool-level reset-timing
+            switches (<see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithResetOnReturn(System.Boolean)"/> / <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithResetOnBorrow(System.Boolean)"/>), which govern only the
+            library default policy's reset of an <see cref="T:DotNetCore.HayateOP.IHayateResettable"/> object: a caller describing a
+            policy through these delegates owns that policy's hooks, exactly as a policy class would, and the
+            switches leave it alone.
+            </remarks>
+            <example>
+            <code>
+            var pool = new HayatePoolBuilder&lt;MyBuffer&gt;()
+                .WithFactory(() =&gt; new MyBuffer())
+                .WithReset(b =&gt; b.Clear())
+                .Build();
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithReturnPredicate(System.Func{`0,System.Boolean})">
+            <summary>
+            Sets the predicate that decides whether a returned object is taken back into the pool.
+            </summary>
+            <param name="predicate">
+            The delegate invoked with the object being returned; <c>false</c> destroys the object instead of
+            parking it.
+            </param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="predicate"/> is <c>null</c>.</exception>
+            <remarks>
+            This is the policy's release hook: it runs after <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithReset(System.Action{`0})"/>'s passivate, so an object
+            is reset before the pool decides whether it is worth keeping. Returning <c>false</c> is the same
+            outcome a policy class produces, and — as there — disposing an <c>IDisposable</c> object stays
+            with the pool.
+            </remarks>
+            <example>
+            <code>
+            // Keep the object only while it is still within its inspection date.
+            var pool = new HayatePoolBuilder&lt;MyConnection&gt;()
+                .WithFactory(() =&gt; new MyConnection())
+                .WithReturnPredicate(c =&gt; !c.IsStale)
+                .Build();
             </code>
             </example>
         </member>
@@ -8337,7 +8423,9 @@
         <member name="T:DotNetCore.HayateOP.DelegateHayateObjectPolicy`1">
             <summary>
             An <see cref="T:DotNetCore.HayateOP.Policies.IHayateObjectPolicy`1"/> built from delegates. <see cref="M:DotNetCore.HayateOP.HayatePool.Simple``1(System.Int32,System.Func{``0},System.Action{``0},System.String)"/> uses it
-            so creation can be expressed as a lambda instead of a policy class.
+            so creation can be expressed as a lambda instead of a policy class, and
+            <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithFactory(System.Func{`0})"/> and its two companions expose the same mechanism on the
+            builder.
             </summary>
             <remarks>
             Everything the policy does not customize keeps the neutral behaviour that makes it safe as a default:
@@ -8351,7 +8439,9 @@
             <summary>Creates a new object by invoking the supplied factory.</summary>
         </member>
         <member name="M:DotNetCore.HayateOP.DelegateHayateObjectPolicy`1.OnRelease(`0)">
-            <summary>Accepts the object back into the pool.</summary>
+            <summary>Accepts the object back into the pool unless a return predicate was supplied.</summary>
+            <param name="item">The object being returned.</param>
+            <returns>The predicate's answer, or <c>true</c> when none was supplied.</returns>
         </member>
         <member name="M:DotNetCore.HayateOP.DelegateHayateObjectPolicy`1.Validate(`0)">
             <summary>Considers the object valid; per-object validity is left to the pool's own switches.</summary>
@@ -8360,7 +8450,8 @@
             <summary>Invokes the acquire callback supplied at construction, if any.</summary>
         </member>
         <member name="M:DotNetCore.HayateOP.DelegateHayateObjectPolicy`1.OnPassivate(`0)">
-            <summary>Does nothing; returning an object to the idle state needs no preparation here.</summary>
+            <summary>Invokes the reset callback supplied at construction, if any, on the way into the idle state.</summary>
+            <param name="item">The object being returned.</param>
         </member>
         <member name="M:DotNetCore.HayateOP.DelegateHayateObjectPolicy`1.OnDestroy(`0)">
             <summary>Does nothing; disposing <c>IDisposable</c> objects is performed by the pool itself.</summary>

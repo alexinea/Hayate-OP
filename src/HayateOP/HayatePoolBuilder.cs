@@ -13,6 +13,15 @@ public class HayatePoolBuilder<T> where T : class
 
     // Null means "the library default, not resolved yet" — see Policy.
     private IHayateObjectPolicy<T>? _policy;
+
+    // The delegate-policy slots (G-13). The flag records that one of the delegate setters ran, which is
+    // what tells a hook apart from a missing factory. Last-one-wins needs no second mechanism: the
+    // delegate setters clear a policy WithPolicy set, and Policy resolves lazily on the first build, so
+    // whichever description ran last is the one the resolution sees.
+    private bool _delegatePolicyRequested;
+    private Func<T>? _delegateCreate;
+    private Action<T>? _delegateReset;
+    private Func<T, bool>? _delegateReturnPredicate;
     private IHayateScalingStrategy _scalingStrategy;
     private IHayateMetrics _metrics;
     private IHayateLogger _logger;
@@ -54,10 +63,36 @@ public class HayatePoolBuilder<T> where T : class
     /// configuration (<c>IsValid</c> -&gt; <c>ApplyFeatureSwitches</c>) before it ever touches this
     /// property, so a lean pool hands its policy the already-downgraded value rather than the one the
     /// builder call sequence happened to leave behind. A policy supplied through <see cref="WithPolicy"/>
-    /// owns its own reset behavior and is never reconfigured here.
+    /// owns its own reset behavior and is never reconfigured here. The same resolution order carries the
+    /// delegate setters (G-13): one of them ran, and the delegate policy it describes is what the pool is
+    /// built with — see <see cref="ResolvePolicy"/>.
     /// </remarks>
-    private IHayateObjectPolicy<T> Policy => _policy ??= HayateDefaultConstruction.Policy<T>(
-        _options.ResetOnReturn, _options.ResetOnBorrow);
+    private IHayateObjectPolicy<T> Policy => _policy ??= ResolvePolicy();
+
+    // Resolves the policy in the order the call sequence decided: the delegate policy a delegate setter
+    // asked for, or the library default. WithPolicy needs no branch here — it sets the field this
+    // property caches into, so a policy set later than a delegate description is resolved by the lazy
+    // ??= short-circuit, and a delegate setter that runs later clears the field and lands back here.
+    private IHayateObjectPolicy<T> ResolvePolicy()
+    {
+        if (_delegatePolicyRequested)
+        {
+            if (_delegateCreate is null)
+            {
+                // The other two delegate setters have nothing to attach to without a factory, and a pool
+                // that cannot create is a builder mistake rather than a state to discover at the first
+                // borrow — so it is reported here, next to the other build-time rejections.
+                throw new InvalidOperationException(
+                    "A delegate policy was configured through WithReset or WithReturnPredicate without a factory; call WithFactory to supply one.");
+            }
+
+            return new DelegateHayateObjectPolicy<T>(_delegateCreate,
+                onPassivate: _delegateReset, onRelease: _delegateReturnPredicate);
+        }
+
+        return HayateDefaultConstruction.Policy<T>(
+            _options.ResetOnReturn, _options.ResetOnBorrow);
+    }
 
     #region Feature toggles
 
@@ -1627,6 +1662,14 @@ public class HayatePoolBuilder<T> where T : class
     /// <param name="policy">The policy used to create, validate and reset pooled objects.</param>
     /// <returns>The same builder instance for chaining.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="policy"/> is <c>null</c>.</exception>
+    /// <remarks>
+    /// The last call on the chain wins: a policy set here replaces the delegate description an earlier
+    /// <see cref="WithFactory"/> / <see cref="WithReset"/> / <see cref="WithReturnPredicate"/> left
+    /// pending, and those three replace a policy set here when they come later. The mechanism is one
+    /// rule rather than two: the delegate setters clear the policy field, and <see cref="Policy"/>
+    /// resolves lazily on the first build, so whichever way of describing a policy ran last is the one
+    /// the resolution sees.
+    /// </remarks>
     /// <example>
     /// <code>
     /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
@@ -1636,6 +1679,100 @@ public class HayatePoolBuilder<T> where T : class
     public HayatePoolBuilder<T> WithPolicy(IHayateObjectPolicy<T> policy)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the object factory as a delegate, so a pool's creation can be expressed as a lambda instead of
+    /// a policy class.
+    /// </summary>
+    /// <param name="create">The delegate that builds a new object; its result must not be <c>null</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="create"/> is <c>null</c>.</exception>
+    /// <remarks>
+    /// This is the builder-side form of what <see cref="HayatePool.Simple{T}"/> does for the one-call
+    /// pool, with the whole option surface still available: every other
+    /// <c>With*</c> call on the chain applies to the pool this factory builds, which the one-call factory
+    /// cannot offer. <see cref="WithReset"/> and <see cref="WithReturnPredicate"/> attach to the same
+    /// delegate policy and need no particular order relative to this call; the last call on the chain
+    /// wins over an earlier <see cref="WithPolicy"/>.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var pool = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithFactory(() =&gt; new MyResource())
+    ///     .WithReset(r =&gt; r.Clear())
+    ///     .WithMaxSize(64)
+    ///     .Build();
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithFactory(Func<T> create)
+    {
+        _delegateCreate = create ?? throw new ArgumentNullException(nameof(create));
+        _delegatePolicyRequested = true;
+        _policy = null;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the reset that runs when a returned object is on its way back into the idle state.
+    /// </summary>
+    /// <param name="reset">The delegate invoked with the object being returned.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="reset"/> is <c>null</c>.</exception>
+    /// <remarks>
+    /// The delegate is the policy's passivate hook, which runs before the return is accepted — see
+    /// <see cref="WithReturnPredicate"/>. It is a separate layer from the pool-level reset-timing
+    /// switches (<see cref="WithResetOnReturn"/> / <see cref="WithResetOnBorrow"/>), which govern only the
+    /// library default policy's reset of an <see cref="IHayateResettable"/> object: a caller describing a
+    /// policy through these delegates owns that policy's hooks, exactly as a policy class would, and the
+    /// switches leave it alone.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var pool = new HayatePoolBuilder&lt;MyBuffer&gt;()
+    ///     .WithFactory(() =&gt; new MyBuffer())
+    ///     .WithReset(b =&gt; b.Clear())
+    ///     .Build();
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithReset(Action<T> reset)
+    {
+        _delegateReset = reset ?? throw new ArgumentNullException(nameof(reset));
+        _delegatePolicyRequested = true;
+        _policy = null;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the predicate that decides whether a returned object is taken back into the pool.
+    /// </summary>
+    /// <param name="predicate">
+    /// The delegate invoked with the object being returned; <c>false</c> destroys the object instead of
+    /// parking it.
+    /// </param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="predicate"/> is <c>null</c>.</exception>
+    /// <remarks>
+    /// This is the policy's release hook: it runs after <see cref="WithReset"/>'s passivate, so an object
+    /// is reset before the pool decides whether it is worth keeping. Returning <c>false</c> is the same
+    /// outcome a policy class produces, and — as there — disposing an <c>IDisposable</c> object stays
+    /// with the pool.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// // Keep the object only while it is still within its inspection date.
+    /// var pool = new HayatePoolBuilder&lt;MyConnection&gt;()
+    ///     .WithFactory(() =&gt; new MyConnection())
+    ///     .WithReturnPredicate(c =&gt; !c.IsStale)
+    ///     .Build();
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithReturnPredicate(Func<T, bool> predicate)
+    {
+        _delegateReturnPredicate = predicate ?? throw new ArgumentNullException(nameof(predicate));
+        _delegatePolicyRequested = true;
+        _policy = null;
         return this;
     }
 
