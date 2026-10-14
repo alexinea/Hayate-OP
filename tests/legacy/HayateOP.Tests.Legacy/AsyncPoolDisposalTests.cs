@@ -197,6 +197,8 @@ namespace DotNetCore.HayateOP.Tests
             public void SetAvailable() { }
             public int Evict(HayateEvictReason reason) { return 0; }
             public int PreWarm(int count) { return 0; }
+            public bool TryAcquire(out DualDisposeObject item) { item = new(); return true; }
+            public bool TryAcquire(TimeSpan timeout, out DualDisposeObject item) => TryAcquire(out item);
         }
 
         /// <summary>The unbounded pool requires a parameterless constructor and disposes nothing anyway.</summary>

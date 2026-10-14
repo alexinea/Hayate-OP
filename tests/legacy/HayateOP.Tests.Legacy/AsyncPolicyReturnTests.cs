@@ -144,6 +144,8 @@ namespace DotNetCore.HayateOP.Tests
             public void SetAvailable() { }
             public int Evict(HayateEvictReason reason) { return 0; }
             public int PreWarm(int count) { return 0; }
+            public bool TryAcquire(out TestObject item) { item = new(); return true; }
+            public bool TryAcquire(TimeSpan timeout, out TestObject item) => TryAcquire(out item);
             public void Dispose() { }
         }
 
