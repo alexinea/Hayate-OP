@@ -39,6 +39,11 @@ The line also closes a small diagnostics debt carried since 2.9 (G-16): the exce
 ends in now names the cause the caller reading it is usually in a position to fix — borrowed objects
 that never come back.
 
+The line also adds a non-throwing form of the borrow (G-17): `TryAcquire`, in both a zero-budget and a
+timeout-taking overload, for call sites that would otherwise wrap a borrow in a `try`/`catch` only to
+ask "is one free right now?". Like the ceiling, the lease and the switches, it is a pure addition — the
+throwing forms and every existing behaviour are untouched.
+
 ### Added
 
 - **A ceiling on concurrent borrows** (G-5): `MaxActiveObjects` caps how many objects may be lent out
@@ -168,6 +173,27 @@ that never come back.
   project that does not use the library gets no diagnostic at all. Targets `netstandard2.0` against
   Roslyn 3.8, the oldest host the current line-up shares, and is a pure addition: nothing in the core,
   the extensions or the samples references it.
+- **A non-throwing borrow, `TryAcquire`** (G-17): two new members on `IHayateObjectPool<T>` —
+  `TryAcquire(out T item)` and `TryAcquire(TimeSpan timeout, out T item)` — for the call site that
+  asks "is an object free right now?" without treating the answer as an error. Every pool type
+  implements them, including the three pools in the `Specialized` extension package, which forward the
+  try to the pool they wrap. The first form is the second with a zero budget, so a caller can check
+  the pool's current state without naming a duration at all. What counts as a refusal follows the
+  borrow the caller already knows: the circuit breaker being open reports `false` rather than throwing
+  `HayatePoolUnavailableException`, an `Abort` miss reports `false` rather than throwing
+  `InvalidOperationException`, a `Block` or `BlockTimeout` miss reports `false` rather than throwing
+  `TimeoutException`, and a borrow that stops at the `MaxActiveObjects` ceiling reports `false` rather
+  than waiting or creating. Two failures stay failures, because a try is a question about the pool's
+  state and not a promise to swallow bugs: a negative timeout still throws
+  `ArgumentOutOfRangeException`, exactly as `Acquire` does, and an object factory that throws still
+  surfaces its exception — wrapped as before, so a misconfigured pool cannot pass silently as an empty
+  pool. `Block`'s documented idiosyncrasy — it ignores its timeout and returns only when an object is
+  free — deliberately does not carry over: in try mode the timeout is a hard cutoff, because the one
+  thing a caller asking with a budget cannot mean by "try" is "maybe never". Statistics count a
+  refused try the same way they count the refused borrow it replaced: the missed-borrow counters move
+  under the same metrics gate as before, and the ceiling's throttle counter is not gated at all, so
+  the two borrow forms report the same numbers for the same events. The lean path, the general path
+  and the asynchronous wrapper all answer the same questions the same way.
 
 ### Changed
 

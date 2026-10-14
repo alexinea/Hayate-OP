@@ -398,6 +398,45 @@ cancellation propagates `TaskCanceledException`):
 var obj = await pool.AcquireAsync(TimeSpan.FromSeconds(5), cancellationToken);
 ```
 
+### Non-throwing borrows
+
+`TryAcquire` answers "is an object free right now?" without an exception for the answer. The
+zero-budget form checks the pool's current state; the timeout form waits up to the budget you name.
+Both report `false` for a refusal — an open circuit breaker, an `Abort` miss, a wait that runs out,
+or a borrow stopped at the `MaxActiveObjects` ceiling — and hand the object back on success:
+
+```csharp
+if (pool.TryAcquire(out var obj))
+{
+    try
+    {
+        obj.Data = 42;
+        // use the object
+    }
+    finally
+    {
+        pool.Release(obj);
+    }
+}
+else
+{
+    // pool is busy — fall back, skip, or measure how often this happens
+}
+
+// or wait for up to 50 ms for a return
+if (pool.TryAcquire(TimeSpan.FromMilliseconds(50), out var obj2))
+{
+    // ...
+}
+```
+
+Two failures stay failures even here, because a try is a question about the pool's state and not a
+promise to swallow bugs: a negative timeout throws `ArgumentOutOfRangeException` exactly as
+`Acquire` does, and a factory that throws surfaces its exception, so a misconfigured pool cannot
+pass silently as an empty one. One asymmetry with `Block` is deliberate: `Block` normally ignores
+its timeout and returns only when an object is free, but in try mode the timeout is a hard cutoff —
+the one thing a caller asking with a budget cannot mean by "try" is "maybe never".
+
 ### Scoped borrows
 
 `AcquireScoped()` returns a lease that hands its object back when it is disposed, so a `using` block
@@ -1019,6 +1058,8 @@ HayateOP follows Semantic Versioning. Breaking changes so far:
 
 | Version | Change |
 | :--- | :--- |
+| 3.1 | `IHayateObjectPool<T>` gained `TryAcquire(out T)` and `TryAcquire(TimeSpan, out T)` — breaking for implementers only; callers are unaffected |
+| 3.0 | `IHayateLogger` gained `LogTrace`, `LogCritical`, `IsEnabled` and `BeginScope` — breaking for implementers; `HayateLoggerBase` is the migration path |
 | 2.5 | `HayateObject<T>.AcquireTrace` (string) replaced by `HayateLeaseContext`; new lifecycle fields (`CreatedAtTick`, `LeaseCount`, `OwnerPoolName`) |
 | 2.4 | Idle pools actually scale down (the contradicting internal gate was removed) |
 | 2.2 | `Build()` fails fast when custom metrics are registered while metrics are disabled |

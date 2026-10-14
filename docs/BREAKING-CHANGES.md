@@ -4,6 +4,41 @@ Migration guidance for every breaking change, newest first, plus the behavioural
 frequently surprise adopters. For a per-version summary of all changes see
 [`../CHANGELOG.md`](../CHANGELOG.md).
 
+## 3.1 — Capability line (one signature change for pool implementers: `TryAcquire`)
+
+3.1 adds capabilities without moving an existing behaviour: a ceiling on concurrent borrows
+(`MaxActiveObjects`), a value-type lease (`HayatePoolLease<T>` with its four produce-once overloads),
+reset-timing switches (`ResetOnReturn` / `ResetOnBorrow`), two storage backends that are off by
+default, a ready-made `CancellationTokenSource` pool, an optional analyzer package, and a sentence in
+the timeout messages naming the usual cause of the wait. For a **caller** of the library every one of
+them is a pure addition — nothing that compiled and ran against 3.0 behaves differently now.
+
+One bullet below is the exception, and it only reaches an author who **implements**
+`IHayateObjectPool<T>` outside this repository, which is the same shape 3.0's logger extension took.
+
+- **`IHayateObjectPool<T>` gained `TryAcquire`** (G-17). `TryAcquire(out T item)` and
+  `TryAcquire(TimeSpan timeout, out T item)` were added to the interface, so an implementation written
+  outside this repository no longer satisfies it and will not compile until it answers for both. This
+  is the project's standing policy rather than a one-off decision — `Evict` (2.5), `CheckAvailable`
+  (2.6), `PreWarm` (2.8) and `IHayateLogger`'s four members (3.0) were added the same way — because a
+  parallel interface would fork every generic constraint and every `is` pattern in consuming code, and
+  the usual softening, a default interface method, is unavailable: the core package targets
+  `netstandard2.0` and `net48`, and neither runtime supports them. Answering is cheap. The
+  zero-budget overload is one line forwarding to the timeout-taking one with `TimeSpan.Zero`. For a
+  decorator, forwarding is the whole implementation — the three pools in the `Specialized` extension
+  package forward the try to the pool they wrap and add nothing. The refusal semantics are the ones
+  the throwing form already has, minus the throw: the open breaker, an `Abort` miss, a timed-out wait
+  and a borrow stopped at the ceiling report `false`; a negative timeout and a throwing factory still
+  propagate, so a try cannot turn a misconfigured pool into an empty one. A caller is untouched by
+  any of this: the throwing forms, the options and the statistics behave exactly as they did.
+
+### Migration
+
+Nothing to migrate on the caller side — no existing signature, option or behaviour changed. For an
+external implementation of `IHayateObjectPool<T>`, add the two members: implement the timeout-taking
+form (delegating to the pool's existing acquire machinery if the implementation is a wrapper) and
+let the zero-budget form forward to it with `TimeSpan.Zero`. No consumer-visible change follows.
+
 ## 3.0 — Lifetime semantics named, blocking wake-up made signal-driven, one-call factory grows on a miss, logging surface extended and relocated
 
 3.0 states the meaning `MaxLifeTime` always had, in full, and leaves the enforcement of the borrowed
