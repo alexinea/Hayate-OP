@@ -128,8 +128,8 @@ time**, exactly as the lean fast path already refuses a borrow order it cannot h
 
 > `EnableLockFreeStorage` with `BorrowStrategy != Fifo` throws from `Build()`. The default `Fifo` is
 > what a pool that never asked for anything holds, so a pool that simply turns the backend on
-> builds; a pool that explicitly asked for `Lifo` and then turned the backend on is told the two
-> cannot both hold.
+> builds; a pool that asked for `Lifo`, `Lru` or `Priority` and then turned the backend on is told
+> the two cannot both hold.
 
 **`SnapshotHead` stops being the coldest end.** The eviction sampler uses it to look at the oldest
 idle objects first (`Shard.cs:496-501`), which is what makes `MaxIdleTime` and `MaxLifeTime`
@@ -223,9 +223,9 @@ configuration loss rather than a smaller feature.
 | 1 | `HayatePoolOptions` property (default `false`) | `EnableLockFreeStorage` | `EnableThreadLocalFrontSlot` |
 | 2 | `CopyTo` | travels with the execution-mode block, like `EnableArrayPoolStorage` (`HayatePoolOptions.cs:1258-1259`) | same |
 | 3 | `ApplyFeatureSwitches` | forced `false` by `EnableLean` (`:1387-1417`) | same |
-| 4 | `IsValid` | nothing new: the `Lifo` conflict is a `Build()` refusal, matching the lean guard | nothing new |
+| 4 | `IsValid` | nothing new: the non-`Fifo` conflict is a `Build()` refusal, matching the lean guard | nothing new |
 | 5 | builder writer | `WithLockFreeStorage(bool = true)` | `WithThreadLocalFrontSlot(bool = true)` |
-| 6 | `Build()` refusal | `EnableLockFreeStorage && BorrowStrategy != Fifo` throws | none |
+| 6 | `Build()` refusal | `EnableLockFreeStorage && BorrowStrategy != Fifo` throws | `EnableThreadLocalFrontSlot && BorrowStrategy != Fifo` throws — added with G-21, because a tier hit is served before the shard is asked, so the order could only hold on a tier miss |
 | 7 | docs | this page, `README.MD`, `docs/hot-path-costs.md` | same |
 
 Presets do not touch either switch. The lean profile normalizes them off, because lean has its own

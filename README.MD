@@ -7,7 +7,7 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 - **High Performance Core**: Optimized for both single-threaded and multi-threaded scenarios.
 - **Sharding Support**: Reduces lock contention through sharded architecture.
 - **Configuration Presets**: `HayatePoolPreset` names nine ready-made configurations — `Default`, `Lean`, `Full`, `HighThroughput`, `LowLatency`, `MemoryConstrained`, `ConnectionPool`, `BatchProcessing`, `Deterministic` — and they stay composable: a preset owns its field set, and a later `With*` call overrules it.
-- **Borrow Order**: `Fifo` (default) or `Lifo` hand-out order from the idle list, selected with `HayateBorrowStrategy`.
+- **Borrow Order**: `Fifo` (default), `Lifo`, `Lru` or caller-ranked `Priority` hand-out order from the idle list, selected with `HayateBorrowStrategy`.
 - **Soft Capacity**: Bounds the pool's *retained* set on the return path — returns past the ceiling are disposed instead of stored, while the pool still lends out its whole hard ceiling.
 - **Bucketed Buffer Pool**: Optional `HayateBufferPool<T>` — a fixed ladder of size buckets with round-up-to-nearest-size routing, for workloads that rent arrays of a few known sizes.
 - **Auto-Scaling**: Dynamically adjusts pool size based on usage patterns (aggressive scale-up / conservative scale-down steps).
@@ -267,7 +267,7 @@ new HayatePoolOptions().UsePreset(HayatePoolPreset.MemoryConstrained);
 | Preset | Reach for it when | What it changes | What to know |
 | :--- | :--- | :--- | :--- |
 | `Default` | You want the shipped behaviour, or an explicit reset | The whole option surface, restored from the shipped defaults | The only preset that owns sizing, timeouts, the reject policy and the callbacks — it clears them |
-| `Lean` | A pure borrow/return workload on a hot path | The wrapper-free fast path: no sharding, no background pass, no per-object bookkeeping | The fast path has nowhere to keep per-object state, so the feature switches are forced off and a LIFO borrow order fails the build |
+| `Lean` | A pure borrow/return workload on a hot path | The wrapper-free fast path: no sharding, no background pass, no per-object bookkeeping | The fast path has nowhere to keep per-object state, so the feature switches are forced off and any borrow order but the default `Fifo` fails the build |
 | `Full` | Bringing a pool up, or diagnosing one | Every optional feature switch on: sharding, auto-scaling, validation, eviction, generation optimization, leak detection, metrics, allocation tracking | Nothing validates until you ask it to, and the numeric thresholds keep their shipped values |
 | `HighThroughput` | A busy pool where creation is the expensive part | Scale up below the shipped threshold in steps of eight, scale down slowly, retain objects for 15 idle minutes, optional bookkeeping off | Leak forensics is off — the first switch to turn back on when an object goes missing |
 | `LowLatency` | A request path where a background pass is a latency spike | No scaling, validation, eviction or generation pass and no optional bookkeeping, plus the first acquire waits for the warm floor | With eviction off nothing is ever retired: pair it with `WithValidateOnBorrow` or a `MaxLifeTime` where a stale object is a real risk |
@@ -1079,9 +1079,9 @@ The short version of how to trim:
 | :--- | :--- |
 | `EnableLean` | Removes the wrapper allocation, the shard lock, the return-side registry probe and every diagnostic write — about 10.6x against the same feature set |
 | `EnableSharding` | One extra idle-list probe per shard on a miss; free in single-threaded steady state |
-| `EnableLockFreeStorage` | Replaces the shard spin lock and its idle list with a slot array, so a take is one compare-exchange per slot scanned — no lock, no list walk, and no allocation. Off by default → one predicted branch. It gives up `BorrowStrategy` (`Lifo` fails the build) and any `ReloadConfig` that would widen the ceiling |
-| `EnableThreadLocalFrontSlot` | One hop before the shard scan, plus one atomic on each park and each hit to keep the pool's own idle count true. A hit never reaches a shard. Off by default → one predicted branch |
-| `BorrowStrategy` | `Fifo` (the default) reads the end the borrow path has always read — no added cost; `Lifo` costs one predicted branch on a constructor-time flag |
+| `EnableLockFreeStorage` | Replaces the shard spin lock and its idle list with a slot array, so a take is one compare-exchange per slot scanned — no lock, no list walk, and no allocation. Off by default → one predicted branch. It gives up `BorrowStrategy` (any value but `Fifo` fails the build) and any `ReloadConfig` that would widen the ceiling |
+| `EnableThreadLocalFrontSlot` | One hop before the shard scan, plus one atomic on each park and each hit to keep the pool's own idle count true. A hit never reaches a shard. Off by default → one predicted branch. Because a hit is served before the shard is asked, it gives up `BorrowStrategy` (any value but `Fifo` fails the build) |
+| `BorrowStrategy` | `Fifo` (the default) reads the end the borrow path has always read — no added cost; `Lifo` costs one predicted branch on a constructor-time flag; `Lru` and `Priority` cost one walk of the idle list (plus one comparer call per node for `Priority`) |
 | `EnableGenerationOptimization` | One extra `Stopwatch.GetTimestamp()` per borrow — the only switch that adds a QPC read to the borrow path |
 | `ValidateOnBorrow` / `ValidateOnReturn` | One `IHayateObjectPolicy.Validate` call per borrow / return; the policy's own work (often a health probe) dominates |
 | `ResetOnReturn` / `ResetOnBorrow` | One `IHayateResettable.Reset` call per return / per borrow, on the default policy only. Return-side is the default (before 3.1 it was unconditional); borrow-side is off by default and forced off by `EnableLean`. Moving the reset relocates it rather than adding one — measured with a 4 KB-clearing `Reset`, ~119 ns/op shifts from the return path to the borrow path (borrow 174 → 293 ns/op) and the round trip moves by 3%. The case for the borrow side is the object that is created and never borrowed again: it is then never reset at all |
@@ -1348,35 +1348,78 @@ new HayatePoolBuilder<Connection>().WithLean().WithEnableLifetimeRotationOnBorro
 Silently ignoring the switch is exactly the failure it exists to remove — an owner who believes objects
 are rotated on hand-out while they are not.
 
-### Borrow order (FIFO / LIFO)
+### Borrow order (FIFO / LIFO / LRU / priority)
 
-A borrow is served from one end of the shard's idle list, and which end is a choice:
+A borrow is served from the shard's idle list, and which object it takes is a choice:
 
 ```csharp
 var pool = new HayatePoolBuilder<Connection>()
     .WithBorrowStrategy(HayateBorrowStrategy.Lifo)   // hand back the connection that came in last
     .Build();
+
+var ranked = new HayatePoolBuilder<Job>()
+    .WithBorrowPriority(Comparer<Job>.Create((a, b) => a.Priority.CompareTo(b.Priority)))
+    .Build();                                        // hand back the highest-priority job; the call selects Priority
 ```
 
-`Fifo` (the default) hands out the longest-idle object; `Lifo` hands out the object that came back
-most recently. The idle list is kept in return order either way, so the switch changes the order of
-borrows and nothing else — in particular the eviction scan still samples the oldest-returned end, which
-is why the same `IHayateEvictionPolicy<T>` sees the same cold objects under either strategy, and
-abandoned recovery still examines the oldest borrow first.
+| Value | Serves | Costs on the borrow path |
+| --- | --- | --- |
+| `Fifo` (default) | the longest-idle object — the head of the idle list | nothing; this is what every release before the switch did |
+| `Lifo` | the object that came back most recently — the tail | one predicted branch on a constructor-time flag |
+| `Lru` | the object borrowed longest ago, by `LastBorrowedAt` | one walk of the idle list |
+| `Priority` | the object the `WithBorrowPriority` comparer ranks highest | one walk of the idle list, plus one comparer call per node |
+
+`Lru` orders by *borrow* where `Fifo` orders by *return*, and that is the whole of the difference: the
+two agree while every object is returned in the order it was borrowed, and diverge as soon as one is
+not. An object that has never been borrowed carries a zero stamp and so ranks lowest of all. For
+`Priority`, a positive `IComparer<T>.Compare` result means "borrow this one first", and objects the
+comparer calls equal are served oldest-returned first — the end `Fifo` would have served — so the order
+is deterministic without the comparer having to be a total order.
+
+The idle list is kept in return order under every value and none of them reorders it, so the switch
+changes the order of borrows and nothing else — in particular the eviction scan still samples the
+oldest-returned end, which is why the same `IHayateEvictionPolicy<T>` sees the same cold objects under
+any strategy, and abandoned recovery still examines the oldest borrow first.
 
 Rules of thumb: `Lifo` suits a tight borrow/use/return loop, or an instance whose per-instance state is
 cheap to keep and worth keeping warm; `Fifo` suits an instance whose state should age uniformly, or one
-where spreading usage across the idle set is the point. The default reproduces the behaviour of every
-release before the switch, so a pool that never calls `WithBorrowStrategy` is unaffected.
+where spreading usage across the idle set is the point; `Lru` suits a pool whose objects are
+interchangeable but whose per-object warm-up is what you are trying to preserve, when returns do not
+come back in the order the borrows went out; `Priority` suits a pool whose objects are *not*
+interchangeable — a job with a rank, a channel with a cost — where the next borrow has a right answer
+that no ordering of the list can express. The default reproduces the behaviour of every release before
+the switch, so a pool that never calls `WithBorrowStrategy` is unaffected.
 
-`Lifo` applies to the general-purpose engine, sharded or collapsed to a single shard. The lean fast
-path holds no ordered idle list — it has a single fast lane plus a slot array — so asking for `Lifo` on
-a lean pool fails the build rather than being silently turned into the default:
+The comparer lives on the builder rather than in `HayatePoolOptions`, because that type is not generic
+and cannot name `IComparer<T>`. In the DependencyInjection and Configuration packages it is resolved
+from the container, and only when the configured strategy actually asks for one:
 
 ```csharp
-// Throws InvalidOperationException: the lean fast path cannot honour a borrow order.
-new HayatePoolBuilder<Connection>().WithLean().WithBorrowStrategy(HayateBorrowStrategy.Lifo).Build();
+services.AddSingleton<IComparer<Job>>(Comparer<Job>.Create((a, b) => a.Priority.CompareTo(b.Priority)));
+services.AddHayatePoolSupport().RegisterHayatePool<Job>(o => o.BorrowStrategy = HayateBorrowStrategy.Priority);
 ```
+
+Every value but `Fifo` applies to the general-purpose engine alone, sharded or collapsed to a single
+shard, and each combination the engine cannot honour fails the build rather than being silently turned
+into the default:
+
+```csharp
+// Throws InvalidOperationException: the lean fast path holds no ordered idle list.
+new HayatePoolBuilder<Connection>().WithLean().WithBorrowStrategy(HayateBorrowStrategy.Lru).Build();
+
+// Throws InvalidOperationException: the lock-free store keeps no order at all.
+new HayatePoolBuilder<Connection>().WithLockFreeStorage().WithBorrowStrategy(HayateBorrowStrategy.Lru).Build();
+
+// Throws InvalidOperationException: the front tier is consulted before the shard, so the order could
+// only hold on a tier miss.
+new HayatePoolBuilder<Connection>().WithThreadLocalFrontSlot().WithBorrowStrategy(HayateBorrowStrategy.Lru).Build();
+
+// Throws InvalidOperationException: selecting Priority alone cannot say which object to serve.
+new HayatePoolBuilder<Connection>().WithBorrowStrategy(HayateBorrowStrategy.Priority).Build();
+```
+
+The order is fixed when the pool is built — every shard snapshots it — so `ReloadConfig` refuses a
+change to it rather than accepting one it cannot apply.
 
 ### Soft capacity (bound the retained set)
 

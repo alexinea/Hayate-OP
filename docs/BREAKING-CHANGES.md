@@ -8,10 +8,11 @@ frequently surprise adopters. For a per-version summary of all changes see
 
 3.1 adds capabilities without moving an existing behaviour: a ceiling on concurrent borrows
 (`MaxActiveObjects`), a value-type lease (`HayatePoolLease<T>` with its four produce-once overloads),
-reset-timing switches (`ResetOnReturn` / `ResetOnBorrow`), two storage backends that are off by
-default, a ready-made `CancellationTokenSource` pool, an optional analyzer package, and a sentence in
-the timeout messages naming the usual cause of the wait. For a **caller** of the library every one of
-them is a pure addition — nothing that compiled and ran against 3.0 behaves differently now.
+reset-timing switches (`ResetOnReturn` / `ResetOnBorrow`), two more borrow orders (`Lru` and
+`Priority`), two storage backends that are off by default, a ready-made `CancellationTokenSource`
+pool, an optional analyzer package, and a sentence in the timeout messages naming the usual cause of
+the wait. For a **caller** of the library every one of them is a pure addition — nothing that compiled
+and ran against 3.0 behaves differently now.
 
 One bullet below is the exception, and it only reaches an author who **implements**
 `IHayateObjectPool<T>` outside this repository, which is the same shape 3.0's logger extension took.
@@ -43,6 +44,18 @@ One behavioural note reaches a caller who returns an object twice — a misuse r
   fresh object. The documented outcome of the misuse ("the pool loses one object") is unchanged; only
   its consistency is. The new `ErrorOnIncorrectUsage` option — off by default, aimed at debug and
   test builds — is the opt-in that turns the second return into an exception instead.
+
+And one behavioural note reaches a caller who changed the borrow order through `ReloadConfig`:
+
+- **A `BorrowStrategy` change at run time is refused instead of accepted and ignored** (G-21). Every
+  shard snapshots the order when it is constructed — which end it reads, or which node its walk picks —
+  so a reload could change the option without changing the pool's behaviour, and `GetOptions()` would
+  report an order the pool does not serve. That is the shape `SoftCapacity` and the lean retention
+  buffer already refuse, and the change is now refused the same way, with the original value restored.
+  The hole predates the two new orders (the option already had two values and was never guarded), so
+  this note is not new to 3.1 in kind — but a caller who relied on the reload being accepted will now
+  see an `InvalidOperationException`, which is the point: it was never being applied. Rebuild the pool
+  to change the order.
 
 ### Migration
 

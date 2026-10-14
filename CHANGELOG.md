@@ -58,6 +58,14 @@ path itself (also G-14): the refusal that follows a second return destroyed the 
 countable, and the next borrow handed out its `null` value. That is fixed on both storage backends and
 recorded under Fixed.
 
+The line also widens the borrow order (G-21): the switch that chose which end of a shard's idle list a
+borrow came from gains two orders no end can answer — `Lru`, which serves the object borrowed longest
+ago, and `Priority`, which serves the one a caller-supplied `IComparer<T>` ranks highest. Both leave
+the idle list in return order, so the eviction sampler keeps reading the end it always read, and both
+are off by default. Verifying them exposed a hole in the reload path (also G-21): a `BorrowStrategy`
+change was accepted on a live pool and then ignored, because every shard snapshots the order when it is
+built. That is now refused, and recorded under Fixed.
+
 ### Added
 
 - **A ceiling on concurrent borrows** (G-5): `MaxActiveObjects` caps how many objects may be lent out
@@ -240,6 +248,31 @@ recorded under Fixed.
   no ownership lookup. A refused return leaves the object with the caller rather than destroying it —
   the forgiving path destroys a foreign object, but a return the pool refuses cannot also take
   ownership of it. No existing signature, option or behaviour changed.
+- **Two more borrow orders: least recently used, and caller-ranked priority** (G-21):
+  `HayateBorrowStrategy` gains `Lru` — the borrow serves the object borrowed longest ago, by the
+  `LastBorrowedAt` stamp the borrow path has recorded unconditionally since 2.5, so the order adds no
+  per-object state — and `Priority` — the borrow serves the object a caller-supplied `IComparer<T>`
+  ranks highest, installed through the new `WithBorrowPriority(IComparer<T>)`, which selects the
+  strategy as well so a comparer cannot be handed over and then ignored. `Lru` orders by *borrow* where
+  `Fifo` orders by *return*, which is the whole of the difference: the two agree while every object is
+  returned in the order it was borrowed, and diverge as soon as one is not. Objects the comparer calls
+  equal are served oldest-returned first, the end `Fifo` serves, so the order stays deterministic
+  without the comparer having to be a total one. Neither value reorders the idle list — both walk it
+  and unlink the node they chose — so the eviction scan keeps sampling the oldest-returned end and the
+  objects offered to an `IHayateEvictionPolicy<T>` never depend on this setting. Four boundaries are
+  deliberate, and each fails the build rather than being honoured in part, the rule the existing
+  `Lifo`-on-lean guard already followed: no order but `Fifo` is available on the lean fast path (no
+  ordered idle list), on the lock-free store (no order at all), or alongside the per-shard front tier
+  (consulted before the shard, so the order would hold on a tier miss only); and `Priority` without a
+  comparer cannot express which object should be served. The comparer lives on the builder rather than
+  in `HayatePoolOptions`, which is not generic and so cannot name `IComparer<T>` — the route
+  `CustomShardAffinity` already takes — and in the DependencyInjection and Configuration packages it is
+  resolved from the container when, and only when, the configured strategy asks for one, so a comparer
+  registered for some unrelated purpose is never picked up by a pool that did not ask. `RoundRobin`
+  from the reference implementation was deliberately not added: on a list every return appends to the
+  tail, serving the head *is* a round robin over the idle set, so the value would have been a synonym
+  with a cost and no behaviour. No existing signature, option or behaviour changed; the default is
+  `Fifo`, statement for statement.
 
 ### Changed
 
@@ -280,6 +313,16 @@ recorded under Fixed.
   still hold; §8 records what the pool now does differently with the policy that path resolves. The
   fallback is recognised by instance identity rather than by a "did we seed it?" flag, so a policy
   registered after the pool is honoured rather than replaced by the library's own.
+- **A borrow-order change is no longer accepted at run time and then ignored** (G-21): `ReloadConfig`
+  let `BorrowStrategy` be changed on a live pool, but every shard snapshots the order when it is
+  constructed, so the shards kept serving the order they were built with while `GetOptions()` reported
+  the new one — the "accepted and never applied" shape this switch exists to remove, and the same rule
+  `SoftCapacity` and the lean retention buffer already follow. A reload that changes the order is now
+  refused with the original value restored, and the pool keeps serving the order it was built with.
+  The hole predates the two new orders — the option already had two values and was never guarded — but
+  adding the two that walk the list is what made it visible, because a stale snapshot now also decides
+  *how* the selection is performed, not only which end it starts from. Rebuild the pool to change the
+  order.
 
 ## [3.0.0] - 2026-09-24
 

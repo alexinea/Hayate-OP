@@ -96,7 +96,7 @@ intuition.
 | Default `ShardCount` is 4 | Sharding is on by default |
 | `HayatePoolFactory.Create` overwrites a same-named registration and **leaks the old pool** | Use `GetOrCreatePool` when a pool may already exist |
 | `IHayateObjectPoolRegistry.Remove` does **not** dispose | Only `HayateSharedPoolRegistry.Remove<T>` disposes what it removes |
-| `ReloadConfig` cannot change the feature switches, `ShardCount` or `SoftCapacity` | Changing `SoftCapacity` fails the whole reload. `MaxLifeTime` and `GenerationThresholdMs` can be changed |
+| `ReloadConfig` cannot change the feature switches, `ShardCount`, `SoftCapacity` or `BorrowStrategy` | Changing `SoftCapacity` or `BorrowStrategy` fails the whole reload — both are snapshotted when the pool is built, so accepting them would report a value the pool does not run. `MaxLifeTime` and `GenerationThresholdMs` can be changed |
 | `WithCustomShardAffinity` takes a `Func<int>` | Return an out-of-range value (`-1`) for "no affinity" — that falls back to the sequential scan |
 | `ValidateOnReturn` / `ValidateWhileIdle` **are** wired | Older comments claimed they were not |
 | The core package has **no dependencies** | Adding `Microsoft.Extensions.Logging` or Serilog to it is rejected by design; third-party loggers are bridged with `HayateMicrosoftLoggerAdapter<T>` |
