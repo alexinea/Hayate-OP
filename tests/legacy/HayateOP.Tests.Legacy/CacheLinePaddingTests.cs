@@ -120,10 +120,10 @@ namespace DotNetCore.HayateOP.Tests
         private static ConstructorInfo ControlConstructor() => typeof(UnpaddedShardShape)
             .GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic)[0];
 
-        // Both constructors take the same five arguments in the same order, so the one array fits either and
+        // Both constructors take the same six arguments in the same order, so the one array fits either and
         // the per-invocation cost of passing it cannot differ between the two measurements. The logger is left
         // null on purpose: the constructor only stores it, and nothing here calls a shard.
-        private static object[] Arguments() => new object[] { new HayatePoolOptions(), 0, 16, null, false };
+        private static object[] Arguments() => new object[] { new HayatePoolOptions(), 0, 16, null, false, null };
 
         /// <summary>
         /// The padding in bytes: the average of the per-construction difference between what a shard costs
@@ -173,6 +173,12 @@ namespace DotNetCore.HayateOP.Tests
             private readonly bool _enableDiagnostics;
             private readonly LinkedList<object> _list;
             private readonly bool _takeNewest;
+            // G-21: the shard declares the two fields the walk-based borrow orders need, in this position,
+            // so the control declares them here too. The comparer is declared over object rather than over
+            // the element type the shard closes it over: the control is not generic, and the field-set
+            // check below compares value types by size and reference types by nothing but "is a reference".
+            private readonly bool _selectFromIdleList;
+            private readonly IComparer<object> _borrowPriority;
             private readonly LinkedList<object> _borrowed;
             private readonly bool _trackBorrowed;
             private readonly ConcurrentDictionary<object, object> _objects;
@@ -199,7 +205,7 @@ namespace DotNetCore.HayateOP.Tests
             public int Index { get; }
 
             private UnpaddedShardShape(HayatePoolOptions options, int index, int maxSize, IHayateLogger logger,
-                bool prefersAsyncDisposal)
+                bool prefersAsyncDisposal, IComparer<object> borrowPriority)
             {
                 Index = index;
                 _maxSize = maxSize;
@@ -208,6 +214,12 @@ namespace DotNetCore.HayateOP.Tests
                 _trackBorrowed = options.RemoveAbandonedOnBorrow || options.RemoveAbandonedOnMaintenance;
                 _enableDiagnostics = options.EnableDiagnostics;
                 _takeNewest = options.BorrowStrategy == HayateBorrowStrategy.Lifo;
+                // The shard splits the walk-based orders off with a second flag rather than reusing this
+                // one, and stores the comparer beside it. Neither allocates, so mirroring them costs the
+                // control nothing and the paired difference still measures the padding alone.
+                _selectFromIdleList = options.BorrowStrategy == HayateBorrowStrategy.Lru ||
+                                      options.BorrowStrategy == HayateBorrowStrategy.Priority;
+                _borrowPriority = borrowPriority;
                 // Mirror the shard's off-path exactly: the switch is off, so both arrays are the shared
                 // empty-array singletons — the same two the shard assigns, and the same zero bytes.
                 _useLockFreeStore = options.EnableLockFreeStorage;
@@ -227,6 +239,8 @@ namespace DotNetCore.HayateOP.Tests
                 _ = _logger;
                 _ = _enableDiagnostics;
                 _ = _takeNewest;
+                _ = _selectFromIdleList;
+                _ = _borrowPriority;
                 _ = _trackBorrowed;
                 _ = _prefersAsyncDisposal;
                 _ = _spareCount;
