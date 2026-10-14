@@ -112,6 +112,59 @@ public interface IHayateObjectPool<T> : IHayateObjectPool where T : class
     Task<T> AcquireAsync(TimeSpan timeout, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Attempts to acquire an object without waiting: a single pass over the pool, plus the creation
+    /// the configured reject policy performs on a miss, and no parking whatsoever. Equivalent to
+    /// <see cref="TryAcquire(TimeSpan, out T)"/> with a zero budget.
+    /// </summary>
+    /// <param name="item">The acquired object when the method returns <c>true</c>; the default value
+    /// of <typeparamref name="T"/> otherwise.</param>
+    /// <returns><c>true</c> when an object was handed over; <c>false</c> when the only way forward
+    /// was to wait or be refused — an open circuit breaker, the Abort policy, or a policy that waits
+    /// holding nothing idle. A pool that creates on a miss answers <c>true</c>.</returns>
+    /// <remarks>
+    /// Where <see cref="Acquire()"/> reports a pool that cannot serve the request right now by
+    /// throwing, this method reports it by returning <c>false</c> — the caller decides whether
+    /// "not available" is worth an exception. Faults are still thrown: a negative timeout and a
+    /// factory that fails are bugs or environment problems, never a pool state, so they are never
+    /// read as "nothing available".
+    /// </remarks>
+    /// <example><code>
+    /// if (pool.TryAcquire(out var obj))
+    /// {
+    ///     try { /* use obj */ }
+    ///     finally { pool.Release(obj); }
+    /// }
+    /// </code></example>
+    bool TryAcquire(out T item);
+
+    /// <summary>
+    /// Attempts to acquire an object, waiting at most <paramref name="timeout"/> for one to become
+    /// available. Reports exhaustion as a <c>false</c> return instead of a
+    /// <see cref="TimeoutException"/>.
+    /// </summary>
+    /// <param name="timeout">The maximum wait time. The budget is a hard bound under every reject
+    /// policy — including <see cref="HayatePoolRejectPolicy.Block"/>, whose
+    /// <see cref="Acquire(TimeSpan)"/> waits without a limit.</param>
+    /// <param name="item">The acquired object when the method returns <c>true</c>; the default value
+    /// of <typeparamref name="T"/> otherwise.</param>
+    /// <returns><c>true</c> when an object was handed over within the budget; <c>false</c> when the
+    /// budget elapsed, the pool refused the request (Abort, or an open circuit breaker), or the
+    /// pool had nothing to give when the call started and no policy creates on a miss.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeout"/> is negative.</exception>
+    /// <remarks>
+    /// A wait that the budget no longer covers is a refusal: the timeout form never parks past its
+    /// own budget, whatever the reject policy says. Faults (a failing factory) still propagate.
+    /// </remarks>
+    /// <example><code>
+    /// if (pool.TryAcquire(TimeSpan.FromMilliseconds(50), out var obj))
+    /// {
+    ///     try { /* use obj */ }
+    ///     finally { pool.Release(obj); }
+    /// }
+    /// </code></example>
+    bool TryAcquire(TimeSpan timeout, out T item);
+
+    /// <summary>
     /// Returns an object to the pool so it can be reused.
     /// </summary>
     /// <param name="item">The object previously obtained from <c>Acquire</c>; must not be <c>null</c>.</param>

@@ -284,6 +284,12 @@ public sealed partial class StringBuilderPool : IHayateObjectPool<PooledStringBu
     public PooledStringBuilder Acquire(TimeSpan timeout) => _pool.Acquire(timeout);
 
     /// <inheritdoc />
+    public bool TryAcquire(out PooledStringBuilder item) => _pool.TryAcquire(out item);
+
+    /// <inheritdoc />
+    public bool TryAcquire(TimeSpan timeout, out PooledStringBuilder item) => _pool.TryAcquire(timeout, out item);
+
+    /// <inheritdoc />
     public Task<PooledStringBuilder> AcquireAsync(CancellationToken cancellationToken = default)
         => _pool.AcquireAsync(cancellationToken);
 

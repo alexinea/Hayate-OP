@@ -128,24 +128,99 @@ public sealed class HayatePreparationPool<T> : IHayateObjectPool<T>
         => AcquireAsyncCore(timeout, cancellationToken);
 
     /// <summary>
+    /// Attempts to acquire an object without waiting: one borrow from the inner pool, then the
+    /// preparation chain before delivering it — blocking on the asynchronous chain, like
+    /// <see cref="Acquire()"/>. Delegates to <see cref="TryAcquire(TimeSpan, out T)"/> with a zero
+    /// budget.
+    /// </summary>
+    /// <param name="item">The prepared object when the method returns <c>true</c>; the default value
+    /// of <typeparamref name="T"/> otherwise.</param>
+    /// <inheritdoc />
+    public bool TryAcquire(out T item) => TryAcquire(TimeSpan.Zero, out item);
+
+    /// <summary>
+    /// Attempts to acquire an object, waiting at most <paramref name="timeout"/> for the inner pool
+    /// to hand one over, and runs the preparation chain before delivering it — blocking on the
+    /// asynchronous chain, like <see cref="Acquire(TimeSpan)"/>.
+    /// </summary>
+    /// <param name="timeout">The budget forwarded to the inner pool's borrow, honoured under every
+    /// reject policy.</param>
+    /// <param name="item">The prepared object when the method returns <c>true</c>; the default value
+    /// of <typeparamref name="T"/> otherwise.</param>
+    /// <returns><c>true</c> when an object was handed over; <c>false</c> when the inner pool had
+    /// nothing to give within the budget.</returns>
+    /// <remarks>
+    /// The wait is the only part that can be refused: a pool that has nothing to give within the
+    /// budget is reported as <c>false</c>, while a preparation failure still throws — a broken object
+    /// is a fault, not a pool state, and answering "not available" for it would hide the cause. The
+    /// inner pool's own <c>TryAcquire</c> supplies the outcome, so the budget is honoured under every
+    /// reject policy, <c>Block</c> included.
+    /// </remarks>
+    /// <inheritdoc cref="IHayateObjectPool{T}.TryAcquire(TimeSpan, out T)"/>
+    public bool TryAcquire(TimeSpan timeout, out T item)
+    {
+        var acquired = AcquireAsyncCore(timeout, default, tryBorrow: true).GetAwaiter().GetResult();
+
+        // A prepared object is never null, so a null return unambiguously means the inner pool had
+        // nothing to give within the budget.
+        if (acquired is null)
+        {
+            item = default!;
+            return false;
+        }
+
+        item = acquired;
+        return true;
+    }
+
+    /// <summary>
     /// Runs the borrow-and-prepare chain, forwarding the optional <paramref name="timeout"/> to the
     /// inner pool's borrow.
     /// </summary>
-    private async Task<T> AcquireAsyncCore(TimeSpan? timeout, CancellationToken cancellationToken)
+    /// <param name="timeout">The optional budget forwarded to the inner pool's borrow.</param>
+    /// <param name="cancellationToken">An external cancellation token that can interrupt the wait at
+    /// any point.</param>
+    /// <param name="tryBorrow">When <c>true</c> the borrow uses the inner pool's <c>TryAcquire</c>:
+    /// the first borrow that has nothing to give ends the call with a <c>null</c> result, and a retry
+    /// that finds the pool dry rethrows the prepare failure that started the chain.</param>
+    private async Task<T> AcquireAsyncCore(TimeSpan? timeout, CancellationToken cancellationToken, bool tryBorrow = false)
     {
         Exception? lastFailure = null;
         for (var attempt = 1; attempt <= _maxPrepareAttempts; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // The inner pool's asynchronous borrow, with the timeout forwarded when there is one: an
-            // exhausted pool suspends this context (no thread held for the duration of the wait), and a
-            // borrow that never completes within the timeout surfaces the inner pool's TimeoutException.
-            // Nothing is held yet, so an unsuccessful borrow simply propagates — there is no object to
-            // discard.
-            var item = timeout.HasValue
-                ? await _inner.AcquireAsync(timeout.Value, cancellationToken).ConfigureAwait(false)
-                : await _inner.AcquireAsync(cancellationToken).ConfigureAwait(false);
+            T item;
+            if (tryBorrow)
+            {
+                // The inner pool's non-throwing borrow, with the timeout forwarded when there is one:
+                // a pool that cannot serve the request within the budget is the outcome this wrapper
+                // reports as false. Nothing is held yet, so a refusal costs nothing to report.
+                if (!_inner.TryAcquire(timeout.GetValueOrDefault(), out var tried))
+                {
+                    if (attempt == 1) return default!;
+
+                    // A retry that finds the pool dry: the prepare failure already in hand is the real
+                    // cause, and reporting it beats answering "not available" for a broken object.
+                    throw new HayatePoolPreparationException(
+                        $"The preparation strategy failed for {attempt - 1} consecutive objects and the pool then had nothing left to retry with; the last failure is attached.",
+                        lastFailure);
+                }
+
+                item = tried;
+            }
+            else
+            {
+                // The inner pool's asynchronous borrow, with the timeout forwarded when there is one: an
+                // exhausted pool suspends this context (no thread held for the duration of the wait), and a
+                // borrow that never completes within the timeout surfaces the inner pool's TimeoutException.
+                // Nothing is held yet, so an unsuccessful borrow simply propagates — there is no object to
+                // discard.
+                item = timeout.HasValue
+                    ? await _inner.AcquireAsync(timeout.Value, cancellationToken).ConfigureAwait(false)
+                    : await _inner.AcquireAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             try
             {
                 if (await _strategy.IsReadyAsync(item, cancellationToken).ConfigureAwait(false))

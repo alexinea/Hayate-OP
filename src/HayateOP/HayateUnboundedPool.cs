@@ -193,6 +193,20 @@ public class HayateUnboundedPool<T> : IHayateObjectPool<T>
     public T Acquire(TimeSpan timeout) => Acquire();
 
     /// <summary>
+    /// Acquires an object. An unbounded pool never waits and never refuses, so the result is always
+    /// <c>true</c> and the timeout is ignored, exactly as <see cref="Acquire(TimeSpan)"/> ignores it.
+    /// </summary>
+    /// <inheritdoc />
+    public bool TryAcquire(out T item)
+    {
+        item = Acquire();
+        return true;
+    }
+
+    /// <inheritdoc />
+    public bool TryAcquire(TimeSpan timeout, out T item) => TryAcquire(out item);
+
+    /// <summary>
     /// Acquires an object; the pool never waits, so the returned task is always completed and the
     /// token is never observed.
     /// </summary>

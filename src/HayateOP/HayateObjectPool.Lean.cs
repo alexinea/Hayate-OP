@@ -614,7 +614,36 @@ public partial class HayatePoolBasic<T>
             return hit;
         }
 
-        return AcquireLeanSlow(timeout);
+        return AcquireLeanSlow(timeout, tryMode: false, out _);
+    }
+
+    /// <summary>
+    /// The lean borrow in try mode: the same fast path first — an idle object never needs a budget —
+    /// then the slow path, where a refusal is reported instead of thrown.
+    /// </summary>
+    private bool TryAcquireLean(TimeSpan timeout, out T item)
+    {
+        WaitForWarmupIfNeeded();
+
+        if (TryTakeLean(out var hit))
+        {
+            // Consume one wake-up signal (if any), exactly as the throwing form does.
+            if (_blockGate.CurrentCount > 0) _blockGate.Wait(0);
+
+            _policy.OnAcquire(hit);
+            item = hit;
+            return true;
+        }
+
+        var acquired = AcquireLeanSlow(timeout, tryMode: true, out var refused);
+        if (refused)
+        {
+            item = default!;
+            return false;
+        }
+
+        item = acquired;
+        return true;
     }
 
     // The suspended-wait slice used by the lean acquire path when no signal arrives. A signal wakes
@@ -634,10 +663,16 @@ public partial class HayatePoolBasic<T>
     /// only then fall back to the configured reject policy. The elapsed-time measurement starts
     /// here, because a timeout can only be exceeded after at least one miss.
     /// </summary>
+    /// <param name="timeout">The borrow's budget; in try mode it caps every wait.</param>
+    /// <param name="tryMode">When <c>true</c> a refusal is reported through <paramref name="refused"/>
+    /// instead of thrown, and every wait is capped by <paramref name="timeout"/>.</param>
+    /// <param name="refused">Set to <c>true</c> when a try-mode borrow gives up; always
+    /// <c>false</c> on a successful return and never consulted by the throwing form.</param>
     /// <exception cref="InvalidOperationException">Thrown by the Abort policy when the pool is at capacity and holds nothing idle.</exception>
     /// <exception cref="TimeoutException">Thrown by the BlockTimeout (or CreateNew) policy when acquisition exceeds <paramref name="timeout"/>.</exception>
-    private T AcquireLeanSlow(TimeSpan timeout)
+    private T AcquireLeanSlow(TimeSpan timeout, bool tryMode, out bool refused)
     {
+        refused = false;
         var sw = ValueStopwatch.StartNew();
 
         while (true)
@@ -660,11 +695,33 @@ public partial class HayatePoolBasic<T>
             {
                 case HayatePoolRejectPolicy.Abort:
                     {
+                        if (tryMode)
+                        {
+                            refused = true;
+                            return default!;
+                        }
+
                         throw new InvalidOperationException($"HayatePool [{_name}] has no available object; the request was rejected by the Abort reject policy.");
                     }
 
                 case HayatePoolRejectPolicy.Block:
                     {
+                        if (tryMode)
+                        {
+                            // The slice stays — it is what covers the unsignalled drop paths — but the
+                            // budget is a hard bound: once the timeout no longer covers a full slice,
+                            // the remaining time is what the wait gets, and once it covers nothing at
+                            // all the refusal is reported instead of parking.
+                            if (sw.Elapsed >= timeout)
+                            {
+                                refused = true;
+                                return default!;
+                            }
+
+                            _blockGate.Wait(Math.Min(BlockWaitSliceMs, RemainingWaitMs(timeout, sw.Elapsed)));
+                            continue;
+                        }
+
                         // No timeout concept under this policy; wait for a return signal and retry.
                         _blockGate.Wait(BlockWaitSliceMs);
                         continue;
@@ -681,6 +738,12 @@ public partial class HayatePoolBasic<T>
                         // construction, so "create while the pool has room" is never satisfiable here.
                         if (sw.Elapsed >= timeout)
                         {
+                            if (tryMode)
+                            {
+                                refused = true;
+                                return default!;
+                            }
+
                             throw new TimeoutException($"HayatePool [{_name}] timed out acquiring an object after {timeout.TotalSeconds}s. Borrowed objects that are never returned are the usual cause of this wait: check for a suspected leak and pair every borrow with a return.");
                         }
 

@@ -113,6 +113,12 @@
         <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.Acquire(System.TimeSpan)">
             <inheritdoc />
         </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.TryAcquire(DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource@)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.TryAcquire(System.TimeSpan,DotNetCore.HayateOP.Specialized.PooledCancellationTokenSource@)">
+            <inheritdoc />
+        </member>
         <member name="M:DotNetCore.HayateOP.Specialized.CancellationTokenSourcePool.AcquireAsync(System.Threading.CancellationToken)">
             <inheritdoc />
         </member>
@@ -708,6 +714,12 @@
             zero.</exception>
         </member>
         <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.Acquire(System.TimeSpan)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.TryAcquire(DotNetCore.HayateOP.Specialized.PooledMemoryStream@)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.TryAcquire(System.TimeSpan,DotNetCore.HayateOP.Specialized.PooledMemoryStream@)">
             <inheritdoc />
         </member>
         <member name="M:DotNetCore.HayateOP.Specialized.MemoryStreamPool.AcquireAsync(System.Threading.CancellationToken)">
@@ -1696,6 +1708,12 @@
             zero.</exception>
         </member>
         <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.Acquire(System.TimeSpan)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.TryAcquire(DotNetCore.HayateOP.Specialized.PooledStringBuilder@)">
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.TryAcquire(System.TimeSpan,DotNetCore.HayateOP.Specialized.PooledStringBuilder@)">
             <inheritdoc />
         </member>
         <member name="M:DotNetCore.HayateOP.Specialized.StringBuilderPool.AcquireAsync(System.Threading.CancellationToken)">

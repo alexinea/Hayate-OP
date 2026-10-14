@@ -1089,7 +1089,7 @@
             included, so the default configuration is untouched.
             </summary>
         </member>
-        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.HandleActiveLimitReached(DotNetCore.HayateOP.Common.ValueStopwatch,System.TimeSpan)">
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.HandleActiveLimitReached(DotNetCore.HayateOP.Common.ValueStopwatch,System.TimeSpan,System.Boolean)">
             <summary>
             G-5: the borrow reached the active-object ceiling. Nothing is handed out and nothing is created —
             a created object would itself be out on loan — so the outcome is the one
@@ -1098,6 +1098,13 @@
             up. The two creation policies wait as well instead of creating, which is the single place the
             ceiling overrules the policy. No forced scale-up runs here: capacity is not what is binding.
             </summary>
+            <param name="sw">The stopwatch started at the beginning of the borrow call.</param>
+            <param name="timeout">The borrow's budget; in try mode it caps the <c>Block</c> wait.</param>
+            <param name="tryMode">When <c>true</c> a refusal is reported to the caller instead of thrown,
+            and the <c>Block</c> wait is capped by <paramref name="timeout"/>.</param>
+            <returns><c>true</c> when a try-mode caller must give up (the refusal); <c>false</c> means the
+            wait is over and the caller should retry the scan. The throwing form never returns
+            <c>true</c> — it throws instead.</returns>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.UntrackObject(DotNetCore.HayateOP.HayateObject{`0})">
             <summary>
@@ -1207,6 +1214,38 @@
             finally { pool.Release(obj); }
             </code></example>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryAcquire(`0@)">
+            <summary>
+            Attempts to borrow without waiting: one pass over the pool, the creation the reject policy
+            performs on a miss, and no parking at all. Delegates to
+            <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryAcquire(System.TimeSpan,`0@)"/> with a zero budget.
+            </summary>
+            <inheritdoc cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.TryAcquire(`0@)"/>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryAcquire(System.TimeSpan,`0@)">
+            <summary>
+            Attempts to borrow, waiting at most <paramref name="timeout"/> under every reject policy —
+            including <see cref="F:DotNetCore.HayateOP.HayatePoolRejectPolicy.Block"/>, whose <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Acquire(System.TimeSpan)"/>
+            waits without a limit. Exhaustion, a refusal and an open breaker are reported as
+            <c>false</c>; a negative timeout and a failing factory still throw.
+            </summary>
+            <inheritdoc cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.TryAcquire(System.TimeSpan,`0@)"/>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryAcquireCore(System.TimeSpan,`0@)">
+            <summary>
+            Runs the borrow through the same engine in try mode and turns a refusal into <c>false</c>.
+            The engine stays throw-based and gains a mode rather than a second copy, so the two borrow
+            forms cannot drift apart.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.AcquireCore(System.TimeSpan,System.Boolean,System.Boolean@)">
+            <summary>
+            The borrow loop shared by both forms. <paramref name="tryMode"/> only changes what happens at
+            the five refusal points — a refusal is reported through <paramref name="refused"/> instead of
+            thrown, and a <c>Block</c> wait is capped by <paramref name="timeout"/> — so the object-found
+            path is identical for both forms.
+            </summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.AcquireAsync(System.Threading.CancellationToken)">
             <summary>Asynchronously acquires a pooled object, honouring the supplied cancellation token.</summary>
             <exception cref="T:System.Threading.Tasks.TaskCanceledException">Thrown if <paramref name="cancellationToken"/> is cancelled while waiting.</exception>
@@ -1301,6 +1340,14 @@
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.ThrowIfCircuitOpen">
             <summary>Borrow-path fail-fast. Throws before any pool work while the breaker is open.</summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.GateCircuitBreaker(System.Boolean,System.Boolean@)">
+            <summary>
+            The circuit-breaker gate for the borrow core, in either mode: an open breaker stops a throwing
+            borrow with <see cref="T:DotNetCore.HayateOP.HayatePoolUnavailableException"/> and a try-mode borrow by refusing it,
+            because "the pool is out of service" is a state a <c>TryAcquire</c> caller asked to be told
+            about as an outcome rather than an exception.
+            </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TripBreaker(System.String)">
             <summary>
@@ -1789,12 +1836,23 @@
             <exception cref="T:System.InvalidOperationException">Thrown by the Abort policy when the pool is at capacity and holds nothing idle.</exception>
             <exception cref="T:System.TimeoutException">Thrown by the BlockTimeout (or CreateNew) policy when acquisition exceeds <paramref name="timeout"/>.</exception>
         </member>
-        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.AcquireLeanSlow(System.TimeSpan)">
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryAcquireLean(System.TimeSpan,`0@)">
+            <summary>
+            The lean borrow in try mode: the same fast path first — an idle object never needs a budget —
+            then the slow path, where a refusal is reported instead of thrown.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.AcquireLeanSlow(System.TimeSpan,System.Boolean,System.Boolean@)">
             <summary>
             The lean acquire path once the buffer came back empty: grow up to the ceiling first, and
             only then fall back to the configured reject policy. The elapsed-time measurement starts
             here, because a timeout can only be exceeded after at least one miss.
             </summary>
+            <param name="timeout">The borrow's budget; in try mode it caps every wait.</param>
+            <param name="tryMode">When <c>true</c> a refusal is reported through <paramref name="refused"/>
+            instead of thrown, and every wait is capped by <paramref name="timeout"/>.</param>
+            <param name="refused">Set to <c>true</c> when a try-mode borrow gives up; always
+            <c>false</c> on a successful return and never consulted by the throwing form.</param>
             <exception cref="T:System.InvalidOperationException">Thrown by the Abort policy when the pool is at capacity and holds nothing idle.</exception>
             <exception cref="T:System.TimeoutException">Thrown by the BlockTimeout (or CreateNew) policy when acquisition exceeds <paramref name="timeout"/>.</exception>
         </member>
@@ -6173,11 +6231,49 @@
         <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.AcquireAsync(System.TimeSpan,System.Threading.CancellationToken)">
             <inheritdoc />
         </member>
-        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.AcquireAsyncCore(System.Nullable{System.TimeSpan},System.Threading.CancellationToken)">
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.TryAcquire(`0@)">
+            <summary>
+            Attempts to acquire an object without waiting: one borrow from the inner pool, then the
+            preparation chain before delivering it — blocking on the asynchronous chain, like
+            <see cref="M:DotNetCore.HayateOP.HayatePreparationPool`1.Acquire"/>. Delegates to <see cref="M:DotNetCore.HayateOP.HayatePreparationPool`1.TryAcquire(System.TimeSpan,`0@)"/> with a zero
+            budget.
+            </summary>
+            <param name="item">The prepared object when the method returns <c>true</c>; the default value
+            of <typeparamref name="T"/> otherwise.</param>
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.TryAcquire(System.TimeSpan,`0@)">
+            <summary>
+            Attempts to acquire an object, waiting at most <paramref name="timeout"/> for the inner pool
+            to hand one over, and runs the preparation chain before delivering it — blocking on the
+            asynchronous chain, like <see cref="M:DotNetCore.HayateOP.HayatePreparationPool`1.Acquire(System.TimeSpan)"/>.
+            </summary>
+            <param name="timeout">The budget forwarded to the inner pool's borrow, honoured under every
+            reject policy.</param>
+            <param name="item">The prepared object when the method returns <c>true</c>; the default value
+            of <typeparamref name="T"/> otherwise.</param>
+            <returns><c>true</c> when an object was handed over; <c>false</c> when the inner pool had
+            nothing to give within the budget.</returns>
+            <remarks>
+            The wait is the only part that can be refused: a pool that has nothing to give within the
+            budget is reported as <c>false</c>, while a preparation failure still throws — a broken object
+            is a fault, not a pool state, and answering "not available" for it would hide the cause. The
+            inner pool's own <c>TryAcquire</c> supplies the outcome, so the budget is honoured under every
+            reject policy, <c>Block</c> included.
+            </remarks>
+            <inheritdoc cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.TryAcquire(System.TimeSpan,`0@)"/>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.AcquireAsyncCore(System.Nullable{System.TimeSpan},System.Threading.CancellationToken,System.Boolean)">
             <summary>
             Runs the borrow-and-prepare chain, forwarding the optional <paramref name="timeout"/> to the
             inner pool's borrow.
             </summary>
+            <param name="timeout">The optional budget forwarded to the inner pool's borrow.</param>
+            <param name="cancellationToken">An external cancellation token that can interrupt the wait at
+            any point.</param>
+            <param name="tryBorrow">When <c>true</c> the borrow uses the inner pool's <c>TryAcquire</c>:
+            the first borrow that has nothing to give ends the call with a <c>null</c> result, and a retry
+            that finds the pool dry rethrows the prepare failure that started the chain.</param>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePreparationPool`1.Release(`0)">
             <summary>
@@ -6860,6 +6956,16 @@
             </summary>
             <inheritdoc />
         </member>
+        <member name="M:DotNetCore.HayateOP.HayateUnboundedPool`1.TryAcquire(`0@)">
+            <summary>
+            Acquires an object. An unbounded pool never waits and never refuses, so the result is always
+            <c>true</c> and the timeout is ignored, exactly as <see cref="M:DotNetCore.HayateOP.HayateUnboundedPool`1.Acquire(System.TimeSpan)"/> ignores it.
+            </summary>
+            <inheritdoc />
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayateUnboundedPool`1.TryAcquire(System.TimeSpan,`0@)">
+            <inheritdoc />
+        </member>
         <member name="M:DotNetCore.HayateOP.HayateUnboundedPool`1.AcquireAsync(System.Threading.CancellationToken)">
             <summary>
             Acquires an object; the pool never waits, so the returned task is always completed and the
@@ -7187,6 +7293,59 @@
             finally { pool.Release(obj); }
             </code>
             </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPool`1.TryAcquire(`0@)">
+            <summary>
+            Attempts to acquire an object without waiting: a single pass over the pool, plus the creation
+            the configured reject policy performs on a miss, and no parking whatsoever. Equivalent to
+            <see cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.TryAcquire(System.TimeSpan,`0@)"/> with a zero budget.
+            </summary>
+            <param name="item">The acquired object when the method returns <c>true</c>; the default value
+            of <typeparamref name="T"/> otherwise.</param>
+            <returns><c>true</c> when an object was handed over; <c>false</c> when the only way forward
+            was to wait or be refused — an open circuit breaker, the Abort policy, or a policy that waits
+            holding nothing idle. A pool that creates on a miss answers <c>true</c>.</returns>
+            <remarks>
+            Where <see cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.Acquire"/> reports a pool that cannot serve the request right now by
+            throwing, this method reports it by returning <c>false</c> — the caller decides whether
+            "not available" is worth an exception. Faults are still thrown: a negative timeout and a
+            factory that fails are bugs or environment problems, never a pool state, so they are never
+            read as "nothing available".
+            </remarks>
+            <example><code>
+            if (pool.TryAcquire(out var obj))
+            {
+                try { /* use obj */ }
+                finally { pool.Release(obj); }
+            }
+            </code></example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.IHayateObjectPool`1.TryAcquire(System.TimeSpan,`0@)">
+            <summary>
+            Attempts to acquire an object, waiting at most <paramref name="timeout"/> for one to become
+            available. Reports exhaustion as a <c>false</c> return instead of a
+            <see cref="T:System.TimeoutException"/>.
+            </summary>
+            <param name="timeout">The maximum wait time. The budget is a hard bound under every reject
+            policy — including <see cref="F:DotNetCore.HayateOP.HayatePoolRejectPolicy.Block"/>, whose
+            <see cref="M:DotNetCore.HayateOP.IHayateObjectPool`1.Acquire(System.TimeSpan)"/> waits without a limit.</param>
+            <param name="item">The acquired object when the method returns <c>true</c>; the default value
+            of <typeparamref name="T"/> otherwise.</param>
+            <returns><c>true</c> when an object was handed over within the budget; <c>false</c> when the
+            budget elapsed, the pool refused the request (Abort, or an open circuit breaker), or the
+            pool had nothing to give when the call started and no policy creates on a miss.</returns>
+            <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="timeout"/> is negative.</exception>
+            <remarks>
+            A wait that the budget no longer covers is a refusal: the timeout form never parks past its
+            own budget, whatever the reject policy says. Faults (a failing factory) still propagate.
+            </remarks>
+            <example><code>
+            if (pool.TryAcquire(TimeSpan.FromMilliseconds(50), out var obj))
+            {
+                try { /* use obj */ }
+                finally { pool.Release(obj); }
+            }
+            </code></example>
         </member>
         <member name="M:DotNetCore.HayateOP.IHayateObjectPool`1.Release(`0)">
             <summary>

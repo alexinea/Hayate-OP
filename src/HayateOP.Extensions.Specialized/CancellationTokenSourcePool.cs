@@ -161,6 +161,13 @@ public sealed class CancellationTokenSourcePool : IHayateObjectPool<PooledCancel
     public PooledCancellationTokenSource Acquire(TimeSpan timeout) => _pool.Acquire(timeout);
 
     /// <inheritdoc />
+    public bool TryAcquire(out PooledCancellationTokenSource item) => _pool.TryAcquire(out item);
+
+    /// <inheritdoc />
+    public bool TryAcquire(TimeSpan timeout, out PooledCancellationTokenSource item)
+        => _pool.TryAcquire(timeout, out item);
+
+    /// <inheritdoc />
     public Task<PooledCancellationTokenSource> AcquireAsync(CancellationToken cancellationToken = default)
         => _pool.AcquireAsync(cancellationToken);
 

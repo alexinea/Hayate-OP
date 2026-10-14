@@ -391,7 +391,14 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     /// up. The two creation policies wait as well instead of creating, which is the single place the
     /// ceiling overrules the policy. No forced scale-up runs here: capacity is not what is binding.
     /// </summary>
-    private void HandleActiveLimitReached(ValueStopwatch sw, TimeSpan timeout)
+    /// <param name="sw">The stopwatch started at the beginning of the borrow call.</param>
+    /// <param name="timeout">The borrow's budget; in try mode it caps the <c>Block</c> wait.</param>
+    /// <param name="tryMode">When <c>true</c> a refusal is reported to the caller instead of thrown,
+    /// and the <c>Block</c> wait is capped by <paramref name="timeout"/>.</param>
+    /// <returns><c>true</c> when a try-mode caller must give up (the refusal); <c>false</c> means the
+    /// wait is over and the caller should retry the scan. The throwing form never returns
+    /// <c>true</c> — it throws instead.</returns>
+    private bool HandleActiveLimitReached(ValueStopwatch sw, TimeSpan timeout, bool tryMode)
     {
         Interlocked.Increment(ref _activeLimitThrottledCount);
 
@@ -399,13 +406,25 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         {
             case HayatePoolRejectPolicy.Abort:
                 if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
+                if (tryMode) return true;
                 throw new InvalidOperationException(
                     $"HayatePool [{_name}] has {_maxActiveObjects} objects out on loan, which is its MaxActiveObjects ceiling; the request was rejected by the Abort reject policy.");
 
             case HayatePoolRejectPolicy.Block:
-                // No timeout under Block, exactly as on the miss path.
-                _blockGate.Wait();
-                return;
+                if (tryMode)
+                {
+                    // The budget is a hard bound in try mode: a wait the timeout no longer covers is
+                    // the refusal, so a Try never parks past the budget it was given.
+                    if (sw.Elapsed >= timeout) return true;
+                    _blockGate.Wait(RemainingWaitMs(timeout, sw.Elapsed));
+                }
+                else
+                {
+                    // No timeout under Block, exactly as on the miss path.
+                    _blockGate.Wait();
+                }
+
+                return false;
 
             case HayatePoolRejectPolicy.BlockTimeout:
             case HayatePoolRejectPolicy.CreateNew:
@@ -413,12 +432,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 if (sw.Elapsed >= timeout)
                 {
                     if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
+                    if (tryMode) return true;
                     throw new TimeoutException(
                         $"HayatePool [{_name}] timed out acquiring an object after {timeout.TotalSeconds}s: all {_maxActiveObjects} objects of its MaxActiveObjects ceiling are still out on loan.");
                 }
 
                 _blockGate.Wait(RemainingWaitMs(timeout, sw.Elapsed));
-                return;
+                return false;
 
             default:
                 throw new ArgumentOutOfRangeException(nameof(_options.RejectPolicy), "Unknown reject policy.");
@@ -1200,14 +1220,77 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         return acquired;
     }
 
-    private T AcquireCore(TimeSpan timeout)
+    /// <summary>
+    /// Attempts to borrow without waiting: one pass over the pool, the creation the reject policy
+    /// performs on a miss, and no parking at all. Delegates to
+    /// <see cref="TryAcquire(TimeSpan, out T)"/> with a zero budget.
+    /// </summary>
+    /// <inheritdoc cref="IHayateObjectPool{T}.TryAcquire(out T)"/>
+    public bool TryAcquire(out T item) => TryAcquire(TimeSpan.Zero, out item);
+
+    /// <summary>
+    /// Attempts to borrow, waiting at most <paramref name="timeout"/> under every reject policy —
+    /// including <see cref="HayatePoolRejectPolicy.Block"/>, whose <see cref="Acquire(TimeSpan)"/>
+    /// waits without a limit. Exhaustion, a refusal and an open breaker are reported as
+    /// <c>false</c>; a negative timeout and a failing factory still throw.
+    /// </summary>
+    /// <inheritdoc cref="IHayateObjectPool{T}.TryAcquire(TimeSpan, out T)"/>
+    public bool TryAcquire(TimeSpan timeout, out T item)
     {
+        // Argument validation stays exception-based exactly as on the Acquire path: a negative budget
+        // is a caller bug, never a pool state.
+        if (timeout < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be non-negative");
+
+        // Lean fast path dispatch (same order as Acquire).
+        if (_enableLean) return TryAcquireLean(timeout, out item);
+
+        if (!_enableAllocationTracking) return TryAcquireCore(timeout, out item);
+
+        // Allocation tracking mirrors Acquire, refusal included: the sample is recorded either way, so
+        // the statistics stay comparable between the two borrow forms.
+        var allocatedBefore = GetAllocatedBytesForCurrentThread();
+        var acquired = TryAcquireCore(timeout, out item);
+        Interlocked.Add(ref _acquireAllocatedBytes, GetAllocatedBytesForCurrentThread() - allocatedBefore);
+        Interlocked.Increment(ref _acquireAllocationSamples);
+        return acquired;
+    }
+
+    /// <summary>
+    /// Runs the borrow through the same engine in try mode and turns a refusal into <c>false</c>.
+    /// The engine stays throw-based and gains a mode rather than a second copy, so the two borrow
+    /// forms cannot drift apart.
+    /// </summary>
+    private bool TryAcquireCore(TimeSpan timeout, out T item)
+    {
+        var acquired = AcquireCore(timeout, tryMode: true, out var refused);
+        if (refused)
+        {
+            item = default!;
+            return false;
+        }
+
+        item = acquired;
+        return true;
+    }
+
+    private T AcquireCore(TimeSpan timeout) => AcquireCore(timeout, tryMode: false, out _);
+
+    /// <summary>
+    /// The borrow loop shared by both forms. <paramref name="tryMode"/> only changes what happens at
+    /// the five refusal points — a refusal is reported through <paramref name="refused"/> instead of
+    /// thrown, and a <c>Block</c> wait is capped by <paramref name="timeout"/> — so the object-found
+    /// path is identical for both forms.
+    /// </summary>
+    private T AcquireCore(TimeSpan timeout, bool tryMode, out bool refused)
+    {
+        refused = false;
         if (timeout < TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(timeout), "Timeout must be non-negative");
 
         // Pool-level circuit breaker (off by default → constant branch, JIT-eliminable). While the breaker
         // is open the whole pool is out of service: fail before touching any shard, wait gate or policy.
-        if (_enableCircuitBreaker) ThrowIfCircuitOpen();
+        if (_enableCircuitBreaker) GateCircuitBreaker(tryMode, out refused);
 
         // Wait for pre-warm readiness if not yet done (off by default → constant branch, zero overhead)
         WaitForWarmupIfNeeded();
@@ -1237,7 +1320,14 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             // iteration would be counted twice there.
             if (_maxActiveObjects > 0 && Volatile.Read(ref _activeCount) >= _maxActiveObjects)
             {
-                HandleActiveLimitReached(sw, timeout);
+                if (HandleActiveLimitReached(sw, timeout, tryMode))
+                {
+                    // Try mode only: the ceiling refusing the loan is the outcome, reported as false.
+                    // The throwing form above never reaches here.
+                    refused = true;
+                    return default!;
+                }
+
                 continue;
             }
 
@@ -1283,7 +1373,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                     if (_maxActiveObjects > 0 && !TryClaimActiveSlot())
                     {
                         if (shard.Add(w)) SignalAvailability();
-                        HandleActiveLimitReached(sw, timeout);
+                        if (HandleActiveLimitReached(sw, timeout, tryMode))
+                        {
+                            // Try mode only: the ceiling refusing the loan is the outcome.
+                            refused = true;
+                            return default!;
+                        }
+
                         continue;
                     }
 
@@ -1497,6 +1593,14 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         // Throw immediately when no idle object is available; do not wait
                         if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
                         if (_enableAutoScaling) ForceScaleUpOneStep();
+                        if (tryMode)
+                        {
+                            // Refusal is the outcome for a try-mode caller: the bookkeeping above stays
+                            // identical, so the statistics do not depend on which borrow form ran.
+                            refused = true;
+                            return default!;
+                        }
+
                         throw new InvalidOperationException($"HayatePool [{_name}] has no available object; the request was rejected by the Abort reject policy.");
                     }
 
@@ -1509,6 +1613,20 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         // ColdBootTests (BlockTimeout_NonEmptyPoolDoesNotGrowOnMiss).
                         var coldBoot = TryColdBootAcquire((long)sw.Elapsed.TotalMilliseconds);
                         if (coldBoot is not null) return coldBoot;
+
+                        if (tryMode)
+                        {
+                            // The budget is a hard bound here, even though Block has no timeout of its
+                            // own: a try-mode caller must never park past the budget it was given.
+                            if (sw.Elapsed >= timeout)
+                            {
+                                refused = true;
+                                return default!;
+                            }
+
+                            _blockGate.Wait(RemainingWaitMs(timeout, sw.Elapsed));
+                            continue;
+                        }
 
                         // Wait indefinitely until an object is obtained. This is a single SemaphoreSlim wait, so its latency
                         // is the signalling site's and not a re-check period; it replaces the original SpinOnce busy-wait
@@ -1533,6 +1651,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                         {
                             if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
                             if (_enableAutoScaling) ForceScaleUpOneStep();
+                            if (tryMode)
+                            {
+                                refused = true;
+                                return default!;
+                            }
+
                             throw new TimeoutException($"HayatePool [{_name}] timed out acquiring an object after {timeout.TotalSeconds}s. Borrowed objects that are never returned are the usual cause of this wait: check for a suspected leak and pair every borrow with a return.");
                         }
 
@@ -1568,6 +1692,12 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                             {
                                 Interlocked.Increment(ref _activeLimitThrottledCount);
                                 if (_enableMetrics) Interlocked.Increment(ref _totalMissed);
+                                if (tryMode)
+                                {
+                                    refused = true;
+                                    return default!;
+                                }
+
                                 throw new TimeoutException(
                                     $"HayatePool [{_name}] timed out acquiring an object after {timeout.TotalSeconds}s: all {_maxActiveObjects} objects of its MaxActiveObjects ceiling are still out on loan.");
                             }
@@ -2322,6 +2452,24 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         {
             throw new HayatePoolUnavailableException(_name, Volatile.Read(ref _breakerReason));
         }
+    }
+
+    /// <summary>
+    /// The circuit-breaker gate for the borrow core, in either mode: an open breaker stops a throwing
+    /// borrow with <see cref="HayatePoolUnavailableException"/> and a try-mode borrow by refusing it,
+    /// because "the pool is out of service" is a state a <c>TryAcquire</c> caller asked to be told
+    /// about as an outcome rather than an exception.
+    /// </summary>
+    private void GateCircuitBreaker(bool tryMode, out bool refused)
+    {
+        if (Volatile.Read(ref _breakerTripped) == 0)
+        {
+            refused = false;
+            return;
+        }
+
+        if (!tryMode) throw new HayatePoolUnavailableException(_name, Volatile.Read(ref _breakerReason));
+        refused = true;
     }
 
     /// <summary>

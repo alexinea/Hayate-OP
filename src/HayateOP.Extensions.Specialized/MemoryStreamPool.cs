@@ -251,6 +251,12 @@ public sealed class MemoryStreamPool : IHayateObjectPool<PooledMemoryStream>
     public PooledMemoryStream Acquire(TimeSpan timeout) => _pool.Acquire(timeout);
 
     /// <inheritdoc />
+    public bool TryAcquire(out PooledMemoryStream item) => _pool.TryAcquire(out item);
+
+    /// <inheritdoc />
+    public bool TryAcquire(TimeSpan timeout, out PooledMemoryStream item) => _pool.TryAcquire(timeout, out item);
+
+    /// <inheritdoc />
     public Task<PooledMemoryStream> AcquireAsync(CancellationToken cancellationToken = default)
         => _pool.AcquireAsync(cancellationToken);
 
