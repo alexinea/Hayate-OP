@@ -44,6 +44,11 @@ timeout-taking overload, for call sites that would otherwise wrap a borrow in a 
 ask "is one free right now?". Like the ceiling, the lease and the switches, it is a pure addition — the
 throwing forms and every existing behaviour are untouched.
 
+The line also removes the policy class as the price of admission for a configured pool (G-13):
+`WithFactory`, `WithReset` and `WithReturnPredicate` describe a pool's creation, reset and return
+decision as lambdas on the builder itself, so the full option surface — sizes, reject policy, metrics,
+the reset-timing switches, lean mode — is reachable without writing a six-member policy class first.
+
 ### Added
 
 - **A ceiling on concurrent borrows** (G-5): `MaxActiveObjects` caps how many objects may be lent out
@@ -194,6 +199,24 @@ throwing forms and every existing behaviour are untouched.
   under the same metrics gate as before, and the ceiling's throttle counter is not gated at all, so
   the two borrow forms report the same numbers for the same events. The lean path, the general path
   and the asynchronous wrapper all answer the same questions the same way.
+- **A policy described by lambdas, on the builder** (G-13): `WithFactory`, `WithReset` and
+  `WithReturnPredicate` on `HayatePoolBuilder<T>` describe a pool's creation, its reset on the way
+  back into the idle state, and the predicate that decides whether a returned object is taken back —
+  the three things a policy class exists to say, expressed as lambdas. The builder previously had one
+  policy entry, `WithPolicy`, which takes an `IHayateObjectPolicy<T>`: correct for a policy with a
+  lifetime of its own, and a six-member class to write for the pool whose factory is a lambda. What
+  the one-call `HayatePool.Simple` already did for the no-options case — build its policy from
+  delegates — is now the same mechanism on the full builder, so every other option on the chain still
+  applies: sizes, reject policy, metrics, the reset-timing switches, lean mode, named pools. The
+  delegates are last-one-wins against `WithPolicy` in both directions, so mixing the two ways of
+  describing a policy resolves by the order the calls were made rather than by an undocumented
+  precedence. Two layers are deliberately kept apart: `WithReset` runs on the policy's passivate hook,
+  while `ResetOnReturn` / `ResetOnBorrow` continue to govern only the library default policy's reset
+  of an `IHayateResettable` object — a policy the caller describes, by class or by lambda, owns its
+  own hooks, which is what a policy class has always meant. A chain that asks for a hook without a
+  factory fails at build time, next to the other build-time rejections, rather than at the first
+  borrow. `HayatePool.Simple` itself is unchanged in signature and behaviour. No existing signature,
+  option or behaviour changed.
 
 ### Changed
 

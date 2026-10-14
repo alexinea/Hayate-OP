@@ -373,6 +373,28 @@ var pool = new HayatePoolBuilder<MyCustomObject>()
     .Build();
 ```
 
+When the policy is only those three hooks — build it, reset it, decide whether to keep it — the
+builder takes them as lambdas instead of a class, and every other option on the chain still applies:
+
+```csharp
+var pool = new HayatePoolBuilder<MyConnection>()
+    .WithFactory(() => new MyConnection(connectionString))
+    .WithReset(c => c.ClearCommand())
+    .WithReturnPredicate(c => !c.IsStale)   // false destroys the object instead of parking it
+    .WithMinSize(4)
+    .WithMaxSize(32)
+    .Build();
+```
+
+`WithReset` is the passivate hook: it runs when a returned object is on its way back into the idle
+state, before the return is accepted. `WithReturnPredicate` is the release hook: returning `false`
+destroys the object rather than parking it, exactly as a policy class's `OnRelease` does. Both are
+separate from the `ResetOnReturn` / `ResetOnBorrow` switches, which govern only the library default
+policy's reset of an `IHayateResettable` object — a policy you describe, by class or by lambda, owns
+its own hooks. Mixing the two spellings resolves by the last call on the chain: a later `WithPolicy`
+replaces the lambdas, and a later lambda replaces the policy. A chain that asks for a hook without a
+factory fails at build time rather than at the first borrow.
+
 ### Async Usage
 
 ```csharp
