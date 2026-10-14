@@ -76,6 +76,13 @@ unchanged. The members mirror four of the six synchronous hooks:
 > `ValueTask<bool>`; the 2.9 plan sketches it as `ValueTask`, which would silently lose the
 > accept/reject decision. This page takes `ValueTask<bool>`.
 
+`IHayateObjectLifecycleObserver<T>` (G-22) is deliberately **synchronous only** — it has no
+`...Async` twin. It is a notification rather than a step the engine has to complete: the observer
+runs on the destroy path and its exceptions are swallowed, so making it asynchronous would make every
+drain and every eviction wait on policy code for no gain. Because it is a second, orthogonal
+interface, a policy that implements only the asynchronous contract above still implements the
+synchronous observer — it can observe destruction without writing any other synchronous hook.
+
 ## 4. Dispatch rules
 
 1. **A policy that implements `IHayateAsyncObjectPolicy<T>` takes the asynchronous path.** The

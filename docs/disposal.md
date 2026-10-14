@@ -26,8 +26,10 @@ The drain itself, on the general-purpose engine:
 
 1. Per shard, under the shard lock, the idle free list is copied out and emptied, and each
    wrapper is marked destroyed.
-2. Outside the lock, every drained value goes through `Shard.SafeDispose`, which calls
-   `IDisposable.Dispose()` when the value implements it. **An exception thrown by a user's
+2. Outside the lock, each drained wrapper is offered to the lifecycle observer as
+   `HayateDestroyReason.PoolCleared` (when the policy implements
+   `IHayateObjectLifecycleObserver<T>`), then its value goes through `Shard.SafeDispose`, which
+   calls `IDisposable.Dispose()` when the value implements it. **An exception thrown by a user's
    `Dispose` is caught and logged**, so one badly-behaved object cannot abort the drain —
    the remaining objects are still released.
 3. The shard registry is cleared.
@@ -86,6 +88,12 @@ whereas every other destroy path — `Destroy(HayateObject<T>)`, `Destroy(T)`, t
 rejection path, the eviction path, and the lean drain — does. A policy that relies on
 `OnDestroy` for bookkeeping (releasing a handle it manages separately, decrementing an
 external counter) will not see objects that were drained by `Clear()` / `Dispose()`.
+
+An optional `IHayateObjectLifecycleObserver<T>` *is* notified of a drain, with
+`HayateDestroyReason.PoolCleared` — see [`README.MD`](../README.MD#hearing-about-destruction).
+The two hooks are independent: the drain reports the destruction to the observer while still
+leaving `OnDestroy` uncalled, so a policy that needs to account for drained objects should
+implement the observer rather than move its bookkeeping into `OnDestroy`.
 
 **2. There is no disposed-state guard.** MEOP's `DisposableObjectPool<T>` refuses further
 use with `ObjectDisposedException`. HayateOP's `Dispose()` releases the timer and the

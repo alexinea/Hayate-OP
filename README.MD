@@ -12,6 +12,7 @@ A high-performance, feature-rich object pool implementation for .NET, designed t
 - **Bucketed Buffer Pool**: Optional `HayateBufferPool<T>` — a fixed ladder of size buckets with round-up-to-nearest-size routing, for workloads that rent arrays of a few known sizes.
 - **Auto-Scaling**: Dynamically adjusts pool size based on usage patterns (aggressive scale-up / conservative scale-down steps).
 - **Object Validation**: Validates objects on borrow, return, and while idle.
+- **Lifecycle Observation**: An optional `IHayateObjectLifecycleObserver<T>` tells a policy about every object the engine destroys, with the `HayateDestroyReason` it went — so external bookkeeping stays true without a log line to parse.
 - **Eviction Policy**: Automatically removes expired or idle objects on a background run, under a rule you can replace (`IHayateEvictionPolicy<T>`).
 - **Generation Optimization**: Reduces validation frequency for long-lived objects.
 - **Leak Detection**: Tracks and reports potential object leaks; stack-trace capture is opt-in (`Off` / `Sampled` / `EveryAcquire`) since 2.1.
@@ -394,6 +395,70 @@ policy's reset of an `IHayateResettable` object — a policy you describe, by cl
 its own hooks. Mixing the two spellings resolves by the last call on the chain: a later `WithPolicy`
 replaces the lambdas, and a later lambda replaces the policy. A chain that asks for a hook without a
 factory fails at build time rather than at the first borrow.
+
+### Hearing about destruction
+
+A policy can also be told about every object the engine destroys, and why. Implement the optional
+`IHayateObjectLifecycleObserver<T>` alongside `IHayateObjectPolicy<T>` — the same object, a second
+interface — and the engine probes for it:
+
+```csharp
+public class AccountingPolicy : IHayateObjectPolicy<MyConnection>, IHayateObjectLifecycleObserver<MyConnection>
+{
+    // ... Create / Validate / OnAcquire / OnPassivate / OnRelease / OnDestroy ...
+
+    public void OnEvict(MyConnection item, HayateDestroyReason reason)
+    {
+        _liveCount--;                              // every non-validation destroy lands here
+        _logger.LogDebug("released {Id} ({Reason})", item.Id, reason);
+    }
+
+    public void OnValidationFailed(MyConnection item)
+    {
+        _liveCount--;                              // validation failures are the other destroy partition
+        _quarantined.Add(item.Id);                 // the object never reached a caller
+    }
+}
+```
+
+`OnEvict` reports every destruction except validation failures; `OnValidationFailed` reports the one case
+the object is rejected by `Validate` rather than retired, and `HayateDestroyReason.ValidationFailed` is
+the only reason that is routed to it rather than to `OnEvict`. The two hooks partition the events —
+nothing is reported twice, nothing is dropped. `HayateDestroyReason` names nine causes:
+
+| Reason | What produced it |
+| :--- | :--- |
+| `ValidationFailed` | `Validate` said no on the borrow, return or idle-sweep path → `OnValidationFailed` |
+| `Evicted` | the eviction policy retired it, or a manual `Evict` did |
+| `CapacityOverflow` | the shard was full, the soft ceiling was reached, a pre-warm overflowed, or a scale-down grew past it |
+| `ReturnRejected` | `OnRelease` refused the return |
+| `PoolCleared` | a `Clear()` or `Dispose()` drain |
+| `ScaledDown` | automatic scale-down removed it |
+| `Abandoned` | leak recovery reclaimed an object that was never returned |
+| `Rotated` | a lifetime rotation replaced it on hand-out |
+| `Misuse` | a foreign object was returned, or the shard rejected a second return because it already held the wrapper |
+
+A `Release(null)` is still a misuse of the call, but there is no object to destroy or pass to either
+observer hook, so it produces no lifecycle notification.
+
+Three things worth knowing before you rely on it:
+
+* **It is a courtesy, not a gate.** The hook runs **before** the object is torn down, so you see a live
+  value, and **exactly once** per object. Destructions of different objects can happen concurrently, so
+  the observer must synchronize any shared state itself. An exception thrown from either hook is caught
+  and logged rather than propagated, so a broken observer cannot abort a `Clear()` or a drain in progress —
+  do not use it to *prevent* a destruction, only to observe one.
+* **`Clear()` / `Dispose()` report, `OnDestroy` still does not.** A drain notifies the observer with
+  `PoolCleared`, but it still does not call `IHayateObjectPolicy.OnDestroy` — that long-standing
+  contract is unchanged, and [`docs/disposal.md`](docs/disposal.md#5-two-differences-to-be-aware-of) §5
+  explains why the two are independent.
+* **The lean path sees less.** Lean never calls `Validate`, so `OnValidationFailed` is unreachable
+  there — not misreported, simply never raised. Lean reports only the reasons it can see: a refused
+  return, a full buffer and a drain. If you need the full set, do not pool that type on the lean
+  profile.
+
+A policy that does not implement `IHayateObjectLifecycleObserver<T>` is unaffected, statement for
+statement — this is a pure addition.
 
 ### Async Usage
 

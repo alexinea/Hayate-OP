@@ -66,6 +66,15 @@ are off by default. Verifying them exposed a hole in the reload path (also G-21)
 change was accepted on a live pool and then ignored, because every shard snapshots the order when it is
 built. That is now refused, and recorded under Fixed.
 
+The line also gives a policy a way to hear about destruction (G-22): an optional
+`IHayateObjectLifecycleObserver<T>` reports every object the engine destroys, together with the reason
+it went, so a policy that maintains external state — a counter, a handle, a lease it took out in
+`Create` — can keep that state true without re-deriving the reason from a log line. It is a second,
+optional interface rather than two more members on `IHayateObjectPolicy<T>`, because that interface is
+the user's main extension point and the core targets `netstandard2.0` / `net48`, where a default
+interface member cannot keep an existing implementer compiling; the engine probes for the observer with
+`is`, so a policy that does not implement it runs the statements it ran before. A pure addition.
+
 ### Added
 
 - **A ceiling on concurrent borrows** (G-5): `MaxActiveObjects` caps how many objects may be lent out
@@ -273,6 +282,40 @@ built. That is now refused, and recorded under Fixed.
   tail, serving the head *is* a round robin over the idle set, so the value would have been a synonym
   with a cost and no behaviour. No existing signature, option or behaviour changed; the default is
   `Fifo`, statement for statement.
+- **An optional way to hear about destruction, and why it happened** (G-22): a policy may additionally
+  implement `IHayateObjectLifecycleObserver<T>` to be told about every object the engine destroys,
+  through `OnEvict(T item, HayateDestroyReason reason)` — and, for the one case that is a verdict about
+  the object rather than a retirement, `OnValidationFailed(T item)`. `HayateDestroyReason` names nine
+  causes: a failed `Validate` on the borrow, return or idle-sweep path (`ValidationFailed`, routed to
+  the second hook), an eviction by policy or a manual `Evict` (`Evicted`), a return the pool had no room
+  for — a full shard, the soft ceiling, a pre-warm overflow, a scale-down growth race
+  (`CapacityOverflow`) — a return `OnRelease` refused (`ReturnRejected`), a `Clear()` / `Dispose()` drain
+  (`PoolCleared`), an automatic scale-down (`ScaledDown`), an abandoned object reclaimed by leak
+  recovery (`Abandoned`), a lifetime-rotation hand-out (`Rotated`), a foreign return, or a second return
+  rejected because the shard already holds the wrapper (`Misuse`). It is a **separate, optional interface** rather
+  than two more members on `IHayateObjectPolicy<T>`, and that is the whole of the design: that interface
+  is the user's main extension point — every policy class in the tree, and every one downstream,
+  implements it — and the core targets `netstandard2.0` and `net48`, which have no default interface
+  members, so a new member there would be a breaking change for every implementer. The engine probes
+  for the observer with `is` and does nothing when it is absent, the shape the asynchronous policy
+  contract already uses, so a policy that does not implement it is unaffected — statement for
+  statement. Two rules make the hook
+  usable for bookkeeping: it runs **before** the object is torn down, so the observer sees a live value,
+  and **exactly once** per object, from the single point the destroy path already funnels through. An
+  exception thrown by an observer is caught and logged, never allowed to abort a drain in progress — the
+  notification is a courtesy to the policy, not a precondition for releasing the object. Three
+  boundaries are deliberate. The hook is **synchronous only**: it runs on the same paths as `Validate`
+  and `OnAcquire`, and an asynchronous-only policy still implements the synchronous observer, so there
+  is no async twin to keep in step. `Clear()` / `Dispose()` **do** report `PoolCleared` — the drain is
+  the one destruction a caller most wants to account for — while still, by the long-standing contract of
+  [`docs/disposal.md`](docs/disposal.md) §5, not running `OnDestroy`; the two are independent. And the
+  lean fast path reports only the reasons it can actually see — a refused return, a full buffer and a
+  drain — because it never calls `Validate`, so `OnValidationFailed` is unreachable there rather than
+  reported wrongly. The existing `HayateEvictReason` was deliberately not reused: it classifies the
+  manual `Evict` API alone, and a background eviction never produces one — the engine asks
+  `IHayateEvictionPolicy<T>.ShouldEvict` — so widening `OnEvict` to take it would have forced a second
+  implementation of the eviction rule at the call site, the duplication the code deliberately avoids.
+  No existing signature, option or behaviour changed.
 
 ### Changed
 

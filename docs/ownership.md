@@ -49,6 +49,13 @@ Two consequences worth stating plainly:
   is borrowed again, the pool rejects and destroys it — noisy, but safe. If it happens after, the pool
   accepts it and one object acquires two owners. The window is the time between the two returns.
 
+Every destroy in the table is reported to a policy that implements `IHayateObjectLifecycleObserver<T>`,
+with the `HayateDestroyReason` it went — a foreign object as `Misuse`, a second return rejected by the
+shard as `Misuse`, a rejected return as `ReturnRejected`, a post-`Clear` return as `Misuse` (the registry
+is gone, so it takes the foreign-object branch). This reports destroyed objects, not every misuse call:
+for example, the known front-slot duplicate-return interleaving is not always detected by the shard.
+See [`README.MD`](../README.MD#hearing-about-destruction) for the full set of reasons.
+
 ## 3. Making the mistake loud: `ErrorOnIncorrectUsage`
 
 `ErrorOnIncorrectUsage` (the builder's `WithErrorOnIncorrectUsage()`, and the option of the same name)
