@@ -396,7 +396,24 @@ public partial class HayatePoolBasic<T>
                 // otherwise a disposed object could be placed back into the pool -- the direct root cause of a prior regression.
                 var location = w.Location;
                 if (location != HayateObjectLocation.None && location != HayateObjectLocation.Borrowed)
+                {
+                    // G-14-A: an object that is already idle in this shard's list can only be here
+                    // through a second return of the same object. Its node is still linked, so the
+                    // caller's destroy would leave a destroyed wrapper reachable from the list — the
+                    // next take popped that node and handed out its null value. Unlink it here, so
+                    // the destroy the refusal triggers leaves nothing behind.
+                    if (location == HayateObjectLocation.InPool)
+                    {
+                        var parked = w.Node;
+                        if (parked != null && ReferenceEquals(parked.List, _list))
+                        {
+                            _list.Remove(parked);
+                            w.Node = null;
+                        }
+                    }
+
                     return false;
+                }
 
                 // Fallback: in theory Node is always null when an object is returned; if an abnormal path leaves a stale node, unlink it first then append to the tail,
                 // guaranteeing the same object appears at most once in the list.
@@ -467,7 +484,26 @@ public partial class HayatePoolBasic<T>
             // (Removing / Destroyed) must never be placed back into the pool.
             var location = w.Location;
             if (location != HayateObjectLocation.None && location != HayateObjectLocation.Borrowed)
+            {
+                // G-14-A: the lock-free mirror of the unlink in the locked path. A wrapper already
+                // parked in a slot of this store can only be here through a second return of the
+                // same object; its slot still holds it, so the caller's destroy would leave a
+                // destroyed wrapper reachable from the store — the next take would exchange it out
+                // and hand out its null value. Claim the slot out under the same identity check a
+                // take performs: a lost race leaves the store untouched.
+                if (location == HayateObjectLocation.InPool)
+                {
+                    var parkedSlots = _slots;
+                    var parkedIndex = w.SlotIndex;
+                    if ((uint)parkedIndex < (uint)parkedSlots.Length &&
+                        ReferenceEquals(w, Interlocked.CompareExchange(ref parkedSlots[parkedIndex], null, w)))
+                    {
+                        Interlocked.Decrement(ref _idleCount);
+                    }
+                }
+
                 return false;
+            }
 
             var slots = _slots;
             var currentMax = Volatile.Read(ref _maxSize);
