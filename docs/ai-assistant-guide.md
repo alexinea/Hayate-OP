@@ -59,7 +59,10 @@ lease.Value.DoWork();
 **Returning the object transfers ownership.** Do not touch it afterwards, do not return it twice, do
 not return it to a different pool. The engine checks this on the general path and does **not** check
 it on the lean path — the full table of what is and is not detected is in
-[`docs/ownership.md`](ownership.md).
+[`docs/ownership.md`](ownership.md). For a test that wants the mistake to fail loudly instead of
+logging, `WithErrorOnIncorrectUsage()` turns the three detectable ones into exceptions
+(`docs/ownership.md` §3); it is a debug/test switch, off by default, and it covers `null` only in lean
+mode.
 
 ## 3. Five things not to do
 

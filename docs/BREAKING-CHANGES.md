@@ -32,9 +32,22 @@ One bullet below is the exception, and it only reaches an author who **implement
   propagate, so a try cannot turn a misconfigured pool into an empty one. A caller is untouched by
   any of this: the throwing forms, the options and the statistics behave exactly as they did.
 
+One behavioural note reaches a caller who returns an object twice — a misuse rather than a contract:
+
+- **A second return now leaves the store consistent** (G-14). The shard's append guard has always
+  refused a second return of the same object and destroyed it, but the destroyed wrapper stayed linked
+  in the shard's free list, so the idle count kept counting it and the next borrow popped that entry
+  and handed out its value — which destruction had cleared to `null`. A caller who had done nothing
+  wrong could therefore receive a null object from a pool that had one to give. Both storage backends
+  now leave nothing behind: the count drops with the refusal and the borrow that follows creates a
+  fresh object. The documented outcome of the misuse ("the pool loses one object") is unchanged; only
+  its consistency is. The new `ErrorOnIncorrectUsage` option — off by default, aimed at debug and
+  test builds — is the opt-in that turns the second return into an exception instead.
+
 ### Migration
 
-Nothing to migrate on the caller side — no existing signature, option or behaviour changed. For an
+Nothing to migrate on the caller side — no existing signature or option changed, and the one
+behavioural note above concerns a misuse rather than a supported pattern. For an
 external implementation of `IHayateObjectPool<T>`, add the two members: implement the timeout-taking
 form (delegating to the pool's existing acquire machinery if the implementation is a wrapper) and
 let the zero-budget form forward to it with `TimeSpan.Zero`. No consumer-visible change follows.

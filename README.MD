@@ -459,6 +459,33 @@ pass silently as an empty one. One asymmetry with `Block` is deliberate: `Block`
 its timeout and returns only when an object is free, but in try mode the timeout is a hard cutoff —
 the one thing a caller asking with a budget cannot mean by "try" is "maybe never".
 
+### Misuse as a hard error
+
+The return path is deliberately forgiving: a `null` return, an object from another pool and a second
+return of an object the pool already holds are each logged, counted and handled rather than thrown at
+the caller ([`docs/ownership.md`](docs/ownership.md) records the whole table). That is right for
+production and wrong for a test that has just made one of those mistakes and wants to know now.
+`ErrorOnIncorrectUsage` moves the three into the exception path:
+
+```csharp
+var pool = new HayatePoolBuilder<MyResource>()
+    .WithFactory(() => new MyResource())
+    .WithErrorOnIncorrectUsage()   // debug and test builds
+    .Build();
+
+var obj = pool.Acquire();
+pool.Release(obj);
+pool.Release(obj);   // InvalidOperationException: the pool already holds this object
+```
+
+Three facts decide when to use it. It costs on the return path — with the thread-local front slot on,
+the already-returned check enumerates the slot tiers — so it belongs in debug and test builds, which
+is what the original switch's documentation says too. A `ValidateOnReturn` failure and an `OnRelease`
+rejection are verdicts about the object rather than mistakes by the caller, so they stay non-throwing
+whatever the switch says. And lean mode detects only the `null` case, because its return path keeps no
+ownership lookup: a foreign object is pooled there by contract. When a return is refused, the object
+stays with the caller instead of being destroyed on its behalf.
+
 ### Scoped borrows
 
 `AcquireScoped()` returns a lease that hands its object back when it is disposed, so a `using` block

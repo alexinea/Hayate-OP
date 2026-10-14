@@ -49,6 +49,15 @@ The line also removes the policy class as the price of admission for a configure
 decision as lambdas on the builder itself, so the full option surface — sizes, reject policy, metrics,
 the reset-timing switches, lean mode — is reachable without writing a six-member policy class first.
 
+The line also turns the return path's three caller mistakes into an optional hard error (G-14):
+`ErrorOnIncorrectUsage` makes a null return, a return of an object the pool does not own and a second
+return of an object the pool already holds throw instead of being logged and handled. Off by default,
+so the shipped behaviour is untouched — the switch is meant for debug and test builds, where the
+exception names the mistake at the line that makes it. Verifying it exposed a hole in the forgiving
+path itself (also G-14): the refusal that follows a second return destroyed the object but left it
+countable, and the next borrow handed out its `null` value. That is fixed on both storage backends and
+recorded under Fixed.
+
 ### Added
 
 - **A ceiling on concurrent borrows** (G-5): `MaxActiveObjects` caps how many objects may be lent out
@@ -217,6 +226,20 @@ the reset-timing switches, lean mode — is reachable without writing a six-memb
   factory fails at build time, next to the other build-time rejections, rather than at the first
   borrow. `HayatePool.Simple` itself is unchanged in signature and behaviour. No existing signature,
   option or behaviour changed.
+- **An optional hard error for a misused return** (G-14): `ErrorOnIncorrectUsage` (default `false`) and
+  the builder's `WithErrorOnIncorrectUsage()` turn the three caller mistakes on the return path into an
+  `InvalidOperationException` instead of a log line — returning `null`, returning an object this pool
+  does not own, and returning an object the pool already holds. The default path is unchanged statement
+  for statement: the misuse is still logged, counted and handled, exactly as
+  [`docs/ownership.md`](docs/ownership.md) records. The switch costs on the return path — with the
+  thread-local front slot on, the already-returned check enumerates the slot tiers — so it is meant for
+  debug and test builds, where the exception names the mistake at the line that makes it rather than
+  where its effects surface. Two boundaries are deliberate: a `ValidateOnReturn` failure and an
+  `OnRelease` rejection are verdicts about the object rather than mistakes by the caller, so they stay
+  non-throwing; and in lean mode only the `null` case is detectable, because the lean return path keeps
+  no ownership lookup. A refused return leaves the object with the caller rather than destroying it —
+  the forgiving path destroys a foreign object, but a return the pool refuses cannot also take
+  ownership of it. No existing signature, option or behaviour changed.
 
 ### Changed
 
@@ -231,6 +254,16 @@ the reset-timing switches, lean mode — is reachable without writing a six-memb
 
 ### Fixed
 
+- **A second return can no longer leave the pool handing out `null`** (G-14): the shard's append guard
+  has always refused a second return of the same object and destroyed it — the documented "the pool
+  loses one object" outcome — but the destroyed wrapper stayed linked in the shard's free list, so the
+  idle count kept counting it and the next borrow popped that entry and handed out the wrapper's value,
+  which destruction had cleared to `null`. A caller who had done nothing wrong received a null object
+  from a pool that had one to give. Both storage backends are fixed: the locked list unlinks the entry
+  when it refuses the return, and the lock-free store claims the slot out under the same identity check
+  a take performs. The refusal now leaves the store consistent, the idle count drops immediately instead
+  of at the next borrow, and the borrow that follows creates a fresh object. Found while verifying the
+  misuse switch above.
 - **The DependencyInjection and Configuration paths now honour the reset-timing switches** (G-20): a
   pool registered through `AddNamedPool<T>` / `RegisterHayatePool<T>` or through the configuration
   bindings ignored `ResetOnReturn` and `ResetOnBorrow` — the container seeded the library's default
