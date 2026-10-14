@@ -538,6 +538,34 @@ public class HayatePoolOptions
 
     #endregion
 
+    #region Misuse detection
+
+    /// <summary>
+    /// Whether a misuse detected on the return path throws instead of being handled the forgiving
+    /// way.<br />
+    /// Default value: <c>false</c>.
+    /// </summary>
+    /// <remarks>
+    /// Purpose: turn the three caller mistakes — returning <c>null</c>, returning an object this pool
+    /// does not own, and returning an object the pool already holds — into an
+    /// <see cref="InvalidOperationException"/>, so a test or a debug run fails where the mistake is
+    /// made instead of where its effects surface. The research term is YOPSHARP's
+    /// <c>ErrorOnIncorrectUsage</c>, and the switch carries that name.<br />
+    /// Special case: enabling it costs on the return path — with the thread-local front slot on, the
+    /// already-returned check enumerates the slot tiers — so it is meant for debug and test builds,
+    /// exactly as the original documents it. The default path is unchanged statement for statement:
+    /// the misuse is logged, counted, and handled.<br />
+    /// Boundary: covers the three caller mistakes only. A <c>ValidateOnReturn</c> failure and an
+    /// <c>OnRelease</c> rejection are verdicts about the object, not mistakes by the caller, and stay
+    /// non-throwing; a shard at capacity is a normal steady-state outcome. In lean mode only
+    /// <c>null</c> is detectable, because the lean return path keeps no ownership lookup. The value is
+    /// snapshotted when the pool is built and is not changed by <c>ReloadConfig</c>.<br />
+    /// Recommended range: off in production, on in test and debug builds when a problem is suspected.
+    /// </remarks>
+    public bool ErrorOnIncorrectUsage { get; set; }
+
+    #endregion
+
     #region Reset
 
     /// <summary>
@@ -1369,6 +1397,9 @@ public class HayatePoolOptions
         options.ValidateOnReturn = this.ValidateOnReturn;
         options.ValidateWhileIdle = this.ValidateWhileIdle;
         options.ValidateIntervalMs = this.ValidateIntervalMs;
+
+        // Misuse detection
+        options.ErrorOnIncorrectUsage = this.ErrorOnIncorrectUsage;
 
         // Reset timing
         options.ResetOnReturn = this.ResetOnReturn;

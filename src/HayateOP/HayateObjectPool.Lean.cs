@@ -823,6 +823,15 @@ public partial class HayatePoolBasic<T>
 
         if (item is null)
         {
+            // G-14: the only misuse the lean return path can detect — it keeps no ownership lookup,
+            // so a foreign or a repeated return is indistinguishable from a legitimate one here. When
+            // the switch is off this stays the warning it has always been.
+            if (_errorOnIncorrectUsage)
+            {
+                throw new InvalidOperationException(
+                    $"HayatePool [{_name}] received a null object on Release. Type: {typeof(T).Name}.");
+            }
+
             _logger.LogWarning("Returned null object to pool. Type: {Type}", typeof(T).Name);
             return;
         }
@@ -853,6 +862,12 @@ public partial class HayatePoolBasic<T>
     {
         if (item is null)
         {
+            if (_errorOnIncorrectUsage)
+            {
+                throw new InvalidOperationException(
+                    $"HayatePool [{_name}] received a null object on Release. Type: {typeof(T).Name}.");
+            }
+
             _logger.LogWarning("Returned null object to pool. Type: {Type}", typeof(T).Name);
             return;
         }

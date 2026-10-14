@@ -269,6 +269,26 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     }
 
     /// <summary>
+    /// G-14: whether <paramref name="w"/> is parked in some thread's front tier. A parked object keeps
+    /// its <see cref="HayateObjectLocation.Borrowed"/> mark (see <see cref="TryParkFrontSlot"/>), so the
+    /// location alone cannot tell "the caller holds it" from "this thread already returned it" — only
+    /// the tier can. Enumerated only while the misuse switch is on and a front tier exists: the
+    /// enumeration snapshots the tiers, which is exactly the debug-time cost the switch documents.
+    /// </summary>
+    private bool IsParkedInSomeFrontSlot(HayateObject<T> w)
+    {
+        var slots = _frontSlots;
+        if (slots is null) return false;
+
+        foreach (var slot in slots.Values)
+        {
+            if (ReferenceEquals(slot.Parked, w)) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// G-10: records that this thread has borrowed from this pool, which is what the <c>Rents</c> rule
     /// reads before a later park (see <see cref="TryParkFrontSlot"/>).
     /// </summary>
@@ -584,6 +604,13 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
     private readonly bool _enableEviction;
     private readonly bool _enableAutoScaling;
 
+    // G-14 (off by default): when on, the three caller mistakes on the return path — a null object,
+    // an object this pool does not own, an object the pool already holds — throw an
+    // InvalidOperationException instead of being logged, counted and handled. Snapshotted at
+    // construction like every other feature switch, so the forgiving path costs one predicted branch
+    // when the switch is off and the throwing path never runs on a pool that did not ask for it.
+    private readonly bool _errorOnIncorrectUsage;
+
     // A3a (off by default): rotate an object that has outlived MaxLifeTime on the borrow path, instead
     // of handing it out. Captured at construction like every other feature switch.
     private readonly bool _enableLifetimeRotationOnBorrow;
@@ -775,6 +802,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         _enableLifetimeRotationOnBorrow = _options.EnableLifetimeRotationOnBorrow;
         _enableDiagnostics = _options.EnableDiagnostics;
         _enableMetrics = _options.EnableMetrics;
+        _errorOnIncorrectUsage = _options.ErrorOnIncorrectUsage;
 
         // G-1: the operational metrics' time origin. Captured only while metrics are on, so a pool with
         // the switch off reports no start time, no uptime and no throughput rather than an age measured
@@ -2077,6 +2105,15 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         w = null!;
         if (item is null)
         {
+            // G-14: the misuse is the same one either way; the switch decides whether it is reported
+            // as a log line or as an exception. There is nothing to count and nothing to destroy
+            // here, so the throwing path is the message alone.
+            if (_errorOnIncorrectUsage)
+            {
+                throw new InvalidOperationException(
+                    $"HayatePool [{_name}] received a null object on Release. Type: {typeof(T).Name}.");
+            }
+
             _logger.LogWarning("Returned null object to pool. Type: {Type}", typeof(T).Name);
             return false;
         }
@@ -2088,6 +2125,20 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
 
         if (w is null)
         {
+            // G-14: count the refused release exactly as the forgiving path would have, then throw
+            // instead of destroying. The object never belonged to this pool, so a return the pool
+            // refuses leaves it with the caller rather than taking ownership in order to destroy it.
+            if (_errorOnIncorrectUsage)
+            {
+                if (_enableMetrics)
+                {
+                    _metrics.RecordObjectReleased(_name, item, false);
+                }
+
+                throw new InvalidOperationException(
+                    $"HayatePool [{_name}] received an object it does not own on Release. Type: {typeof(T).Name}.");
+            }
+
             _logger.LogWarning("Returned object does not belong to pool. Disposing. Type: {Type}", typeof(T).Name);
             Destroy(item);
 
@@ -2097,6 +2148,23 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             }
 
             return false;
+        }
+
+        // G-14: a wrapper the pool still holds idle — sitting in a shard free list, or parked in a
+        // front tier — is a second return of an object that was already returned. Detected here,
+        // before any loan bookkeeping, because the forgiving path would run ReleaseActiveSlot a
+        // second time for one loan and then either destroy a pooled object or park it twice; the
+        // throwing path changes nothing at all. The rejected release is counted like the shard's
+        // append guard used to count it.
+        if (_errorOnIncorrectUsage && (w.Location == HayateObjectLocation.InPool || IsParkedInSomeFrontSlot(w)))
+        {
+            if (_enableMetrics)
+            {
+                _metrics.RecordObjectReleased(_name, item, false);
+            }
+
+            throw new InvalidOperationException(
+                $"HayatePool [{_name}] received an object it already holds on Release. Type: {typeof(T).Name}.");
         }
 
         if (_enableValidation && _options.ValidateOnReturn && !_policy.Validate(item))

@@ -1035,6 +1035,15 @@
             wins — an object that lost the race is destroyed here instead of left parked.
             </remarks>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.IsParkedInSomeFrontSlot(DotNetCore.HayateOP.HayateObject{`0})">
+            <summary>
+            G-14: whether <paramref name="w"/> is parked in some thread's front tier. A parked object keeps
+            its <see cref="F:DotNetCore.HayateOP.HayateObjectLocation.Borrowed"/> mark (see <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.TryParkFrontSlot(DotNetCore.HayateOP.HayateObject{`0})"/>), so the
+            location alone cannot tell "the caller holds it" from "this thread already returned it" — only
+            the tier can. Enumerated only while the misuse switch is on and a front tier exists: the
+            enumeration snapshots the tiers, which is exactly the debug-time cost the switch documents.
+            </summary>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.NoteBorrowedOnThisThread">
             <summary>
             G-10: records that this thread has borrowed from this pool, which is what the <c>Rents</c> rule
@@ -3145,6 +3154,29 @@
             </code>
             </example>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithErrorOnIncorrectUsage(System.Boolean)">
+            <summary>
+            Sets whether a misuse detected on the return path throws instead of being handled the
+            forgiving way.
+            </summary>
+            <param name="enable">Whether a misuse throws; defaults to <c>true</c>.</param>
+            <returns>The same builder instance for chaining.</returns>
+            <remarks>
+            The three caller mistakes covered are returning <c>null</c>, returning an object this pool does
+            not own, and returning an object the pool already holds; see
+            <see cref="P:DotNetCore.HayateOP.HayatePoolOptions.ErrorOnIncorrectUsage"/> for the exact boundary, the lean-mode
+            limit and the cost of the check.<br />
+            The value is read when the pool is built, like every other feature switch.
+            </remarks>
+            <example>
+            <code>
+            // A test pool: a double return is a failure, not a silent destroy.
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithErrorOnIncorrectUsage()
+                .WithFactory(() =&gt; new MyResource());
+            </code>
+            </example>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithResetOnReturn(System.Boolean)">
             <summary>
             Sets whether an <see cref="T:DotNetCore.HayateOP.IHayateResettable"/> object is reset on its way back into the pool.
@@ -4688,6 +4720,30 @@
             wake-up frequency.<br />
             Boundary: should be &gt; 0.<br />
             Recommended range: 10000~60000ms.
+            </remarks>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolOptions.ErrorOnIncorrectUsage">
+            <summary>
+            Whether a misuse detected on the return path throws instead of being handled the forgiving
+            way.<br />
+            Default value: <c>false</c>.
+            </summary>
+            <remarks>
+            Purpose: turn the three caller mistakes — returning <c>null</c>, returning an object this pool
+            does not own, and returning an object the pool already holds — into an
+            <see cref="T:System.InvalidOperationException"/>, so a test or a debug run fails where the mistake is
+            made instead of where its effects surface. The research term is YOPSHARP's
+            <c>ErrorOnIncorrectUsage</c>, and the switch carries that name.<br />
+            Special case: enabling it costs on the return path — with the thread-local front slot on, the
+            already-returned check enumerates the slot tiers — so it is meant for debug and test builds,
+            exactly as the original documents it. The default path is unchanged statement for statement:
+            the misuse is logged, counted, and handled.<br />
+            Boundary: covers the three caller mistakes only. A <c>ValidateOnReturn</c> failure and an
+            <c>OnRelease</c> rejection are verdicts about the object, not mistakes by the caller, and stay
+            non-throwing; a shard at capacity is a normal steady-state outcome. In lean mode only
+            <c>null</c> is detectable, because the lean return path keeps no ownership lookup. The value is
+            snapshotted when the pool is built and is not changed by <c>ReloadConfig</c>.<br />
+            Recommended range: off in production, on in test and debug builds when a problem is suspected.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.ResetOnReturn">

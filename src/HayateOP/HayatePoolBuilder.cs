@@ -1185,6 +1185,37 @@ public class HayatePoolBuilder<T> where T : class
 
     #endregion
 
+    #region Misuse detection
+
+    /// <summary>
+    /// Sets whether a misuse detected on the return path throws instead of being handled the
+    /// forgiving way.
+    /// </summary>
+    /// <param name="enable">Whether a misuse throws; defaults to <c>true</c>.</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <remarks>
+    /// The three caller mistakes covered are returning <c>null</c>, returning an object this pool does
+    /// not own, and returning an object the pool already holds; see
+    /// <see cref="HayatePoolOptions.ErrorOnIncorrectUsage"/> for the exact boundary, the lean-mode
+    /// limit and the cost of the check.<br />
+    /// The value is read when the pool is built, like every other feature switch.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// // A test pool: a double return is a failure, not a silent destroy.
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithErrorOnIncorrectUsage()
+    ///     .WithFactory(() =&gt; new MyResource());
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithErrorOnIncorrectUsage(bool enable = true)
+    {
+        _options.ErrorOnIncorrectUsage = enable;
+        return this;
+    }
+
+    #endregion
+
     #region Reset timing
 
     /// <summary>
