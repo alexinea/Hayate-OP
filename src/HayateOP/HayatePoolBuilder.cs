@@ -41,6 +41,13 @@ public class HayatePoolBuilder<T> where T : class
     // the pool once at construction and never re-read.
     private IHayateShutdownHook? _shutdownHook;
 
+    // G-21: the comparer behind HayateBorrowStrategy.Priority. It lives here rather than on
+    // HayatePoolOptions because that type is not generic, so it cannot name IComparer<T>; the pool
+    // receives it as a constructor argument, the same route HayatePoolOptions.CustomShardAffinity takes.
+    // Null means "no priority order was asked for": WithBorrowPriority sets it, WithBorrowStrategy
+    // clears it whenever it selects anything else, and Build rejects Priority without one.
+    private IComparer<T>? _borrowPriority;
+
     public HayatePoolBuilder()
     {
         _scalingStrategy = new ThresholdScalingStrategy();
@@ -867,18 +874,26 @@ public class HayatePoolBuilder<T> where T : class
     }
 
     /// <summary>
-    /// Sets the end of the idle list a borrow is served from: <see cref="HayateBorrowStrategy.Fifo"/>
-    /// (the default) hands out the oldest returned object, <see cref="HayateBorrowStrategy.Lifo"/> the
-    /// most recently returned one.
+    /// Sets which idle object a borrow is served: <see cref="HayateBorrowStrategy.Fifo"/> (the default)
+    /// hands out the oldest returned object, <see cref="HayateBorrowStrategy.Lifo"/> the most recently
+    /// returned one, <see cref="HayateBorrowStrategy.Lru"/> the one borrowed longest ago, and
+    /// <see cref="HayateBorrowStrategy.Priority"/> the one the <see cref="WithBorrowPriority"/> comparer
+    /// ranks highest.
     /// </summary>
     /// <param name="strategy">The borrow order to use.</param>
     /// <returns>The same builder instance for chaining.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="strategy"/> is not one of the
     /// supported borrow strategies.</exception>
     /// <remarks>
-    /// Both strategies use the same idle list and the same eviction behaviour, so this switches the
-    /// order of borrows only. It is not available on the lean fast path, which keeps no ordered idle
-    /// list — asking for Lifo there fails the build rather than being ignored.
+    /// Every strategy reads the same idle list and leaves it in return order, so this switches the order
+    /// of borrows only: the eviction scan keeps sampling the oldest-returned end. Choosing anything but
+    /// <see cref="HayateBorrowStrategy.Priority"/> also drops any comparer a previous
+    /// <see cref="WithBorrowPriority"/> call installed, so the last call describes the order and nothing
+    /// is left behind to reject.<br />
+    /// No strategy but <see cref="HayateBorrowStrategy.Fifo"/> is available on the lean fast path (which
+    /// keeps no ordered idle list), on the lock-free store (which keeps no order at all) or alongside the
+    /// per-shard front tier (which is consulted before the shard); each of those combinations fails the
+    /// build rather than being served in an order the pool cannot guarantee.
     /// </remarks>
     /// <example>
     /// <code>
@@ -888,11 +903,48 @@ public class HayatePoolBuilder<T> where T : class
     /// </example>
     public HayatePoolBuilder<T> WithBorrowStrategy(HayateBorrowStrategy strategy)
     {
-        if (strategy != HayateBorrowStrategy.Fifo && strategy != HayateBorrowStrategy.Lifo)
+        if (strategy != HayateBorrowStrategy.Fifo && strategy != HayateBorrowStrategy.Lifo &&
+            strategy != HayateBorrowStrategy.Lru && strategy != HayateBorrowStrategy.Priority)
         {
             throw new ArgumentOutOfRangeException(nameof(strategy), "Unknown borrow strategy");
         }
+
         _options.BorrowStrategy = strategy;
+
+        // G-21: a comparer only means something to Priority. Selecting any other value drops it, so a
+        // chain that ends on, say, Fifo cannot leave a comparer behind that Build would then have to
+        // reject — last call wins, the same single-mechanism rule the delegate policy follows.
+        if (strategy != HayateBorrowStrategy.Priority) _borrowPriority = null;
+
+        return this;
+    }
+
+    /// <summary>
+    /// Supplies the comparer behind <see cref="HayateBorrowStrategy.Priority"/> and selects that
+    /// strategy.
+    /// </summary>
+    /// <param name="comparer">The comparer applied to the pooled values. A positive
+    /// <see cref="IComparer{T}.Compare"/> result means "borrow this one first".</param>
+    /// <returns>The same builder instance for chaining.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="comparer"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// Equivalent to <see cref="WithBorrowStrategy"/> with <see cref="HayateBorrowStrategy.Priority"/>
+    /// plus the comparer, so the comparer cannot be supplied and then silently ignored. A later
+    /// <see cref="WithBorrowStrategy"/> call with any other value clears it again.<br />
+    /// Objects the comparer calls equal are served oldest-returned first, so the order stays deterministic
+    /// without the comparer having to be a total one. Priority is unavailable on the lean fast path, on the
+    /// lock-free store and alongside the per-shard front tier; those combinations fail the build.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+    ///     .WithBorrowPriority(Comparer&lt;MyResource&gt;.Create((a, b) =&gt; a.Rank.CompareTo(b.Rank)));
+    /// </code>
+    /// </example>
+    public HayatePoolBuilder<T> WithBorrowPriority(IComparer<T> comparer)
+    {
+        _borrowPriority = comparer ?? throw new ArgumentNullException(nameof(comparer));
+        _options.BorrowStrategy = HayateBorrowStrategy.Priority;
         return this;
     }
 
@@ -2029,29 +2081,60 @@ public class HayatePoolBuilder<T> where T : class
         }
 
         // Same fail-fast rule for the borrow order: the lean fast path stores the pooled value directly
-        // in a bounded buffer and holds no ordered idle list, so an explicit LIFO request cannot be
+        // in a bounded buffer and holds no ordered idle list, so no order but the default can be
         // honoured there. The default (FIFO) is what a pool that never asked for anything holds, so
         // that combination stays valid — the guard fires only on a request it cannot satisfy, which is
         // what keeps the switch from being an option that is accepted and then ignored.
         if (_options.EnableLean && _options.BorrowStrategy != HayateBorrowStrategy.Fifo)
         {
             throw new InvalidOperationException(
-                "HayatePool: BorrowStrategy was set to Lifo via WithBorrowStrategy(), but the pool runs the lean fast path (UseLeanProfile/WithLean), which keeps no ordered idle list and cannot honour a borrow order. " +
-                "Remove the WithBorrowStrategy() call, or leave the lean fast path.");
+                $"HayatePool: BorrowStrategy was set to {_options.BorrowStrategy} via WithBorrowStrategy()/WithBorrowPriority(), but the pool runs the lean fast path (UseLeanProfile/WithLean), which keeps no ordered idle list and cannot honour a borrow order. " +
+                "Remove the WithBorrowStrategy()/WithBorrowPriority() call, or leave the lean fast path.");
         }
 
         // The same fail-fast rule for the lock-free shard store (G-9): a slot array keeps no order,
-        // because a wrapper owns its slot for as long as it is parked, so an explicit LIFO request
-        // cannot be honoured on that backend either. Fifo is the default a pool that never asked for
-        // anything holds, so simply turning the store on still builds — the guard fires only on a
-        // request the backend cannot satisfy, which is what keeps the switch from being accepted and
-        // then ignored. (Lean mode forces the store off during normalization, so the two guards can
-        // never both apply.)
+        // because a wrapper owns its slot for as long as it is parked, so no order but the default can
+        // be honoured on that backend either. Fifo is the default a pool that never asked for anything
+        // holds, so simply turning the store on still builds — the guard fires only on a request the
+        // backend cannot satisfy, which is what keeps the switch from being accepted and then ignored.
+        // (Lean mode forces the store off during normalization, so the two guards can never both apply.)
         if (_options.EnableLockFreeStorage && _options.BorrowStrategy != HayateBorrowStrategy.Fifo)
         {
             throw new InvalidOperationException(
-                "HayatePool: BorrowStrategy was set to Lifo via WithBorrowStrategy(), but the lock-free shard store (WithLockFreeStorage/EnableLockFreeStorage) keeps no ordered idle list and cannot honour a borrow order. " +
-                "Remove the WithBorrowStrategy() call, or leave the lock-free store.");
+                $"HayatePool: BorrowStrategy was set to {_options.BorrowStrategy} via WithBorrowStrategy()/WithBorrowPriority(), but the lock-free shard store (WithLockFreeStorage/EnableLockFreeStorage) keeps no ordered idle list and cannot honour a borrow order. " +
+                "Remove the WithBorrowStrategy()/WithBorrowPriority() call, or leave the lock-free store.");
+        }
+
+        // G-21: and the same rule again for the per-shard front tier (G-10). A tier hit is served
+        // *before* the shard is asked, so it hands back whatever this thread parked last without ever
+        // reaching the selection — the order would hold on tier misses only. Half-applied is the outcome
+        // every guard here exists to prevent, so the combination is refused rather than documented as
+        // approximately true.
+        if (_options.EnableThreadLocalFrontSlot && _options.BorrowStrategy != HayateBorrowStrategy.Fifo)
+        {
+            throw new InvalidOperationException(
+                $"HayatePool: BorrowStrategy was set to {_options.BorrowStrategy} via WithBorrowStrategy()/WithBorrowPriority(), but the per-shard front tier (WithThreadLocalFrontSlot/EnableThreadLocalFrontSlot) serves a borrow before the shard does, so the order could only apply on a tier miss. " +
+                "Remove the WithBorrowStrategy()/WithBorrowPriority() call, or leave the front tier off.");
+        }
+
+        // G-21: Priority is a comparer-driven order and the comparer cannot travel through
+        // HayatePoolOptions, which is not generic. Selecting the strategy without one is a request the
+        // pool cannot perform, so it fails here rather than silently serving some default order.
+        if (_options.BorrowStrategy == HayateBorrowStrategy.Priority && _borrowPriority is null)
+        {
+            throw new InvalidOperationException(
+                "HayatePool: BorrowStrategy is Priority, but no comparer was supplied. Call WithBorrowPriority(IComparer<T>): selecting the strategy alone cannot express which object should be borrowed first.");
+        }
+
+        // G-21: the mirror image, and the reason the two guards are a pair. WithBorrowStrategy clears the
+        // comparer when it selects something else, but Configure writes straight into the options without
+        // going through that setter, so this is the only place a comparer the pool would never consult can
+        // still be caught. Ignoring it would be the "accepted and then never applied" outcome the borrow
+        // order switch exists to avoid.
+        if (_borrowPriority is not null && _options.BorrowStrategy != HayateBorrowStrategy.Priority)
+        {
+            throw new InvalidOperationException(
+                $"HayatePool: a priority comparer was supplied via WithBorrowPriority(), but BorrowStrategy is {_options.BorrowStrategy}. WithBorrowStrategy() drops the comparer when it selects another order, so this can only come from Configure(); set the strategy to Priority, or stop supplying the comparer.");
         }
 
         // Resolve the logger by pool name (explicit WithLogger takes precedence -> factory ->
@@ -2066,7 +2149,8 @@ public class HayatePoolBuilder<T> where T : class
             logger,
             _poolName,
             _shutdownHook,
-            _evictionPolicy);
+            _evictionPolicy,
+            _borrowPriority);
 
         logger.LogInformation("HayatePool [{PoolName}] initialized successfully", _poolName);
 

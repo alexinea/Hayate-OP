@@ -289,10 +289,11 @@
         </member>
         <member name="T:DotNetCore.HayateOP.HayateBorrowStrategy">
             <summary>
-            The end of a shard's idle list a borrow is served from (2.8).
-            The idle list is kept in return order — the tail is always the most recently returned object —
-            so this switch only chooses which end is handed out next. It never reorders the list, and it
-            does not change what the eviction scan samples.
+            Which idle object a borrow is served (2.8; extended by G-21).
+            The idle list is kept in return order — the tail is always the most recently returned object — and
+            no strategy ever reorders it. <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Fifo"/> and <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Lifo"/> therefore only choose an end
+            of that list, while <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Lru"/> and <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Priority"/> walk it and pick a node; either way
+            the list itself, and so the end the eviction scan samples, is left exactly as it was.
             </summary>
         </member>
         <member name="F:DotNetCore.HayateOP.HayateBorrowStrategy.Fifo">
@@ -309,6 +310,34 @@
             picked stay at the head and age out through the ordinary eviction rules.<br />
             Applies to the general-purpose engine only. The lean fast path keeps no ordered idle list, so
             a lean pool rejects this value at build time rather than accepting a knob it cannot honour.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateBorrowStrategy.Lru">
+            <summary>
+            Least recently used: the borrow takes the object that was borrowed longest ago — the smallest
+            <see cref="P:DotNetCore.HayateOP.HayateObject`1.LastBorrowedAt"/>, with an object that has never been borrowed
+            (timestamp zero) ranking lowest of all. This orders by <i>borrow</i> where <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Fifo"/>
+            orders by <i>return</i>, so an object borrowed early and returned late is served before one
+            borrowed and returned quickly; the two agree only while every object is returned in the order
+            it was borrowed.<br />
+            The idle list is not reordered and the borrow walks it, so the eviction sampler keeps seeing
+            the end it has always seen. Applies to the general-purpose engine only: the lean fast path
+            keeps no ordered idle list, the lock-free store keeps no order at all, and the per-shard front
+            tier is consulted before the shard so it cannot take part in an order either — a pool that
+            combines this value with any of the three fails the build rather than honouring it in part.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayateBorrowStrategy.Priority">
+            <summary>
+            Highest priority first: the borrow takes the object the
+            <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithBorrowPriority(System.Collections.Generic.IComparer{`0})"/> comparer ranks highest, where a positive
+            <see cref="M:System.Collections.Generic.IComparer`1.Compare(`0,`0)"/> result means "borrow this one first". Objects the comparer
+            calls equal are served oldest-returned first, the same end <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Fifo"/> would have served,
+            so the order is deterministic without the comparer having to be a total one.<br />
+            The comparer is a builder-time argument rather than an option, because <see cref="T:DotNetCore.HayateOP.HayatePoolOptions"/>
+            is not generic: selecting this value without supplying one fails the build. The idle list is not
+            reordered, so the eviction sampler is unaffected. Like <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Lru"/> this is unavailable on
+            the lean fast path, on the lock-free store and alongside the per-shard front tier.
             </summary>
         </member>
         <member name="T:DotNetCore.HayateOP.HayateCircuitBreakerOptions">
@@ -1139,7 +1168,7 @@
             arguments in the first place. Both halves are readonly field reads.
             </summary>
         </member>
-        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.#ctor(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0},DotNetCore.HayateOP.HayatePoolOptions,DotNetCore.HayateOP.Scaling.IHayateScalingStrategy,DotNetCore.HayateOP.Metrics.IHayateMetrics,DotNetCore.HayateOP.Logging.IHayateLogger,System.String,DotNetCore.HayateOP.IHayateShutdownHook,DotNetCore.HayateOP.IHayateEvictionPolicy{`0})">
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.#ctor(DotNetCore.HayateOP.Policies.IHayateObjectPolicy{`0},DotNetCore.HayateOP.HayatePoolOptions,DotNetCore.HayateOP.Scaling.IHayateScalingStrategy,DotNetCore.HayateOP.Metrics.IHayateMetrics,DotNetCore.HayateOP.Logging.IHayateLogger,System.String,DotNetCore.HayateOP.IHayateShutdownHook,DotNetCore.HayateOP.IHayateEvictionPolicy{`0},System.Collections.Generic.IComparer{`0})">
             <exception cref="T:System.ArgumentNullException">Thrown if policy, options, scalingStrategy, metrics, logger, or poolName is null.</exception>
             <exception cref="T:System.InvalidOperationException">Thrown if the configured options are invalid.</exception>
         </member>
@@ -2051,6 +2080,27 @@
             there is no competing writer to lose to.
             </remarks>
         </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.SelectFromIdleList">
+            <summary>
+            The G-21 half of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TryTake(DotNetCore.HayateOP.HayateObject{`0}@)"/>: walks the idle list and returns the node the LRU or
+            Priority order selects. Called only while holding the shard lock, and only when one of those
+            two strategies is configured — the default Fifo/Lifo path never reaches it.
+            </summary>
+            <remarks>
+            LRU takes the smallest <see cref="P:DotNetCore.HayateOP.HayateObject`1.LastBorrowedAt"/>. An object that has never
+            been borrowed carries zero and is therefore the least recently used of all, which is what
+            makes a freshly created instance eligible straight away rather than only after one round
+            trip.<br />
+            Priority takes the node the comparer ranks highest: a positive <c>Compare</c> result means
+            "borrow this one first".<br />
+            Both walk from the head and keep the first winner, so a tie — every object the comparer calls
+            equal, and the all-zero case of LRU — resolves towards the oldest-returned object, the same
+            end FIFO would have served. That keeps the result deterministic without requiring the
+            comparer to be a total order, and it needs no extra bookkeeping.<br />
+            The list is not reordered, which is what keeps <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.SnapshotHead(DotNetCore.HayateOP.HayateObject{`0}[],System.Int32)"/> — and so the
+            eviction scan — reading the same end it reads under Fifo.
+            </remarks>
+        </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TryTakeLockFree(DotNetCore.HayateOP.HayateObject{`0}@)">
             <summary>
             The lock-free store's half of <see cref="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TryTake(DotNetCore.HayateOP.HayateObject{`0}@)"/>: scans the slots from a shared round-robin
@@ -2949,23 +2999,55 @@
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithBorrowStrategy(DotNetCore.HayateOP.HayateBorrowStrategy)">
             <summary>
-            Sets the end of the idle list a borrow is served from: <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Fifo"/>
-            (the default) hands out the oldest returned object, <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Lifo"/> the
-            most recently returned one.
+            Sets which idle object a borrow is served: <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Fifo"/> (the default)
+            hands out the oldest returned object, <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Lifo"/> the most recently
+            returned one, <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Lru"/> the one borrowed longest ago, and
+            <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Priority"/> the one the <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithBorrowPriority(System.Collections.Generic.IComparer{`0})"/> comparer
+            ranks highest.
             </summary>
             <param name="strategy">The borrow order to use.</param>
             <returns>The same builder instance for chaining.</returns>
             <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="strategy"/> is not one of the
             supported borrow strategies.</exception>
             <remarks>
-            Both strategies use the same idle list and the same eviction behaviour, so this switches the
-            order of borrows only. It is not available on the lean fast path, which keeps no ordered idle
-            list — asking for Lifo there fails the build rather than being ignored.
+            Every strategy reads the same idle list and leaves it in return order, so this switches the order
+            of borrows only: the eviction scan keeps sampling the oldest-returned end. Choosing anything but
+            <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Priority"/> also drops any comparer a previous
+            <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithBorrowPriority(System.Collections.Generic.IComparer{`0})"/> call installed, so the last call describes the order and nothing
+            is left behind to reject.<br />
+            No strategy but <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Fifo"/> is available on the lean fast path (which
+            keeps no ordered idle list), on the lock-free store (which keeps no order at all) or alongside the
+            per-shard front tier (which is consulted before the shard); each of those combinations fails the
+            build rather than being served in an order the pool cannot guarantee.
             </remarks>
             <example>
             <code>
             var builder = new HayatePoolBuilder&lt;MyResource&gt;()
                 .WithBorrowStrategy(HayateBorrowStrategy.Lifo);
+            </code>
+            </example>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithBorrowPriority(System.Collections.Generic.IComparer{`0})">
+            <summary>
+            Supplies the comparer behind <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Priority"/> and selects that
+            strategy.
+            </summary>
+            <param name="comparer">The comparer applied to the pooled values. A positive
+            <see cref="M:System.Collections.Generic.IComparer`1.Compare(`0,`0)"/> result means "borrow this one first".</param>
+            <returns>The same builder instance for chaining.</returns>
+            <exception cref="T:System.ArgumentNullException"><paramref name="comparer"/> is <see langword="null"/>.</exception>
+            <remarks>
+            Equivalent to <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithBorrowStrategy(DotNetCore.HayateOP.HayateBorrowStrategy)"/> with <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Priority"/>
+            plus the comparer, so the comparer cannot be supplied and then silently ignored. A later
+            <see cref="M:DotNetCore.HayateOP.HayatePoolBuilder`1.WithBorrowStrategy(DotNetCore.HayateOP.HayateBorrowStrategy)"/> call with any other value clears it again.<br />
+            Objects the comparer calls equal are served oldest-returned first, so the order stays deterministic
+            without the comparer having to be a total one. Priority is unavailable on the lean fast path, on the
+            lock-free store and alongside the per-shard front tier; those combinations fail the build.
+            </remarks>
+            <example>
+            <code>
+            var builder = new HayatePoolBuilder&lt;MyResource&gt;()
+                .WithBorrowPriority(Comparer&lt;MyResource&gt;.Create((a, b) =&gt; a.Rank.CompareTo(b.Rank)));
             </code>
             </example>
         </member>
@@ -4591,20 +4673,28 @@
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.BorrowStrategy">
             <summary>
-            The end of a shard's idle list a borrow is served from. Defaults to
+            Which idle object a borrow is served. Defaults to
             <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Fifo"/>, which is the behaviour of every release before the
             switch existed.
             </summary>
             <remarks>
-            The idle list is stored in return order either way; only the end that is handed out next
-            differs. Lifo keeps the most recently returned instance hot, which suits a consumer that
-            borrows, uses and returns in a tight loop; Fifo spreads usage across the whole idle set,
-            which suits an instance whose per-instance state should age uniformly.<br />
-            The eviction scan samples the oldest-returned end under both strategies, so the objects
-            offered to the <see cref="T:DotNetCore.HayateOP.IHayateEvictionPolicy`1"/> do not depend on this setting.<br />
-            Scope: the general-purpose engine (sharded or collapsed to a single shard). The lean fast
-            path keeps no ordered idle list, so <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Lifo"/> on a lean pool
-            fails the build instead of being silently ignored. Unknown enum values fall back to Fifo.
+            The idle list is stored in return order whichever value is set, and no value reorders it; what
+            differs is which node is handed out next. <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Lifo"/> keeps the most
+            recently returned instance hot, which suits a consumer that borrows, uses and returns in a tight
+            loop; <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Fifo"/> spreads usage across the whole idle set, which
+            suits an instance whose per-instance state should age uniformly. <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Lru"/>
+            and <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Priority"/> instead walk the list and pick a node by, respectively,
+            the oldest borrow timestamp and a caller-supplied <see cref="T:System.Collections.Generic.IComparer`1"/> — see each value for
+            what that changes and what it costs.<br />
+            The eviction scan samples the oldest-returned end under every strategy, so the objects offered to
+            the <see cref="T:DotNetCore.HayateOP.IHayateEvictionPolicy`1"/> never depend on this setting.<br />
+            Scope: the general-purpose engine (sharded or collapsed to a single shard). Every value but
+            <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Fifo"/> is unavailable on the lean fast path (no ordered idle
+            list), on the lock-free store (no order at all) and alongside the per-shard front tier (consulted
+            before the shard), and a pool that asks for one of those combinations fails the build instead of
+            honouring it in part. <see cref="F:DotNetCore.HayateOP.HayateBorrowStrategy.Priority"/> additionally needs a comparer,
+            which lives on the builder rather than here because this type is not generic — selecting it without
+            one also fails the build. Unknown enum values fall back to Fifo.
             </remarks>
         </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolOptions.EnableAutoScaling">

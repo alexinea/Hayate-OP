@@ -205,6 +205,19 @@ public static class ConfigurationExtensions
             throw new InvalidOperationException($"HayatePool [{poolName}] configuration is invalid");
         }
 
+        // G-21: Priority is a comparer-driven order, and the comparer cannot travel through
+        // HayatePoolOptions (which is not generic) nor through a configuration section, so a container
+        // expresses it by registering an IComparer<T>. The lookup happens only when the merged options
+        // actually ask for one, so a comparer registered for some unrelated purpose is never picked up by
+        // a pool that did not ask — and a pool that did ask without one is told, rather than being built
+        // with a default order the configuration never mentioned.
+        var borrowPriority = mergedOptions.BorrowStrategy == HayateBorrowStrategy.Priority
+            ? sp.GetService<IComparer<T>>()
+              ?? throw new InvalidOperationException(
+                  $"HayatePool [{poolName}]: BorrowStrategy is Priority, but no IComparer<{typeof(T).Name}> is registered in the container. " +
+                  "Register one, or select a different borrow strategy.")
+            : null;
+
         // Build the pool.
         // Only attach the DI-registered custom metrics when the metrics master switch is enabled;
         // otherwise keep the v2.1 semantics (the custom instance has no effect) to avoid Build()
@@ -215,6 +228,11 @@ public static class ConfigurationExtensions
         if (pinsPolicy)
         {
             builder = builder.WithPolicy(policy);
+        }
+
+        if (borrowPriority is not null)
+        {
+            builder = builder.WithBorrowPriority(borrowPriority);
         }
 
         builder = builder

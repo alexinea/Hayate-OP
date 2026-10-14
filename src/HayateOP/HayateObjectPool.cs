@@ -764,7 +764,8 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         IHayateLogger logger,
         string poolName,
         IHayateShutdownHook? shutdownHook = null,
-        IHayateEvictionPolicy<T>? evictionPolicy = null)
+        IHayateEvictionPolicy<T>? evictionPolicy = null,
+        IComparer<T>? borrowPriority = null)
     {
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
 #if NET6_0_OR_GREATER
@@ -863,7 +864,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
         for (var i = 0; i < shardCount; i++)
         {
             int shardMax = perShardMax + (i < remainderMax ? 1 : 0);
-            _shards[i] = new Shard(_options, i, shardMax, _logger, _prefersAsyncDisposal);
+            _shards[i] = new Shard(_options, i, shardMax, _logger, _prefersAsyncDisposal, borrowPriority);
         }
 
         // Lean-mode storage. Allocated only when the mode is on; the general-purpose path keeps

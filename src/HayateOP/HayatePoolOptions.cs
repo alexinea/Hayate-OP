@@ -390,20 +390,28 @@ public class HayatePoolOptions
     #region Borrow order
 
     /// <summary>
-    /// The end of a shard's idle list a borrow is served from. Defaults to
+    /// Which idle object a borrow is served. Defaults to
     /// <see cref="HayateBorrowStrategy.Fifo"/>, which is the behaviour of every release before the
     /// switch existed.
     /// </summary>
     /// <remarks>
-    /// The idle list is stored in return order either way; only the end that is handed out next
-    /// differs. Lifo keeps the most recently returned instance hot, which suits a consumer that
-    /// borrows, uses and returns in a tight loop; Fifo spreads usage across the whole idle set,
-    /// which suits an instance whose per-instance state should age uniformly.<br />
-    /// The eviction scan samples the oldest-returned end under both strategies, so the objects
-    /// offered to the <see cref="IHayateEvictionPolicy{T}"/> do not depend on this setting.<br />
-    /// Scope: the general-purpose engine (sharded or collapsed to a single shard). The lean fast
-    /// path keeps no ordered idle list, so <see cref="HayateBorrowStrategy.Lifo"/> on a lean pool
-    /// fails the build instead of being silently ignored. Unknown enum values fall back to Fifo.
+    /// The idle list is stored in return order whichever value is set, and no value reorders it; what
+    /// differs is which node is handed out next. <see cref="HayateBorrowStrategy.Lifo"/> keeps the most
+    /// recently returned instance hot, which suits a consumer that borrows, uses and returns in a tight
+    /// loop; <see cref="HayateBorrowStrategy.Fifo"/> spreads usage across the whole idle set, which
+    /// suits an instance whose per-instance state should age uniformly. <see cref="HayateBorrowStrategy.Lru"/>
+    /// and <see cref="HayateBorrowStrategy.Priority"/> instead walk the list and pick a node by, respectively,
+    /// the oldest borrow timestamp and a caller-supplied <see cref="IComparer{T}"/> — see each value for
+    /// what that changes and what it costs.<br />
+    /// The eviction scan samples the oldest-returned end under every strategy, so the objects offered to
+    /// the <see cref="IHayateEvictionPolicy{T}"/> never depend on this setting.<br />
+    /// Scope: the general-purpose engine (sharded or collapsed to a single shard). Every value but
+    /// <see cref="HayateBorrowStrategy.Fifo"/> is unavailable on the lean fast path (no ordered idle
+    /// list), on the lock-free store (no order at all) and alongside the per-shard front tier (consulted
+    /// before the shard), and a pool that asks for one of those combinations fails the build instead of
+    /// honouring it in part. <see cref="HayateBorrowStrategy.Priority"/> additionally needs a comparer,
+    /// which lives on the builder rather than here because this type is not generic — selecting it without
+    /// one also fails the build. Unknown enum values fall back to Fifo.
     /// </remarks>
     public HayateBorrowStrategy BorrowStrategy { get; set; } = HayateBorrowStrategy.Fifo;
 
@@ -1610,11 +1618,16 @@ public class HayatePoolOptions
         }
 
         // Borrow-order normalization: an unrecognised value falls back to the default instead of
-        // leaving the shard with an end it cannot decide on (the same robustness rule as the affinity
-        // mode above). A Lifo request is deliberately *not* rewritten on the lean fast path: that
-        // combination cannot be honoured, and silently turning it into Fifo is exactly the
-        // "accepted but never applied" outcome this switch exists to avoid. It fails the build instead.
-        if (BorrowStrategy != HayateBorrowStrategy.Fifo && BorrowStrategy != HayateBorrowStrategy.Lifo)
+        // leaving the shard with a selection it cannot perform (the same robustness rule as the affinity
+        // mode above). A value the engine *can* perform is deliberately *not* rewritten when the pool
+        // cannot honour it — a Lifo request on the lean fast path, or any order but Fifo on the
+        // lock-free store or alongside the front tier, cannot be honoured, and silently turning it into
+        // Fifo is exactly the "accepted but never applied" outcome this switch exists to avoid. Those
+        // combinations fail the build instead. G-21: the whitelist below is what keeps Lru and Priority
+        // from being swallowed here — a new value that is not listed would be rewritten to Fifo before
+        // Build ever sees it.
+        if (BorrowStrategy != HayateBorrowStrategy.Fifo && BorrowStrategy != HayateBorrowStrategy.Lifo &&
+            BorrowStrategy != HayateBorrowStrategy.Lru && BorrowStrategy != HayateBorrowStrategy.Priority)
         {
             BorrowStrategy = HayateBorrowStrategy.Fifo;
         }

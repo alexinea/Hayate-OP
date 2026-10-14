@@ -33,19 +33,31 @@ public partial class HayatePoolBasic<T>
         private bool DebugTraceEnabled => _enableDiagnostics && _logger.IsEnabled(HayateLogLevel.Debug);
 
         // Free-object linked list, kept in return order: Add appends to the tail, and TryTake removes
-        // from whichever end the configured borrow strategy selects — the head for FIFO (the default,
-        // and what every release before the switch did) or the tail for LIFO. The list is never
-        // reordered, so the head is the oldest-returned object in both modes; the eviction sampler
-        // reads that end, which is why switching the borrow order does not change what a policy sees.
+        // the node the configured borrow strategy selects — the head for FIFO (the default, and what
+        // every release before the switch did), the tail for LIFO, or, for LRU and Priority, whichever
+        // node a walk of the list picks. The list is never reordered under any strategy, so the head is
+        // the oldest-returned object in all four modes; the eviction sampler reads that end, which is
+        // why switching the borrow order does not change what a policy sees.
         // Remove performs an O(1) unlink via HayateObject<T>.Node.
         // The old implementation rebuilt the queue with ConcurrentQueue + "ToList -> Remove -> Clear -> Enqueue";
         // during the rebuild window concurrent TryTake / Add could lose objects or produce duplicates, so it was replaced entirely with a linked list.
         private readonly LinkedList<HayateObject<T>> _list = new();
 
         // Borrow order, snapshotted at construction from HayatePoolOptions.BorrowStrategy. It only
-        // decides which end of _list a borrow is served from, so the borrow path pays one predicted
+        // decides which node of _list a borrow is served, so the borrow path pays one predicted
         // readonly read (and the dispatch folds away entirely for the FIFO default).
         private readonly bool _takeNewest;
+
+        // G-21: the two strategies that pick a node by walking the list rather than by reading an end —
+        // Lru (smallest LastBorrowedAt) and Priority (highest per the comparer). A separate flag from
+        // _takeNewest so the Fifo/Lifo dispatch above stays exactly the two-way branch it always was.
+        private readonly bool _selectFromIdleList;
+
+        // The comparer behind HayateBorrowStrategy.Priority, supplied by the builder (HayatePoolOptions
+        // cannot name IComparer<T>). Non-null exactly when _selectFromIdleList is on and the strategy is
+        // Priority — a pool that asked for Priority without one is refused at build time, so this never
+        // has to be re-checked on the borrow path.
+        private readonly IComparer<T>? _borrowPriority;
 
         // Borrowed-object linked list (K2, abandoned recovery). Maintained only when abandoned recovery
         // is enabled (_trackBorrowed): TryTake appends on borrow (FIFO — the head is the oldest borrow),
@@ -239,7 +251,7 @@ public partial class HayatePoolBasic<T>
             finally { if (taken) _spareLock.Exit(); }
         }
 
-        public Shard(HayatePoolOptions options, int index, int maxSize, IHayateLogger logger, bool prefersAsyncDisposal = false)
+        public Shard(HayatePoolOptions options, int index, int maxSize, IHayateLogger logger, bool prefersAsyncDisposal = false, IComparer<T>? borrowPriority = null)
         {
             Index = index;
             _maxSize = maxSize;
@@ -253,8 +265,13 @@ public partial class HayatePoolBasic<T>
             _trackBorrowed = options.RemoveAbandonedOnBorrow || options.RemoveAbandonedOnMaintenance;
             _enableDiagnostics = options.EnableDiagnostics;
             // Options are normalized before the shards are built, so an unrecognised value has already
-            // fallen back to Fifo and "not Lifo" is the complete test.
+            // fallen back to Fifo. G-21 splits the remaining three into the two cheap end reads
+            // (_takeNewest) and the two that walk the list (_selectFromIdleList); a pool that asked for
+            // either of the latter two without a comparer never gets this far, because Build refuses it.
             _takeNewest = options.BorrowStrategy == HayateBorrowStrategy.Lifo;
+            _selectFromIdleList = options.BorrowStrategy == HayateBorrowStrategy.Lru ||
+                                  options.BorrowStrategy == HayateBorrowStrategy.Priority;
+            _borrowPriority = borrowPriority;
 
             // G-9: the lock-free store. The slot array is sized here — one slot per idle object the
             // shard may hold — and is never replaced, which is what keeps a slot index valid for the
@@ -561,6 +578,54 @@ public partial class HayatePoolBasic<T>
             return true;
         }
 
+        /// <summary>
+        /// The G-21 half of <see cref="TryTake"/>: walks the idle list and returns the node the LRU or
+        /// Priority order selects. Called only while holding the shard lock, and only when one of those
+        /// two strategies is configured — the default Fifo/Lifo path never reaches it.
+        /// </summary>
+        /// <remarks>
+        /// LRU takes the smallest <see cref="HayateObject{T}.LastBorrowedAt"/>. An object that has never
+        /// been borrowed carries zero and is therefore the least recently used of all, which is what
+        /// makes a freshly created instance eligible straight away rather than only after one round
+        /// trip.<br />
+        /// Priority takes the node the comparer ranks highest: a positive <c>Compare</c> result means
+        /// "borrow this one first".<br />
+        /// Both walk from the head and keep the first winner, so a tie — every object the comparer calls
+        /// equal, and the all-zero case of LRU — resolves towards the oldest-returned object, the same
+        /// end FIFO would have served. That keeps the result deterministic without requiring the
+        /// comparer to be a total order, and it needs no extra bookkeeping.<br />
+        /// The list is not reordered, which is what keeps <see cref="SnapshotHead"/> — and so the
+        /// eviction scan — reading the same end it reads under Fifo.
+        /// </remarks>
+        private LinkedListNode<HayateObject<T>>? SelectFromIdleList()
+        {
+            var best = _list.First;
+            if (best == null) return null;
+
+            if (_borrowPriority is not null)
+            {
+                for (var node = best.Next; node != null; node = node.Next)
+                {
+                    if (_borrowPriority.Compare(node.Value.Value, best.Value.Value) > 0) best = node;
+                }
+
+                return best;
+            }
+
+            var bestStamp = best.Value.LastBorrowedAt;
+            for (var node = best.Next; node != null; node = node.Next)
+            {
+                var stamp = node.Value.LastBorrowedAt;
+                if (stamp < bestStamp)
+                {
+                    best = node;
+                    bestStamp = stamp;
+                }
+            }
+
+            return best;
+        }
+
         public bool TryTake(out HayateObject<T> w)
         {
             // G-9: the lock-free store serves a take by exchanging a wrapper out of a slot.
@@ -576,7 +641,11 @@ public partial class HayatePoolBasic<T>
                 // FIFO (default) serves the head, the oldest returned object; LIFO serves the tail,
                 // the object that came back last. Both ends are read through the same node walk, so
                 // the strategy costs the borrow path one predicted branch and nothing else.
-                var node = _takeNewest ? _list.Last : _list.First;
+                // G-21: LRU and Priority cannot be answered by an end, so they walk the list once and
+                // are dispatched here rather than duplicating the unlink/claim sequence below.
+                var node = _selectFromIdleList
+                    ? SelectFromIdleList()
+                    : (_takeNewest ? _list.Last : _list.First);
                 if (node == null) return false;
 
                 w = node.Value;

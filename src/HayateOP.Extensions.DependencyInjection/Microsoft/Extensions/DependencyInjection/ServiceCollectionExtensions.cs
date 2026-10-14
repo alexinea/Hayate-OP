@@ -418,12 +418,29 @@ public static class ServiceCollectionExtensions
         // that the options instance resolved here is not normalized (ApplyFeatureSwitches runs inside
         // Build), so the master switch has to be consulted explicitly: with diagnostics off, attaching
         // the sink would make Build() reject a configuration the user chose deliberately.
+        // G-21: Priority is a comparer-driven order, and the comparer cannot travel through
+        // HayatePoolOptions (which is not generic), so a container expresses it by registering an
+        // IComparer<T>. The lookup happens only when the configured strategy actually asks for one, so a
+        // comparer registered for some unrelated purpose is never picked up by a pool that did not ask —
+        // and a pool that did ask without one is told, rather than being built with a default order.
+        var borrowPriority = options.BorrowStrategy == HayateBorrowStrategy.Priority
+            ? sp.GetService<IComparer<T>>()
+              ?? throw new InvalidOperationException(
+                  $"HayatePool [{poolName}]: BorrowStrategy is Priority, but no IComparer<{typeof(T).Name}> is registered in the container. " +
+                  "Register one, or select a different borrow strategy.")
+            : null;
+
         var builder = new HayatePoolBuilder<T>()
             .WithPoolName(poolName);
 
         if (pinsPolicy)
         {
             builder = builder.WithPolicy(policy);
+        }
+
+        if (borrowPriority is not null)
+        {
+            builder = builder.WithBorrowPriority(borrowPriority);
         }
 
         builder = builder
