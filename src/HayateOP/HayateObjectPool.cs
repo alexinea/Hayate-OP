@@ -4066,6 +4066,7 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
             var previousMaxPoolSize = _options.MaxPoolSize;
             var previousLease = _options.EnableLean;
             var previousSoftCapacity = _options.SoftCapacity;
+            var previousBorrowStrategy = _options.BorrowStrategy;
 
             configure(_options);
             _options.ApplyFeatureSwitches(); // Force-correct the configuration
@@ -4105,6 +4106,20 @@ public partial class HayatePoolBasic<T> : IHayateObjectPool<T>
                 _options.SoftCapacity = previousSoftCapacity;
                 throw new InvalidOperationException(
                     $"HayatePool [{_name}] cannot change SoftCapacity at runtime: the ceiling is applied by the return path from a value fixed when the pool was built (in lean mode it also fixes the buffer's slot limit). Rebuild the pool to change it.");
+            }
+
+            // G-21: the borrow order is snapshotted by every shard at construction (which end it reads,
+            // or which node its walk picks), so a reload cannot move it — the shards would keep serving
+            // the order they were built with while GetOptions reported the new one. Same rule as
+            // SoftCapacity above: refused with the original value restored rather than accepted and
+            // ignored. The hole predates G-21 (the option already had two values and was never guarded);
+            // adding the two that walk the list is what made it visible, because a stale snapshot now
+            // also decides *how* the selection is performed, not only which end it starts from.
+            if (_options.BorrowStrategy != previousBorrowStrategy)
+            {
+                _options.BorrowStrategy = previousBorrowStrategy;
+                throw new InvalidOperationException(
+                    $"HayatePool [{_name}] cannot change BorrowStrategy at runtime: each shard snapshots the borrow order when the pool is built. Rebuild the pool to change it.");
             }
 
             // G-9: the lock-free store's slot arrays are sized when the shards are built and are never
