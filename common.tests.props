@@ -33,5 +33,10 @@
         <GenerateAssemblyProductAttribute>false</GenerateAssemblyProductAttribute>
     </PropertyGroup>
     -->
-    
+
+    <!-- 3.1 / A5-6：本文件**不**承载构建门禁。tests/ 的门禁落在 tests/Directory.Build.props
+         （TreatWarningsAsErrors=true），由 MSBuild 对 tests/ 整棵树自动生效。之所以不放这里：
+         本文件只被 4 个测试工程 Import，而 tests/ 下有 16 个工程（13 测试 + 3 工具），
+         逐个 Import 会在新增工程时被漏掉。 -->
+
 </Project>

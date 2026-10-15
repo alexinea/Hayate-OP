@@ -1,0 +1,21 @@
+<Project>
+
+    <!-- 3.1 / A5-6 构建门禁：把 tests/ 的「零警告」从声称变为可执行——任何编译器 / 分析器
+         警告即构建失败。与 src 的门禁（common.props 里的 TreatWarningsAsErrors）同源同口径，
+         区别只在落点：src 由 10 个项目各自 Import common.props，而 tests/ 下既有 13 个测试
+         工程、又有 3 个工具工程（Benchmarks / EnvironmentChecker / PressureTests），逐个
+         Import 容易在新增工程时被漏掉——src 侧的注释已经记过这个教训（「无强制执行的口径
+         必然漂移」）。放在 Directory.Build.props 里，MSBuild 对 tests/ 整棵树自动生效，
+         新增工程无需任何额外动作即被纳入。
+
+         之所以不放进 common.tests.props：后者只被 4 个测试工程 Import，另外 9 个测试工程
+         与 3 个工具工程都是内联声明属性（ImplicitUsings / Nullable / IsPackable），若把门禁
+         放进 common.tests.props，等于门禁本身又依赖「记得去 Import」。
+
+         覆盖范围：tests/ 下全部 16 个工程（13 测试 + 3 工具），Release 与 Debug 均生效。
+         一次性绕过（仅限本地排障）：dotnet build <proj> /p:TreatWarningsAsErrors=false -->
+    <PropertyGroup>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    </PropertyGroup>
+
+</Project>
