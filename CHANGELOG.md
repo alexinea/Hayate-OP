@@ -82,6 +82,16 @@ compare-exchange protocol G-9 landed. The layout is decided per shard at constru
 shards straddle the boundary holds both, and the striped store the same research item proposed was
 deliberately not ported: the shard already is the stripe. No option, no member and no behaviour change.
 
+The line also makes the test tree's own "zero warnings" claim executable (A5-6). The thirteen test
+projects and the three tools under `tests/` were carrying 866 distinct warnings that no gate looked at:
+nullable reference types still off in six projects, the xUnit analyzers' three complaints (1051, 1069
+and 1031), a dead benchmark field, and two binding redirects fighting the automatic ones. They are
+answered at the site rather than switched off, with one deliberate exception: 1031 is suppressed in the
+two assemblies that disable parallelization — the condition xUnit's own documentation names as making
+the rule inapplicable — while the two assemblies that leave parallelism on are fixed instead. Nothing
+in the shipped packages changes; `tests/Directory.Build.props` only decides whether a warning stops the
+build, and it now does, for every project under `tests/`, including one added later.
+
 ### Added
 
 - **A ceiling on concurrent borrows** (G-5): `MaxActiveObjects` caps how many objects may be lent out
