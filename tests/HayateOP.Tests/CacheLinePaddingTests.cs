@@ -196,6 +196,14 @@ public class CacheLinePaddingTests
         private int _idleCount;
         private int _lockFreeTakes;
 
+        // G-23: the layout's three numbers - the stride between two slots, the physical position of
+        // logical slot 0, and the number of slots the array was laid out for. The control takes the
+        // empty-array branch, so the shard it mirrors holds stride 1, offset 0 and capacity 0: three
+        // ints in both, and the paired difference still measures the padding alone.
+        private readonly int _slotStride;
+        private readonly int _slotFirst;
+        private readonly int _slotCapacity;
+
         private readonly bool _prefersAsyncDisposal;
         private SpinLock _spareLock;
         private object? _spareHead;
@@ -228,6 +236,9 @@ public class CacheLinePaddingTests
             _scanCursor = 0;
             _idleCount = 0;
             _lockFreeTakes = 0;
+        _slotStride = 1;
+        _slotFirst = 0;
+        _slotCapacity = 0;
             _list = new LinkedList<object>();
             _borrowed = new LinkedList<object>();
             _objects = new ConcurrentDictionary<object, object>();
@@ -251,6 +262,9 @@ public class CacheLinePaddingTests
             _ = _scanCursor;
             _ = _idleCount;
             _ = _lockFreeTakes;
+        _ = _slotStride;
+        _ = _slotFirst;
+        _ = _slotCapacity;
         }
     }
 }
