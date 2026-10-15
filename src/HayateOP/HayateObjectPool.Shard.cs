@@ -158,6 +158,64 @@ public partial class HayatePoolBasic<T>
         /// <summary>The number of takes served by the lock-free store without entering the shard lock (diagnostic use).</summary>
         internal int LockFreeTakes => Volatile.Read(ref _lockFreeTakes);
 
+        // ---------------------------------------------------------------------------------------------
+        // G-23 (33-R-9): the capacity-adaptive slot layout.
+        //
+        // The compact array puts eight adjacent slots in one cache line on a 64-bit runtime, so two
+        // threads exchanging two different slots ping-pong that one line between them and the CAS
+        // that should have been independent turns into cache-line contention. The layout below moves
+        // each slot a cache line apart for a shard small enough to afford it, and moves logical slot 0
+        // off the array header's line, which every bounds check reads.
+        //
+        // What it costs is the reference array itself: the spaced form holds one reference per stride
+        // position, so it holds `capacity * stride` references for `capacity` objects. That is why
+        // the boundary exists - at or below it the array stays a few KB per shard, and above it the
+        // shard keeps the compact layout rather than pay it. Both layouts run the same protocol (one
+        // compare-exchange per take, return and claim) and differ only in the index-to-position
+        // mapping, which is frozen here because the array is sized once: the pool refuses a reload
+        // that would outgrow it (HayatePoolBasic&lt;T&gt;._lockFreeSlotCeiling).
+        // ---------------------------------------------------------------------------------------------
+
+        /// <summary>
+        /// The largest shard capacity that gets the cache-line-spaced layout. The number is TRTOP
+        /// Reservoir's <c>MaximumCacheLineSlotCapacity</c>, taken over as the boundary at which the
+        /// spaced form's reference array stops paying for itself.
+        /// </summary>
+        private const int CacheLineSlotCapacity = 64;
+
+        /// <summary>
+        /// The distance between two slots in the array, in references: 1 on the compact layout, one
+        /// cache line's worth of references on the spaced one (8 on a 64-bit runtime, 16 on a 32-bit
+        /// one - a reference is pointer-sized, so this is <c>CacheLineSize / IntPtr.Size</c>).
+        /// </summary>
+        private static readonly int CacheLineSlotStride = CacheLinePadded.CacheLineSize / IntPtr.Size;
+
+        /// <summary>
+        /// The distance between two slots in the array, in references. <c>1</c> is the compact layout.
+        /// </summary>
+        private readonly int _slotStride;
+
+        /// <summary>
+        /// The physical position of logical slot 0: <c>0</c> on the compact layout, one stride on the
+        /// spaced one, which is what keeps slot 0 off the array header's cache line.
+        /// </summary>
+        private readonly int _slotFirst;
+
+        /// <summary>The number of slots the array was laid out for - the shard's maximum at construction.</summary>
+        private readonly int _slotCapacity;
+
+        /// <summary>The distance between two slots in the array, in references (G-23; 1 = compact).</summary>
+        internal int SlotStride => _slotStride;
+
+        /// <summary>The physical position of logical slot 0 (G-23; 0 = compact, one stride = spaced).</summary>
+        internal int SlotFirst => _slotFirst;
+
+        /// <summary>The number of slots the array was laid out for (G-23).</summary>
+        internal int SlotCapacity => _slotCapacity;
+
+        /// <summary>The slot array's physical length (G-23; offset + capacity x stride on the spaced layout).</summary>
+        internal int SlotArrayLength => _slots.Length;
+
         // A2 (docs/async-policy.md §5): the destroy sites prefer IAsyncDisposable for a pool whose
         // policy implements the asynchronous contract. Constant false for every other pool, so the
         // SafeDispose branch that reads it is dead code the JIT removes.
@@ -281,7 +339,17 @@ public partial class HayatePoolBasic<T>
             _useLockFreeStore = options.EnableLockFreeStorage;
             if (_useLockFreeStore && maxSize > 0)
             {
-                _slots = new HayateObject<T>?[maxSize];
+                // G-23 (33-R-9): choose the layout once, from the capacity the shard is built with. A
+                // shard at or below the boundary lays its slots a cache line apart, so two threads
+                // exchanging two different slots never share a line, and starts at the first offset so
+                // logical slot 0 does not sit on the array header's line. Above it the compact layout
+                // stands, because the spaced one would hold one reference per stride position.
+                var spaced = maxSize <= CacheLineSlotCapacity;
+                _slotStride = spaced ? CacheLineSlotStride : 1;
+                _slotFirst = spaced ? _slotStride : 0;
+                _slotCapacity = maxSize;
+
+                _slots = new HayateObject<T>?[_slotFirst + maxSize * _slotStride];
                 _freeNext = new int[maxSize];
                 for (var i = 0; i < maxSize - 1; i++) _freeNext[i] = i + 1;
                 _freeNext[maxSize - 1] = -1;
@@ -289,6 +357,11 @@ public partial class HayatePoolBasic<T>
             }
             else
             {
+                // The identity layout: with the store off the array is the shared empty singleton and
+                // every mapping below folds to the index itself.
+                _slotStride = 1;
+                _slotFirst = 0;
+                _slotCapacity = 0;
                 _slots = Array.Empty<HayateObject<T>>();
                 _freeNext = Array.Empty<int>();
                 _freeHead = PackHead(0, -1);
@@ -301,6 +374,13 @@ public partial class HayatePoolBasic<T>
         /// distinguishable from the one a reader loaded.
         /// </summary>
         private static long PackHead(int version, int index) => ((long)version << 32) | (uint)index;
+
+        /// <summary>
+        /// The physical position of a logical slot - the array index a wrapper's <c>SlotIndex</c> maps
+        /// to. The identity on the compact layout; on the spaced one it is the first offset plus the
+        /// index times the stride, which is what puts each slot on a cache line of its own.
+        /// </summary>
+        private int SlotPosition(int logicalSlot) => _slotFirst + logicalSlot * _slotStride;
 
         /// <summary>
         /// Pops a free slot index off the intrusive stack, or returns <c>false</c> when every slot is
@@ -512,8 +592,8 @@ public partial class HayatePoolBasic<T>
                 {
                     var parkedSlots = _slots;
                     var parkedIndex = w.SlotIndex;
-                    if ((uint)parkedIndex < (uint)parkedSlots.Length &&
-                        ReferenceEquals(w, Interlocked.CompareExchange(ref parkedSlots[parkedIndex], null, w)))
+                    if ((uint)parkedIndex < (uint)_slotCapacity &&
+                        ReferenceEquals(w, Interlocked.CompareExchange(ref parkedSlots[SlotPosition(parkedIndex)], null, w)))
                     {
                         Interlocked.Decrement(ref _idleCount);
                     }
@@ -524,7 +604,9 @@ public partial class HayatePoolBasic<T>
 
             var slots = _slots;
             var currentMax = Volatile.Read(ref _maxSize);
-            if (currentMax > slots.Length) currentMax = slots.Length;
+            // G-23: the ceiling is the shard's capacity, which is the logical slot count and not the
+            // array's physical length - on the spaced layout those differ by the offset and the stride.
+            if (currentMax > _slotCapacity) currentMax = _slotCapacity;
 
             var size = 0;
             while (true)
@@ -546,7 +628,7 @@ public partial class HayatePoolBasic<T>
             }
 
             var index = w.SlotIndex;
-            if (index < 0 || index >= slots.Length)
+            if (index < 0 || index >= _slotCapacity)
             {
                 if (!TryPopSlot(out index))
                 {
@@ -562,7 +644,7 @@ public partial class HayatePoolBasic<T>
                 w.SlotIndex = index;
             }
 
-            slots[index] = w;
+            slots[SlotPosition(index)] = w;
             w.Location = HayateObjectLocation.InPool;
 
             // The object is no longer borrowed: unlink it from the borrowed list (K2). That list is
@@ -698,17 +780,22 @@ public partial class HayatePoolBasic<T>
             }
 
             var slots = _slots;
-            var limit = slots.Length;
+            var limit = _slotCapacity;
             var start = limit == 0 ? 0 : (int)((uint)Interlocked.Increment(ref _scanCursor) - 1) % limit;
 
+            // G-23 (33-R-9): the scan walks logical slots and maps each to its position, so the
+            // compact layout - stride 1, offset 0 - pays a correctly predicted branch and no multiply
+            // while the spaced layout buys a cache line of its own per slot. Walking positions instead
+            // would spend eight probes on the spacing of every slot the scan crosses.
             for (var n = 0; n < limit; n++)
             {
                 var i = start + n;
                 if (i >= limit) i -= limit;
 
-                var slot = slots[i];
+                var position = _slotStride == 1 ? i : SlotPosition(i);
+                var slot = slots[position];
                 if (slot is not null &&
-                    ReferenceEquals(slot, Interlocked.CompareExchange(ref slots[i], null, slot)))
+                    ReferenceEquals(slot, Interlocked.CompareExchange(ref slots[position], null, slot)))
                 {
                     Interlocked.Decrement(ref _idleCount);
                     Interlocked.Increment(ref _lockFreeTakes);
@@ -929,9 +1016,10 @@ public partial class HayatePoolBasic<T>
 
             var slots = _slots;
             var index = w.SlotIndex;
-            if (index < 0 || index >= slots.Length) return false;
+            if (index < 0 || index >= _slotCapacity) return false;
 
-            if (!ReferenceEquals(w, Interlocked.CompareExchange(ref slots[index], null, w))) return false;
+            var position = SlotPosition(index);
+            if (!ReferenceEquals(w, Interlocked.CompareExchange(ref slots[position], null, w))) return false;
 
             Interlocked.Decrement(ref _idleCount);
             w.Location = HayateObjectLocation.Removing;
@@ -957,10 +1045,11 @@ public partial class HayatePoolBasic<T>
             if (_useLockFreeStore)
             {
                 var slots = _slots;
-                var found = new List<HayateObject<T>>(slots.Length);
-                for (var i = 0; i < slots.Length; i++)
+                var limit = _slotCapacity;
+                var found = new List<HayateObject<T>>(limit);
+                for (var i = 0; i < limit; i++)
                 {
-                    var slot = Volatile.Read(ref slots[i]);
+                    var slot = Volatile.Read(ref slots[SlotPosition(i)]);
                     if (slot is not null) found.Add(slot);
                 }
 
@@ -1002,9 +1091,11 @@ public partial class HayatePoolBasic<T>
                 var slots = _slots;
                 var slotLimit = Math.Min(count, buffer.Length);
                 var copiedFromSlots = 0;
-                for (var i = 0; i < slots.Length && copiedFromSlots < slotLimit; i++)
+                // G-23: logical slots again - the sample is a run of the shard's slots whichever layout
+                // the array has, and walking positions would spend the run on the spacing.
+                for (var i = 0; i < _slotCapacity && copiedFromSlots < slotLimit; i++)
                 {
-                    var slot = Volatile.Read(ref slots[i]);
+                    var slot = Volatile.Read(ref slots[SlotPosition(i)]);
                     if (slot is not null) buffer[copiedFromSlots++] = slot;
                 }
 
@@ -1114,13 +1205,18 @@ public partial class HayatePoolBasic<T>
         private HayateObject<T>[] DrainForClearLockFree()
         {
             var slots = _slots;
-            var drained = new List<HayateObject<T>>(slots.Length);
+            var limit = _slotCapacity;
+            var drained = new List<HayateObject<T>>(limit);
 
-            for (var i = 0; i < slots.Length; i++)
+            // G-23: the walk covers logical slots, not array positions, so both layouts drain the same
+            // objects. Walking positions on the spaced layout would spend eight exchanges per slot on
+            // the spacing in between, every one of them on null.
+            for (var i = 0; i < limit; i++)
             {
-                var slot = slots[i];
+                var position = SlotPosition(i);
+                var slot = slots[position];
                 if (slot is null) continue;
-                if (!ReferenceEquals(slot, Interlocked.CompareExchange(ref slots[i], null, slot))) continue;
+                if (!ReferenceEquals(slot, Interlocked.CompareExchange(ref slots[position], null, slot))) continue;
 
                 Interlocked.Decrement(ref _idleCount);
                 slot.Node = null;

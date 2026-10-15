@@ -2089,6 +2089,46 @@
         <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.LockFreeTakes">
             <summary>The number of takes served by the lock-free store without entering the shard lock (diagnostic use).</summary>
         </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.CacheLineSlotCapacity">
+            <summary>
+            The largest shard capacity that gets the cache-line-spaced layout. The number is TRTOP
+            Reservoir's <c>MaximumCacheLineSlotCapacity</c>, taken over as the boundary at which the
+            spaced form's reference array stops paying for itself.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.CacheLineSlotStride">
+            <summary>
+            The distance between two slots in the array, in references: 1 on the compact layout, one
+            cache line's worth of references on the spaced one (8 on a 64-bit runtime, 16 on a 32-bit
+            one - a reference is pointer-sized, so this is <c>CacheLineSize / IntPtr.Size</c>).
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1.Shard._slotStride">
+            <summary>
+            The distance between two slots in the array, in references. <c>1</c> is the compact layout.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1.Shard._slotFirst">
+            <summary>
+            The physical position of logical slot 0: <c>0</c> on the compact layout, one stride on the
+            spaced one, which is what keeps slot 0 off the array header's cache line.
+            </summary>
+        </member>
+        <member name="F:DotNetCore.HayateOP.HayatePoolBasic`1.Shard._slotCapacity">
+            <summary>The number of slots the array was laid out for - the shard's maximum at construction.</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.SlotStride">
+            <summary>The distance between two slots in the array, in references (G-23; 1 = compact).</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.SlotFirst">
+            <summary>The physical position of logical slot 0 (G-23; 0 = compact, one stride = spaced).</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.SlotCapacity">
+            <summary>The number of slots the array was laid out for (G-23).</summary>
+        </member>
+        <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.SlotArrayLength">
+            <summary>The slot array's physical length (G-23; offset + capacity x stride on the spaced layout).</summary>
+        </member>
         <member name="P:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.SpareCount">
             <summary>The number of wrappers currently parked on the spare stack (diagnostic use).</summary>
         </member>
@@ -2111,6 +2151,13 @@
             Packs a version and a slot index into the free-stack head. An index of -1 marks the empty
             stack; the version occupies the high half and is what makes a recycled index
             distinguishable from the one a reader loaded.
+            </summary>
+        </member>
+        <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.SlotPosition(System.Int32)">
+            <summary>
+            The physical position of a logical slot - the array index a wrapper's <c>SlotIndex</c> maps
+            to. The identity on the compact layout; on the spaced one it is the first offset plus the
+            index times the stride, which is what puts each slot on a cache line of its own.
             </summary>
         </member>
         <member name="M:DotNetCore.HayateOP.HayatePoolBasic`1.Shard.TryPopSlot(System.Int32@)">
