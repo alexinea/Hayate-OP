@@ -1,9 +1,11 @@
 # Storage backends: the lock-free shard store and the thread-local front slot
 
-Status: **implemented 2026-10-13.** This page is the design source for `G-9` and `G-10` of the 3.1
-performance line (`33-R-5` / `33-R-6`). Per the B8-1 precedent the form was recorded before it was
-built, so the implementation is measured against a stated contract rather than against what it happens
-to do. Section 8 records the two places where building it settled a question this page had left open.
+Status: **implemented 2026-10-13** (`G-9`, `G-10`), **extended 2026-10-15** (`G-23`, the
+capacity-adaptive slot layout of §3.5). This page is the design source for `G-9` and `G-10` of the 3.1
+performance line (`33-R-5` / `33-R-6`) and for `G-23` (`33-R-9`). Per the B8-1 precedent the form was
+recorded before it was built, so the implementation is measured against a stated contract rather than
+against what it happens to do. Section 8 records the two places where building it settled a question
+this page had left open.
 
 Both backends are **off by default**. With them off, neither the shard free list nor the borrow /
 return path changes a single instruction.
@@ -29,9 +31,9 @@ where that redesign actually bites.
 ## 2. What the current shape is, and why the blueprint could not be copied literally
 
 The free list is one `LinkedList<HayateObject<T>>` guarded by one `SpinLock` per shard
-(`HayateObjectPool.Shard.cs:43`, `:86`). The list keeps **return order**; `BorrowStrategy` only
+(`HayateObjectPool.Shard.cs:44`, `:98`). The list keeps **return order**; `BorrowStrategy` only
 decides which end a borrow is served from, and the eviction sampler reads the oldest end under
-either strategy (`Shard.cs:35-42`, `:496-501`). Three facts have to be on the table:
+either strategy (`Shard.cs:35-42`, `:1111`). Three facts have to be on the table:
 
 **(a) A version-packed head cannot hold a pointer.** TRTOP packs `(version, index)` into one `long`
 because its nodes live in a private `Node[]` array, so the head only has to hold a 32-bit **index**.
@@ -47,12 +49,12 @@ doubly linked list with arbitrary unlink is not a thing anyone should ship into 
 form decision therefore has to give something up, and section 3.4 says exactly what.
 
 **(c) A lock-free structure cannot physically unlink an arbitrary interior node.** `Remove` is
-called from three cold paths — `Evict` (`HayateObjectPool.cs:1852`), the eviction sampler (`:2922`)
-and the idle validator (`:3184`) — and each one wants "claim this idle object and take it out of the
+called from three cold paths — `Evict` (`HayateObjectPool.cs:2451`), the eviction sampler (`:3663`)
+and the idle validator (`:3925`) — and each one wants "claim this idle object and take it out of the
 pool, and tell me if you could not". The textbook answer is a tombstone plus a skip on pop, which
 drags seven cold-path methods (`Remove` ×3, `Count` ×10 call sites, `GetAll`, `SnapshotHead`,
 `DrainForClear`) into a new identity model and retires the two `node.List` checks that currently
-prove a node belongs to this shard (`Shard.cs:231`, `:459`).
+prove a node belongs to this shard (`Shard.cs:505`, `:974`).
 
 This repository has already solved the same shape of problem once. The lean fast path stores values
 in a bounded buffer through per-slot compare-exchange (`HayateObjectPool.Lean.cs:240-314`), and the
@@ -111,8 +113,8 @@ migration boundary calls for rather than a departure from it:
   `Remove` meaning what it means today. The array this design does keep is the slot array, which is
   the wrapper store rather than a node pool.
 - **`[ThreadStatic]` stripe affinity.** The shard *is* the stripe here, and the pool already routes
-  borrows through a ring scan from an affinity start (`HayateObjectPool.cs:992-998`, `:1366-1372`)
-  with an optional golden-ratio thread hash (`:2664`). A second, private affinity would be a second
+  borrows through a ring scan from an affinity start (`HayateObjectPool.cs:1350`, `:1796`)
+  with an optional golden-ratio thread hash (`:3329-3345`). A second, private affinity would be a second
   mechanism for the same job. The store's cursor is a *scan hint*, not an affinity: it spreads
   concurrent scanners across the shard without claiming that a thread owns a slot.
 
@@ -124,7 +126,7 @@ returns happened in.
 
 That is not something to leave for a user to discover, so the combination is **refused at build
 time**, exactly as the lean fast path already refuses a borrow order it cannot honour
-(`HayatePoolBuilder.cs:1808-1813`):
+(`HayatePoolBuilder.cs:2083-2092`):
 
 > `EnableLockFreeStorage` with `BorrowStrategy != Fifo` throws from `Build()`. The default `Fifo` is
 > what a pool that never asked for anything holds, so a pool that simply turns the backend on
@@ -132,7 +134,7 @@ time**, exactly as the lean fast path already refuses a borrow order it cannot h
 > the two cannot both hold.
 
 **`SnapshotHead` stops being the coldest end.** The eviction sampler uses it to look at the oldest
-idle objects first (`Shard.cs:496-501`), which is what makes `MaxIdleTime` and `MaxLifeTime`
+idle objects first (`Shard.cs:1111`), which is what makes `MaxIdleTime` and `MaxLifeTime`
 retirement fair. On this backend the sample is a contiguous run of the shard's slots — a fair sample,
 but not an age-ordered one. Consequence, to be stated in the eviction documentation: an object past
 its idle limit is reclaimed when it is sampled, and sampling no longer guarantees that the oldest
@@ -141,6 +143,81 @@ gone.
 
 **Nothing else moves.** `Count`, `GetAll`, `DrainForClear`, the registry, the borrowed list (K2) and
 the spare-wrapper stack keep their semantics, because `Remove` kept its own.
+
+### 3.5 G-23 — the capacity-adaptive slot layout
+
+The slot array as §3.1 leaves it puts **eight adjacent slots in one cache line** on a 64-bit runtime.
+The compare-exchange on each slot is independent; the line is not. Two threads exchanging two different
+slots ping-pong that one line between their cores, so a CAS that should have been independent pays the
+coherence traffic anyway. `33-R-9` is that observation, and the layout below is its answer.
+
+Per shard, decided at construction from that shard's own capacity (`Shard.cs:347-352`):
+
+| | compact | spaced |
+| :--- | :--- | :--- |
+| taken when | capacity > 64 | capacity ≤ 64 |
+| `_slotStride` | `1` | `CacheLineSize / IntPtr.Size` — 8 on a 64-bit runtime, 16 on a 32-bit one (`Shard.cs:191`, `Common/CacheLinePadding.cs:30`) |
+| `_slotFirst` (physical position of logical slot 0) | `0` | one stride, which is what keeps slot 0 off the array header's line — the line every bounds check reads |
+| array length | `capacity` | `first + capacity × stride` |
+
+64 is TRTOP Reservoir's `MaximumCacheLineSlotCapacity`, taken over as the boundary at which the spaced
+form stops paying for itself, and the memory arithmetic is the whole of the reason. The spacing costs
+one reference per stride position: a shard of 64 slots holds 8 + 64 × 8 = 520 references instead of 64
+— about 4 KB instead of 0.5 KB on a 64-bit runtime, which is a fine price for spreading apart the eight
+slots that share a line. Above the boundary the array keeps growing linearly while what it removes does
+not: the number of threads that can contend for one line is bounded by the pool's concurrency, not by
+the array's size, so a shard of 512 slots would hold 4 104 references — 32 KB — to de-contend a line
+that a handful of threads are exchanging.
+
+**The two layouts are one protocol.** They differ in a single mapping, applied at every slot access:
+
+    private int SlotPosition(int logicalSlot) => _slotFirst + logicalSlot * _slotStride;   (Shard.cs:383)
+
+A wrapper's `SlotIndex` stays a **logical** slot, so the free-slot stack, the wrapper's identity and the
+`G-14-A` second-return guard keep their meaning unchanged; only the physical position moves. Seven paths
+apply the mapping — the second-return guard (`:595`), the return (`:609`, `:631`, `:647`), the take scan
+(`:783`, `:795`), `RemoveLockFree` (`:1019`), `GetAll` (`:1048`), `SnapshotHead` (`:1096`) and
+`DrainForClearLockFree` (`:1208`) — and each walks *logical* slots and maps as it goes, because walking
+array positions would spend seven of every eight probes on the spacing, every one of them on `null`.
+
+The take scan is the one place the mapping is not written as a call, because it runs once per probe on
+the hot path and the compact layout is the one a large shard uses:
+
+    var position = _slotStride == 1 ? i : SlotPosition(i);   (Shard.cs:795)
+
+So the compact layout pays one predicted branch per probe instead of a multiply, and the spaced layout
+pays the multiply it needs.
+
+**The layout is frozen at construction, and the pool already guarantees that.** The array is sized once,
+so the mapping cannot change afterwards; `_lockFreeSlotCeiling` (`HayateObjectPool.cs:862`, `:4202`)
+already refuses a `ReloadConfig` that would raise `MaxPoolSize` past the array, which is why this needs
+no new guard and no new option.
+
+**Per shard, not per pool.** The decision reads the shard's own capacity, so a pool whose shards straddle
+the boundary holds both layouts at once: 257 over four shards is 65 / 64 / 64 / 64 — one compact shard
+and three spaced ones in the same pool. The asymmetry is harmless because the layouts share the protocol;
+it would not be if they were two code paths.
+
+**The striped half of the item is deliberately not ported, for the reason §3.3 already gives.** `33-R-9`
+proposes a second, striped store above the boundary (the blueprint's TRTOP/Reservoir pair). The shard
+*is* the stripe here: the pool routes borrows through a ring scan from an affinity start with an
+optional golden-ratio thread hash (`HayateObjectPool.cs:1350`, `:1796`, `:3329-3345`), so a striped
+store would be a second mechanism for a job the sharding layer already does — the same argument that
+refused `[ThreadStatic]` affinity and the index-addressed node array. What the item is left with, once
+that half is accounted for, is the layout, and that is what landed.
+
+**What pins it, and why the layout facts are not enough on their own.** `CacheLineSlotLayoutTests`
+states the cache line independently (64) and measures the layout through the four internal diagnostics —
+`SlotStride`, `SlotFirst`, `SlotCapacity`, `SlotArrayLength` (`Shard.cs:208-217`), the same
+"diagnostic read by reflection" shape the `G-9` take counter uses — so a boundary that moved, a stride
+that changed or a first offset that was dropped all go red. Those numbers do not pin the mapping: a
+mapping that ignored the stride would still leave every wrapper *somewhere*, the store would still work,
+and only the benefit would be gone. So one case reads the array itself and asserts where the wrappers
+land — position 0 stays empty, the first wrapper sits at `stride`, the second at `2 × stride`, and a take
+clears exactly the position it read. The `G-9` behaviour cases run unchanged; because their pools sit
+under the boundary, they now exercise the spaced layout, which is also why the compact layout needed its
+own coverage rather than borrowing theirs, and why the hand-written control in `CacheLinePaddingTests`
+had to gain the three new fields.
 
 ## 4. G-10 — the per-pool thread-local front slot
 
@@ -195,7 +272,7 @@ everything that measures or sweeps shards. Four consequences, all of which the i
 to answer rather than document away:
 
 - **Idle accounting.** The pool derives its idle and borrowed counts from the shards
-  (`HayateObjectPool.cs:78`, `:96`, `:3242`, `:3340`). A parked object would be reported as
+  (`HayateObjectPool.cs:154`, `:177`, `:1051`, `:3446`). A parked object would be reported as
   borrowed. The pool therefore keeps a front-tier count, maintained where parking and unparking
   happen, and folds it into those derivations.
 - **Eviction.** A parked object would never be sampled, so it would never retire on idle or lifetime
@@ -221,8 +298,8 @@ configuration loss rather than a smaller feature.
 | # | Point | `G-9` | `G-10` |
 | :-: | :--- | :--- | :--- |
 | 1 | `HayatePoolOptions` property (default `false`) | `EnableLockFreeStorage` | `EnableThreadLocalFrontSlot` |
-| 2 | `CopyTo` | travels with the execution-mode block, like `EnableArrayPoolStorage` (`HayatePoolOptions.cs:1258-1259`) | same |
-| 3 | `ApplyFeatureSwitches` | forced `false` by `EnableLean` (`:1387-1417`) | same |
+| 2 | `CopyTo` | travels with the execution-mode block, like `EnableArrayPoolStorage` (`HayatePoolOptions.cs:1377`) | same |
+| 3 | `ApplyFeatureSwitches` | forced `false` by `EnableLean` (`:1514`) | same |
 | 4 | `IsValid` | nothing new: the non-`Fifo` conflict is a `Build()` refusal, matching the lean guard | nothing new |
 | 5 | builder writer | `WithLockFreeStorage(bool = true)` | `WithThreadLocalFrontSlot(bool = true)` |
 | 6 | `Build()` refusal | `EnableLockFreeStorage && BorrowStrategy != Fifo` throws | `EnableThreadLocalFrontSlot && BorrowStrategy != Fifo` throws — added with G-21, because a tier hit is served before the shard is asked, so the order could only hold on a tier miss |
@@ -254,15 +331,22 @@ prevent.
    before a re-capture could measure anything. The 2026-10-13 re-capture already cleared the gate's
    calibration caveat, so landing these two items does **not** oblige another one; a re-capture is
    only worth doing if the gains are to be recorded in the baseline.
+9. **The layout is measurable, and the mapping is observable.** (`G-23`) The two numbers that describe
+   the array — the stride and the position of logical slot 0 — are stated by the test rather than copied
+   from the constant, and the mapping is pinned by where a wrapper actually lands in the array rather
+   than by the store still working. Both halves are needed: the numbers alone cannot see a mapping that
+   is consistently wrong, and behaviour alone cannot see a layout that stopped spacing.
 
 ## 7. Deliberately out of scope
 
 - The lean fast path and its O-D backend. Lean and the general engine dispatch to each other by a
-  constant branch at every entry point (`HayateObjectPool.cs:939`, `:1333`, `:1557`, `:1587`), so
+  constant branch at every entry point (`HayateObjectPool.cs:1030`, `:1250`, `:2034`, `:4228`), so
   neither of these backends is reachable from a lean pool.
 - The borrowed list (K2), the per-shard registry and the spare-wrapper stack. None is on the borrow
-  or return path, and the spare stack's own comment (`Shard.cs:118-126`) already argues why a
+  or return path, and the spare stack's own comment (`Shard.cs:257-264`) already argues why a
   Treiber stack would be wrong there.
+- The **striped** half of `33-R-9` (`G-23`): a second store chosen by the capacity boundary. The shard
+  is already the stripe, so what that half asks for is the sharding layer's job. See §3.5.
 - 128-bit compare-exchange, `cmpxchg16b` intrinsics and hazard pointers: not portable to
   `netstandard2.0` / `net48`.
 - `G-11` (struct policy specialization), which waits on the `33-R-1` data.
@@ -292,3 +376,20 @@ prevent.
   (21 against 14). The control was extended to match; the lock-free arrays are the shared empty-array
   singletons on the off path, so the two mirrored fields cost the control no bytes and the paired
   difference still measures the padding alone.
+- **2026-10-15** — `G-23` (`33-R-9`) built. The capacity-adaptive layout of §3.5, and two things that
+  settled while building it:
+  - **The take scan keeps a compact fast path.** Writing every access as `SlotPosition(i)` was the
+    obvious shape, and it is the wrong one for the scan: it runs once per probe, and the layout that
+    would pay a multiply for nothing is the compact one. The scan asks `_slotStride == 1` once per
+    probe instead — one predicted branch on the layout a large shard uses.
+  - **The layout facts are not the whole of the test.** A mapping that ignored the stride would leave
+    the store working and only the benefit gone, so a case had to observe the array rather than the
+    numbers — see §3.5 and the ninth acceptance anchor. The reverse comparison agreed, and added a
+    limit worth knowing: the arm that breaks the scan's mapping makes two cases *block* rather than
+    fail, so it can only be run against the future tree. The legacy copies are bare `[Fact]` — xUnit v2
+    cannot bound a synchronous case — and the arm ran for six hours before that was understood.
+  - **The page's older citations were re-anchored.** Every `File.cs:line` reference on this page was
+    re-checked against the tree on 2026-10-15, and ten of them — plus the bare `:line` continuations
+    that follow them — no longer resolved to the statement they were attached to: the 3.1 items landed
+    between this page being written and `G-23` moved the code under them. They now point at the current
+    sites, which is the only kind of citation worth having.

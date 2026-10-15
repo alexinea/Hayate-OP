@@ -1550,6 +1550,14 @@ lives, which is what lets a borrow take an object without entering the shard loc
 - **The ceiling can no longer be widened.** The slot array is sized when the shard is built, so
   `ReloadConfig` rejects a `MaxPoolSize` above it (lowering stays allowed, and the store clamps to the
   smaller of the two).
+- **The slot array is laid out by capacity.** A shard at or below 64 slots gets its slots one cache
+  line apart, with logical slot 0 a line in from the array header, so two threads exchanging two
+  different slots stop sharing a line; above that it keeps the compact array, because the spacing costs
+  one reference per stride position and what it removes does not grow with the array. The layout is
+  decided per shard when the pool is built — a pool whose shards straddle the boundary holds both — and
+  both layouts run the same protocol, so everything above still holds: `Count`, `GetAll`, `Remove`,
+  `DrainForClear`, the reload ceiling and the given-up retrieval order mean the same thing on either
+  layout.
 - **The idle sample stops being the coldest end.** The eviction sampler walks a contiguous run of
   slots instead of the oldest end of the list. `MaxIdleTime` and `MaxLifeTime` reclaim exactly what
   they always did — an object past its limit is destroyed when it is sampled — but sampling no longer

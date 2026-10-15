@@ -75,6 +75,13 @@ the user's main extension point and the core targets `netstandard2.0` / `net48`,
 interface member cannot keep an existing implementer compiling; the engine probes for the observer with
 `is`, so a policy that does not implement it runs the statements it ran before. A pure addition.
 
+The line also stops a shard's slot array from putting eight of its slots in one cache line (G-23): the
+lock-free store now lays the array out by capacity — slots one cache line apart for a shard small
+enough to afford the references, the compact array above that — while both layouts keep running the one
+compare-exchange protocol G-9 landed. The layout is decided per shard at construction, so a pool whose
+shards straddle the boundary holds both, and the striped store the same research item proposed was
+deliberately not ported: the shard already is the stripe. No option, no member and no behaviour change.
+
 ### Added
 
 - **A ceiling on concurrent borrows** (G-5): `MaxActiveObjects` caps how many objects may be lent out
@@ -316,6 +323,24 @@ interface member cannot keep an existing implementer compiling; the engine probe
   `IHayateEvictionPolicy<T>.ShouldEvict` — so widening `OnEvict` to take it would have forced a second
   implementation of the eviction rule at the call site, the duplication the code deliberately avoids.
   No existing signature, option or behaviour changed.
+- **A shard's slot array spaces its slots a cache line apart when it can afford to** (G-23): with
+  `EnableLockFreeStorage` on, the store's slot array is now laid out by capacity. At or below 64 slots
+  per shard the slots sit one cache line apart — 8 references on a 64-bit runtime, 16 on a 32-bit one —
+  and logical slot 0 starts one stride in, so two threads exchanging two different slots stop
+  ping-ponging the one line the compact array puts them in. Above the boundary the array stays compact,
+  because the spacing costs one reference per stride position and that cost grows with the array while
+  the contention it removes is bounded by the pool's concurrency rather than by the array's size. Both
+  layouts run the same protocol — one compare-exchange per take, return and claim — and differ only in
+  the mapping from a wrapper's logical slot to its array position, which every slot access applies
+  (the second-return guard, the return, the take scan, `Remove`, `GetAll`, `SnapshotHead` and the clear
+  drain), so `Count`, the idle sample, the removal semantics and the reload ceiling keep their meaning
+  on either layout. The decision is per shard and is taken once, when the pool is built, from that
+  shard's own capacity: a pool whose shards straddle the boundary holds both layouts at once, and the
+  array being sized once is already enforced by the reload ceiling that G-9 added. It applies to the
+  lock-free store alone — the lean path has its own storage — and it is not a new option, a new member
+  or a behaviour change: with the store off the borrow and return paths are untouched, and above the
+  boundary the layout is the identity, where the only thing left of it is one predicted branch on the
+  take scan.
 
 ### Changed
 
