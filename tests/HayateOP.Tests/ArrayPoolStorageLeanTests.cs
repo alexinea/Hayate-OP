@@ -104,10 +104,10 @@ public class ArrayPoolStorageLeanTests
     {
         using var pool = Builder(8).Build();
 
-        var item = await pool.AcquireAsync();
+        var item = await pool.AcquireAsync(TestContext.Current.CancellationToken);
         pool.Release(item);
 
-        Assert.Same(item, await pool.AcquireAsync());
+        Assert.Same(item, await pool.AcquireAsync(TestContext.Current.CancellationToken));
     }
 
     [Fact]

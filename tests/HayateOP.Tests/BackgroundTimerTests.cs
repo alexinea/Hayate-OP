@@ -68,6 +68,7 @@ public class BackgroundTimerTests
     [Fact(Timeout = 30_000)]
     public void AllBackgroundFeaturesDisabled_ShouldNotCreateAnyTimer()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("o3-all-off")
             .WithEnableEviction(false)
@@ -89,6 +90,7 @@ public class BackgroundTimerTests
     [Fact(Timeout = 30_000)]
     public void SingleBackgroundFeatureEnabled_ShouldCreateExactlyOneTimer()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("o3-eviction-only")
             .WithEnableEviction(true)
@@ -108,6 +110,7 @@ public class BackgroundTimerTests
     [Fact(Timeout = 30_000)]
     public void AllThreeFeaturesEnabled_ShouldStillCreateExactlyOneTimer()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("o3-all-on")
             .WithEnableEviction(true)
@@ -141,6 +144,7 @@ public class BackgroundTimerTests
     [Fact(Timeout = 30_000)]
     public void BackgroundEviction_ShouldStillRunThroughSharedTimer()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("o3-eviction-runs")
             .WithMinSize(3)
@@ -167,6 +171,7 @@ public class BackgroundTimerTests
     [Fact(Timeout = 30_000)]
     public void BackgroundIdleValidation_ShouldStillRunThroughSharedTimer()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new SwitchableValidatePolicy();
 
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -199,6 +204,7 @@ public class BackgroundTimerTests
     [Fact(Timeout = 30_000)]
     public void Dispose_ShouldReleaseTheSharedTimer()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("o3-dispose")
             .WithEnableEviction(true)

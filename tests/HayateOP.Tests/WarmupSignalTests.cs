@@ -59,12 +59,14 @@ public class WarmupSignalTests
     [Fact(Timeout = 30_000)]
     public void WaitForWarmup_DefaultIsFalse()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.False(new HayatePoolOptions().WaitForWarmup);
     }
 
     [Fact(Timeout = 30_000)]
     public void WaitForWarmup_False_ShouldKeepSynchronousPrewarm()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Zero regression: by default it does not wait -> prewarming is already complete when construction returns (synchronous prewarm)
         using var pool = BaseBuilder("m17-default").Build();
 
@@ -90,11 +92,11 @@ public class WarmupSignalTests
         var acquire = Task.Run(() => pool.Acquire());
 
         // During prewarm the borrow must block (the ready gate is in effect; the cold-pool bootstrap yields)
-        Assert.False(acquire.Wait(TimeSpan.FromMilliseconds(500)), "Acquire should not return before prewarm completes");
+        Assert.False(acquire.Wait(TimeSpan.FromMilliseconds(500), TestContext.Current.CancellationToken), "Acquire should not return before prewarm completes");
 
         // Release the gate -> the ready signal is set -> the borrow is released
         gate.Set();
-        Assert.True(acquire.Wait(TimeSpan.FromSeconds(15)), "Acquire should be released after prewarm completes");
+        Assert.True(acquire.Wait(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken), "Acquire should be released after prewarm completes");
         Assert.Equal(4, policy.CreatedCount);
     }
 
@@ -109,12 +111,12 @@ public class WarmupSignalTests
             .WithWaitForWarmup(true)
             .Build();
 
-        var pending = pool.AcquireAsync();
-        await Task.Delay(300);
+        var pending = pool.AcquireAsync(TestContext.Current.CancellationToken);
+        await Task.Delay(300, TestContext.Current.CancellationToken);
         Assert.False(pending.IsCompleted, "AcquireAsync should not complete before prewarm completes");
 
         gate.Set();
-        var item = await pending.WaitAsync(TimeSpan.FromSeconds(15));
+        var item = await pending.WaitAsync(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken);
         Assert.NotNull(item);
         Assert.Equal(4, policy.CreatedCount);
     }
@@ -141,6 +143,6 @@ public class WarmupSignalTests
             }
         });
 
-        Assert.True(outcome.Wait(TimeSpan.FromSeconds(15)), "Acquire must not block forever after prewarm fails");
+        Assert.True(outcome.Wait(TimeSpan.FromSeconds(15), TestContext.Current.CancellationToken), "Acquire must not block forever after prewarm fails");
     }
 }

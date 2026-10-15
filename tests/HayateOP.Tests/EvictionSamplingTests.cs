@@ -15,6 +15,7 @@ namespace DotNetCore.HayateOP.Tests
         [Fact(Timeout = 60000)]
         public void Eviction_WithBoundedSampleWindow_EventuallyEvictsExpired()
         {
+            TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
             using var pool = new HayatePoolBuilder<TestObject>()
                 .WithEnableEviction(true)
                 .WithEvictionInterval(1000)

@@ -101,6 +101,7 @@ public class ResetTimingTests
     [Fact(Timeout = 30_000)]
     public void Default_ShouldResetOnReturnAndNotOnBorrow()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The configuration every pool before 3.1 had: the object is already clean when it comes back out,
         // and the borrow path does no reset work at all.
         using var pool = Builder().Build();
@@ -124,6 +125,7 @@ public class ResetTimingTests
     [Fact(Timeout = 30_000)]
     public void ResetOnBorrow_ShouldLeaveTheObjectDirtyAcrossTheReturn()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The discriminating case: with the reset moved to the borrow side, a returned object still holds
         // what its borrower left in it. A switch that was accepted and then ignored would show a clean
         // object here.
@@ -152,6 +154,7 @@ public class ResetTimingTests
     [Fact(Timeout = 30_000)]
     public void BothSwitches_ShouldResetOnBothSidesOfTheCycle()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Legal on purpose: a borrower that may hand back an object it has already dirtied, and a next
         // borrower that must not see it either, is a real configuration — the price is two resets a cycle.
         using var pool = Builder()
@@ -169,6 +172,7 @@ public class ResetTimingTests
     [Fact(Timeout = 30_000)]
     public void NeitherSwitch_ShouldNeverReset()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Both off is not rejected either: it is what a pool of stateless payloads wants, and the object
         // keeps the state its borrower left in it all the way round.
         using var pool = Builder()
@@ -185,6 +189,7 @@ public class ResetTimingTests
     [Fact(Timeout = 30_000)]
     public void Switches_ShouldBeVisibleThroughGetOptions()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Builder()
             .WithResetOnReturn(false)
             .WithResetOnBorrow(true)
@@ -201,6 +206,7 @@ public class ResetTimingTests
     [Fact(Timeout = 30_000)]
     public void CustomPolicy_ShouldKeepItsOwnResetWhateverTheSwitchesSay()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // A custom IHayateObjectPolicy<T> owns OnRelease and OnAcquire. The switches reach the pool-driven
         // IHayateResettable reset only, so this policy's own reset survives ResetOnReturn = false — and the
         // object is reset exactly once, not once by the policy and once by the pool.
@@ -293,6 +299,7 @@ public class ResetTimingTests
     [Fact(Timeout = 30_000)]
     public void Lean_ShouldResetOnReturnWhateverTheCallOrder()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Same normalized result from both orders: the mode wins at build time, not at each setter, so
         // WithResetOnBorrow before WithLean is not a way to smuggle a borrow-side reset into a lean pool.
         foreach (var pool in new[]
@@ -325,6 +332,7 @@ public class ResetTimingTests
     [Fact(Timeout = 30_000)]
     public void UnboundedPool_ShouldAlwaysResetOnReturn()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // HayateUnboundedPool<T> takes no options object, so the switches have no route into it and its
         // timing is fixed. The defaults GetOptions() reports are a true statement about that behaviour.
         using var pool = new HayateUnboundedPool<ResettableBuffer>(4);

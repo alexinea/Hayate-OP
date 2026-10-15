@@ -40,6 +40,7 @@ public class AutoScalingTests
     [Fact(Timeout = 60000)]
     public void AcquireTimeout_ShouldTriggerForceScaleUp()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Arrange
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithEnableAutoScaling(true)
@@ -71,6 +72,7 @@ public class AutoScalingTests
     [Fact(Timeout = 60000)]
     public void ScaleDown_ShouldNotGoBelowMinSize()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Arrange
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithEnableAutoScaling(true)
@@ -102,6 +104,7 @@ public class AutoScalingTests
     [Fact(Timeout = 60000)]
     public void ScaleDown_ShouldActuallyShrinkWhenIdle()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // 2.4 behavior-change regression guard: before the fix, the scale-down branch had a mutually exclusive gate
         // (the pool required occupancy > 0.6 to allow, while the strategy required occupancy < ScaleDownThreshold to give a shrink target),
         // making scale-down dead code -- autoScaling only grew, never shrank. This test locks "scale-down really happens" with a strong assertion.

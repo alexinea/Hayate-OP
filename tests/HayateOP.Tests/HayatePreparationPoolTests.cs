@@ -73,8 +73,10 @@ public class HayatePreparationPoolTests
         var strategy = new Strategy { ReadyCheck = static _ => true };
         using var pool = inner.WithPreparation(strategy);
 
-        var conn = await pool.AcquireAsync();
-        Assert.True(conn.Connected is false or true); // any state, just delivered
+        var conn = await pool.AcquireAsync(TestContext.Current.CancellationToken);
+        // Delivered ready, so PrepareAsync never ran and Connected was never set: the state
+        // assertion below is the one the test name promises, not a tautology.
+        Assert.False(conn.Connected);
         Assert.Equal(1, strategy.ReadyCalls);
         Assert.Equal(0, strategy.PrepareCalls);
     }
@@ -97,7 +99,7 @@ public class HayatePreparationPoolTests
         first.Connected = false;
         inner.Release(first);
 
-        var conn = await pool.AcquireAsync();
+        var conn = await pool.AcquireAsync(TestContext.Current.CancellationToken);
         Assert.Same(first, conn);
         Assert.True(conn.Connected);
         Assert.Equal(1, strategy.PrepareCalls);
@@ -134,7 +136,7 @@ public class HayatePreparationPoolTests
         broken.BeyondRepair = true;
         inner.Release(broken);
 
-        var conn = await pool.AcquireAsync();
+        var conn = await pool.AcquireAsync(TestContext.Current.CancellationToken);
 
         Assert.NotSame(broken, conn);
         Assert.True(conn.Connected);
@@ -152,7 +154,7 @@ public class HayatePreparationPoolTests
         };
         using var pool = inner.WithPreparation(strategy, maxPrepareAttempts: 3);
 
-        var ex = await Assert.ThrowsAsync<HayatePoolPreparationException>(() => pool.AcquireAsync());
+        var ex = await Assert.ThrowsAsync<HayatePoolPreparationException>(() => pool.AcquireAsync(TestContext.Current.CancellationToken));
         Assert.IsType<InvalidOperationException>(ex.InnerException);
         Assert.Contains("3 consecutive", ex.Message);
     }
@@ -182,13 +184,14 @@ public class HayatePreparationPoolTests
         parked.Connected = false;
         inner.Release(parked);
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pool2.AcquireAsync());
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pool2.AcquireAsync(TestContext.Current.CancellationToken));
         Assert.Equal(1, discarded);
     }
 
     [Fact(Timeout = 30_000)]
     public void SynchronousAcquire_ShouldRunTheSameChain()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var inner = new HayateUnboundedPool<Connection>(maxIdle: 4);
         var strategy = new ReconnectingStrategy
         {
@@ -218,7 +221,7 @@ public class HayatePreparationPoolTests
         // The call must return at once and leave the wait on the returned task. Before the inner borrow
         // was awaited asynchronously this call blocked the calling thread for the whole acquire timeout.
         var stopwatch = Stopwatch.StartNew();
-        var pending = pool.AcquireAsync();
+        var pending = pool.AcquireAsync(TestContext.Current.CancellationToken);
         stopwatch.Stop();
 
         Assert.False(pending.IsCompleted);
@@ -238,7 +241,7 @@ public class HayatePreparationPoolTests
 
         var stopwatch = Stopwatch.StartNew();
         var ex = await Assert.ThrowsAsync<TimeoutException>(
-            () => pool.AcquireAsync(TimeSpan.FromMilliseconds(200)));
+            () => pool.AcquireAsync(TimeSpan.FromMilliseconds(200), TestContext.Current.CancellationToken));
         stopwatch.Stop();
 
         // The timeout reaches the inner pool instead of being dropped, so the wait converges on the
@@ -257,6 +260,7 @@ public class HayatePreparationPoolTests
     [Fact(Timeout = 30_000)]
     public void SyncBorrowWithTimeout_ShouldSurfaceTheInnerTimeout()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var inner = TakeTheOnlyObject(out var taken);
         using var pool = inner.WithPreparation(new ReconnectingStrategy());
 
@@ -274,6 +278,7 @@ public class HayatePreparationPoolTests
     [Fact(Timeout = 30_000)]
     public void SyncTimeoutMessage_ShouldCarryTheSuspectedLeakHint()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = TakeTheOnlyWaitingPool(out var taken, HayatePoolRejectPolicy.BlockTimeout);
 
         var ex = Assert.Throws<TimeoutException>(() => pool.Acquire(TimeSpan.FromMilliseconds(200)));
@@ -288,6 +293,7 @@ public class HayatePreparationPoolTests
     [Fact(Timeout = 30_000)]
     public void LeanTimeoutMessage_ShouldCarryTheSuspectedLeakHint()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = TakeTheOnlyWaitingPool(out var taken, HayatePoolRejectPolicy.BlockTimeout, lean: true);
 
         var ex = Assert.Throws<TimeoutException>(() => pool.Acquire(TimeSpan.FromMilliseconds(200)));
@@ -352,6 +358,7 @@ public class HayatePreparationPoolTests
     [Fact(Timeout = 30_000)]
     public void DiscardCallbackFailure_ShouldNotMaskThePreparationFailure()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var inner = new HayateUnboundedPool<Connection>(maxIdle: 4);
         var strategy = new ReconnectingStrategy
         {
@@ -369,6 +376,7 @@ public class HayatePreparationPoolTests
     [Fact(Timeout = 30_000)]
     public void OtherMembers_ShouldDelegateToTheInnerPool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var inner = new HayateUnboundedPool<Connection>(maxIdle: 4);
         using var pool = inner.WithPreparation(new Strategy());
 
@@ -390,6 +398,7 @@ public class HayatePreparationPoolTests
     [Fact(Timeout = 30_000)]
     public void InvalidConstruction_ShouldThrow()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var inner = new HayateUnboundedPool<Connection>(maxIdle: 4);
         Assert.Throws<ArgumentNullException>(() => inner.WithPreparation(null!));
         Assert.Throws<ArgumentOutOfRangeException>(() =>
@@ -421,14 +430,14 @@ public class HayatePreparationPoolTests
         };
         using var pool = inner.WithPreparation(strategy, onDiscard: static conn => conn.Dispose());
 
-        var conn = await pool.AcquireAsync();
+        var conn = await pool.AcquireAsync(TestContext.Current.CancellationToken);
         Assert.True(conn.Connected);
 
         // Simulate a dropped connection while parked, then borrow again: repaired transparently.
         conn.Connected = false;
         pool.Release(conn);
 
-        var next = await pool.AcquireAsync();
+        var next = await pool.AcquireAsync(TestContext.Current.CancellationToken);
         Assert.Same(conn, next);
         Assert.True(next.Connected);
     }

@@ -17,6 +17,7 @@ public class EvictTests
     [Fact(Timeout = 30_000)]
     public void EvictTouched_ShouldRemoveOnlyUsedIdleObjects()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m15-touched")
             .WithMinSize(2)
@@ -40,6 +41,7 @@ public class EvictTests
     [Fact(Timeout = 30_000)]
     public void EvictIdle_ShouldHonorMaxIdleTimeAndSkipBorrowed()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m15-idle")
             .WithMinSize(2)
@@ -68,6 +70,7 @@ public class EvictTests
     [Fact(Timeout = 30_000)]
     public void EvictExpired_ShouldRemoveObjectsBeyondMaxLifeTime()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m15-expired")
             .WithMinSize(2)
@@ -87,6 +90,7 @@ public class EvictTests
     [Fact(Timeout = 30_000)]
     public void EvictTouched_ShouldNotTouchBorrowedObjects()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m15-borrowed")
             .WithMinSize(1)
@@ -109,6 +113,7 @@ public class EvictTests
     [Fact(Timeout = 30_000)]
     public async Task Evict_ConcurrentWithBorrowRelease_ShouldStayConsistent()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m15-concurrent")
             .WithMinSize(4)
@@ -148,6 +153,7 @@ public class EvictTests
     [Fact(Timeout = 30_000)]
     public void Evict_UnknownReason_ShouldThrow()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m15-unknown")
             .WithMinSize(1)

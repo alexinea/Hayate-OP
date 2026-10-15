@@ -86,6 +86,7 @@ public class PoolPreWarmTests
     [Fact(Timeout = 30_000)]
     public void PreWarm_ShouldCreateUntilThePoolHoldsThatManyIdleObjects()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = BuildPool(policy, maxSize: 8);
 
@@ -103,6 +104,7 @@ public class PoolPreWarmTests
     [Fact(Timeout = 30_000)]
     public void PreWarm_ShouldNotCreateAnythingWhenTheIdleSetAlreadyCoversTheCount()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = BuildPool(policy, maxSize: 8);
 
@@ -115,6 +117,7 @@ public class PoolPreWarmTests
     [Fact(Timeout = 30_000)]
     public void PreWarm_ShouldCountOnlyIdleObjects()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = BuildPool(policy, maxSize: 8);
 
@@ -137,6 +140,7 @@ public class PoolPreWarmTests
     [Fact(Timeout = 30_000)]
     public void PreWarm_ShouldWarmToTheCeilingRatherThanFail()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = BuildPool(policy, maxSize: 4);
 
@@ -151,6 +155,7 @@ public class PoolPreWarmTests
     [Fact(Timeout = 30_000)]
     public void PreWarm_ShouldRejectANegativeCount()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = BuildPool(policy, maxSize: 4);
 
@@ -160,6 +165,7 @@ public class PoolPreWarmTests
     [Fact(Timeout = 30_000)]
     public void PreWarm_ShouldReportAFailedCreationInsteadOfSwallowingIt()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy { FailCreation = true };
         using var pool = BuildPool(policy, maxSize: 4, creationRetries: 1);
 
@@ -171,6 +177,7 @@ public class PoolPreWarmTests
     [Fact(Timeout = 30_000)]
     public void PreWarm_ShouldWarmTheLeanBuffer()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = BuildPool(policy, maxSize: 4, lean: true);
 
@@ -188,6 +195,7 @@ public class PoolPreWarmTests
     [Fact(Timeout = 30_000)]
     public void PreWarm_ShouldWarmTheUnboundedPool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var created = 0;
         var pool = new HayateUnboundedPool<TestObject>(maxIdle: 8, () =>
         {
@@ -228,6 +236,7 @@ public class PoolPreWarmTests
     [Fact(Timeout = 30_000)]
     public void PreWarm_ShouldReachTheInnerPoolThroughThePreparationDecorator()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         var inner = BuildPool(policy, maxSize: 8);
         using var pool = inner.WithPreparation(new AlwaysReadyStrategy());
@@ -250,14 +259,15 @@ public class PoolPreWarmTests
         // Warming creates objects, it does not prepare them: every borrow still runs the readiness check.
         Assert.Equal(0, strategy.ReadyCalls);
 
-        await pool.AcquireAsync();
-        await pool.AcquireAsync();
+        await pool.AcquireAsync(TestContext.Current.CancellationToken);
+        await pool.AcquireAsync(TestContext.Current.CancellationToken);
         Assert.Equal(2, strategy.ReadyCalls);
     }
 
     [Fact(Timeout = 30_000)]
     public async Task PreWarm_ShouldStayWithinTheCeilingUnderConcurrentCalls()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         const int ceiling = 16;
         var policy = new CountingPolicy();
         using var pool = BuildPool(policy, maxSize: ceiling);
@@ -281,6 +291,7 @@ public class PoolPreWarmTests
     [Fact(Timeout = 30_000)]
     public void PreWarm_ShouldNotChangeTheConfigurationItWarms()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = BuildPool(policy, maxSize: 8);
 
@@ -296,6 +307,7 @@ public class PoolPreWarmTests
     [Fact(Timeout = 30_000)]
     public void PreWarm_ShouldReachTheSpecializedPools()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(maxPoolSize: 8);
 
         Assert.Equal(4, pool.PreWarm(4));

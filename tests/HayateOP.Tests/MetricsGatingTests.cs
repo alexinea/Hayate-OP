@@ -56,6 +56,7 @@ public class MetricsGatingTests
     [Fact(Timeout = 30_000)]
     public void MetricsOff_ShouldStillCountBorrowsButNotTheGatedCounters()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("gating-off")
             .WithMinSize(4)
@@ -95,6 +96,7 @@ public class MetricsGatingTests
     [Fact(Timeout = 30_000)]
     public void MetricsOn_ShouldAdvanceTheGatedCounters()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("gating-on")
             .WithMinSize(4)
@@ -127,6 +129,7 @@ public class MetricsGatingTests
     [Fact(Timeout = 30_000)]
     public void TotalMissed_ShouldFollowTheMetricsGate()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // An empty pool under the Abort policy rejects immediately, which is the cheapest deterministic
         // way to produce a miss. Cold boot does not run on this branch, so nothing is ever created.
         using var metricsOff = new HayatePoolBuilder<TestObject>()
@@ -155,6 +158,7 @@ public class MetricsGatingTests
     [Fact(Timeout = 30_000)]
     public void LeakCounters_ShouldFollowTheLeakDetectionGate_NotMetrics()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("gating-leak")
             .WithMinSize(1)
@@ -184,6 +188,7 @@ public class MetricsGatingTests
     [Fact(Timeout = 30_000)]
     public void AllocationCounters_ShouldFollowTheAllocationTrackingGate_NotMetrics()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var trackingOff = new HayatePoolBuilder<TestObject>()
             .WithPoolName("gating-alloc-off")
             .WithMaxSize(8)
@@ -222,6 +227,7 @@ public class MetricsGatingTests
     [Fact(Timeout = 30_000)]
     public void DiagnosticsOff_ShouldZeroEveryCounterIncludingTotalAcquired()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The master switch is the one configuration in which the borrow-count contract is not kept:
         // the point of the switch is that no bookkeeping survives on the borrow/return path at all.
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -276,6 +282,7 @@ public class MetricsGatingTests
     [Fact(Timeout = 30_000)]
     public void DiagnosticsOn_ShouldStillWriteTotalAcquiredWithMetricsOff()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The other side of the same coin: the master switch is what gates TotalAcquired, so the
         // metrics switch alone must leave the documented contract untouched.
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -299,6 +306,7 @@ public class MetricsGatingTests
     [Fact(Timeout = 30_000)]
     public void DiagnosticsOff_ShouldSuppressThePerOperationTrace()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var quiet = new CountingLogger();
         using (var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("gating-trace-off")
@@ -341,6 +349,7 @@ public class MetricsGatingTests
     [Fact(Timeout = 30_000)]
     public void DiagnosticsOff_ShouldNotAllocateOnTheWarmedBorrowPath()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The diagnostic surface is measured on the borrow phase alone, because the return phase carries
         // one allocation the switches do not own: every return appends a fresh LinkedListNode to the
         // shard free list. Holding the returns outside the measured window isolates what the master
@@ -429,6 +438,7 @@ public class MetricsGatingTests
     [Fact(Timeout = 30_000)]
     public void DiagnosticsOff_WithACustomMetricsSink_ShouldFailFast()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // A sink that can never be called is a configuration mistake, not a silent no-op: the same
         // rule the metrics switch has enforced since 2.2, extended to the master switch that closes
         // metrics with it. The message names the switch that has to be re-opened.

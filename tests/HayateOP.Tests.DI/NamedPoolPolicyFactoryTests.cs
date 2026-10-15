@@ -90,7 +90,7 @@ public class NamedPoolPolicyFactoryTests
     /// contract the interface states.</summary>
     private sealed class NullReturningPolicyFactory : IHayateObjectPolicyFactory<Tagged>
     {
-        public IHayateObjectPolicy<Tagged> Create(string poolName) => null;
+        public IHayateObjectPolicy<Tagged> Create(string poolName) => null!;
     }
 
     [Fact]

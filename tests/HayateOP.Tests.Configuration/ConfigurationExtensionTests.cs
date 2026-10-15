@@ -11,7 +11,7 @@ namespace HayateOP.Tests.Configuration
         [Fact]
         public void AddHayatePoolFromConfiguration_ShouldBindGlobalConfig()
         {
-            var configData = new Dictionary<string, string>
+            var configData = new Dictionary<string, string?>
             {
                 {"HayatePool:Global:MinPoolSize", "10"},
                 {"HayatePool:Global:MaxPoolSize", "100"}
@@ -35,7 +35,7 @@ namespace HayateOP.Tests.Configuration
         [Fact]
         public void AddHayatePool_ShouldBindPoolSpecificConfig()
         {
-            var configData = new Dictionary<string, string>
+            var configData = new Dictionary<string, string?>
             {
                 {"HayatePool:Global:MinPoolSize", "5"},
                 {"HayatePool:Pools:TestObject:MinPoolSize", "20"},
@@ -62,7 +62,7 @@ namespace HayateOP.Tests.Configuration
             // Regression (default-value misjudgment): when the pool config is set explicitly to the same value as the C# default (MinPoolSize=5,
             // i.e. DEFAULT_MIN_POOL_SIZE), the old implementation judged explicitness by "value != default",
             // which misjudged it as "not configured" and let the global value 30 take effect. Correct behavior: the pool config takes precedence, Min=5.
-            var configData = new Dictionary<string, string>
+            var configData = new Dictionary<string, string?>
             {
                 {"HayatePool:Global:MinPoolSize", "30"},
                 {"HayatePool:Pools:TestObject:MinPoolSize", "5"}

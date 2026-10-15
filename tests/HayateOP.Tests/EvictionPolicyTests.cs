@@ -118,6 +118,7 @@ public class EvictionPolicyTests
     [Fact(Timeout = 60_000)]
     public void CustomPolicy_ShouldKeepObjectsTheBuiltInRuleWouldEvict()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Every object here outlives the 100 ms lifetime, so the built-in rule would empty the pool
         // within one eviction cycle. The policy says "keep", and the policy decides.
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -145,6 +146,7 @@ public class EvictionPolicyTests
     [Fact(Timeout = 60_000)]
     public void CustomPolicy_ShouldEvictObjectsNoTimeRuleWouldEvict()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // No time-based criterion fires here — lifetime, idle time and soft-idle time are all an hour —
         // so anything that leaves this pool left it because the policy said so.
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -184,6 +186,7 @@ public class EvictionPolicyTests
     [Fact(Timeout = 60_000)]
     public void Policy_ShouldReceiveTheMeasuredCandidate()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CapturingPolicy();
 
         using var pool = new HayatePoolBuilder<TestObject>()

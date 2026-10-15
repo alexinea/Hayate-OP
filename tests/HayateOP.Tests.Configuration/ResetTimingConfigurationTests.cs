@@ -56,9 +56,9 @@ namespace HayateOP.Tests.Configuration
         /// halves of a cycle, and <c>CreateOnDemand</c> so an empty pool hands out a new object instead of
         /// making the case wait out a timeout for a return that will never come.
         /// </summary>
-        private static Dictionary<string, string> DeterministicGlobal()
+        private static Dictionary<string, string?> DeterministicGlobal()
         {
-            return new Dictionary<string, string>
+            return new Dictionary<string, string?>
             {
                 { "HayatePool:Global:ShardCount", "1" },
                 { "HayatePool:Global:MinPoolSize", "0" },
@@ -72,6 +72,7 @@ namespace HayateOP.Tests.Configuration
         [Fact(Timeout = 30_000)]
         public void Configuration_ShouldReachThePoolsResetTiming()
         {
+            TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
             var configData = DeterministicGlobal();
             configData["HayatePool:Pools:ResettableBuffer:ResetOnReturn"] = "false";
             configData["HayatePool:Pools:ResettableBuffer:ResetOnBorrow"] = "true";
@@ -111,6 +112,7 @@ namespace HayateOP.Tests.Configuration
         [Fact(Timeout = 30_000)]
         public void PoolThatAsksForNothing_ShouldKeepTheHistoricalTiming()
         {
+            TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
             var config = new ConfigurationBuilder().AddInMemoryCollection(DeterministicGlobal()).Build();
 
             var services = new ServiceCollection();
@@ -134,6 +136,7 @@ namespace HayateOP.Tests.Configuration
         [Fact(Timeout = 30_000)]
         public void NamedPools_ShouldEachTakeTheirTimingFromConfiguration()
         {
+            TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
             var configData = DeterministicGlobal();
             configData["HayatePool:Pools:return-side:ResetOnReturn"] = "true";
             configData["HayatePool:Pools:return-side:ResetOnBorrow"] = "false";
@@ -172,6 +175,7 @@ namespace HayateOP.Tests.Configuration
         [Fact(Timeout = 30_000)]
         public void CallerPolicyInTheContainer_ShouldBePinnedAndKeepItsOwnReset()
         {
+            TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
             // A caller's policy is pinned, so the switches do not reach it, and it is the policy that
             // runs — not the options-derived default.
             var configData = DeterministicGlobal();

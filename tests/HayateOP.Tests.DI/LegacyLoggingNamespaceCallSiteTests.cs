@@ -40,8 +40,8 @@ public class LegacyLoggingNamespaceCallSiteTests
 
             public bool IsEnabled(LogLevel logLevel) => logLevel >= _minimum;
 
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception,
-                Func<TState, Exception, string> formatter) => _owner.Messages.Add(formatter(state, exception));
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter) => _owner.Messages.Add(formatter(state, exception));
         }
 
         private sealed class Nop : IDisposable

@@ -398,6 +398,7 @@ public class PoolPresetTests
     [MemberData(nameof(AllPresets))]
     public void Presets_ShouldLandTheConfigurationTheyDocument(HayatePoolPreset preset)
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         AssertOptionsEquivalent(HandWritten(preset), HayatePoolPresets.Create(preset));
     }
 
@@ -405,6 +406,7 @@ public class PoolPresetTests
     [MemberData(nameof(AllPresets))]
     public void Presets_ShouldOwnOnlyTheFieldSetTheyDocument(HayatePoolPreset preset)
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var pristine = new HayatePoolOptions().UsePreset(preset);
 
         var primed = new HayatePoolOptions();
@@ -445,6 +447,7 @@ public class PoolPresetTests
     [MemberData(nameof(AllPresets))]
     public void Presets_ShouldAgreeAcrossEveryEntryPoint(HayatePoolPreset preset)
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var expected = HayatePoolPresets.Create(preset);
 
         AssertOptionsEquivalent(expected, new HayatePoolOptions().UsePreset(preset));
@@ -461,6 +464,7 @@ public class PoolPresetTests
     [MemberData(nameof(AllPresets))]
     public void Presets_ShouldBeRefinableByALaterFeatureCall(HayatePoolPreset preset)
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPreset(preset)
             .WithMaxSize(200)
@@ -482,6 +486,7 @@ public class PoolPresetTests
     [Fact(Timeout = 30_000)]
     public void Presets_ShouldBeComposableAcrossEachOther()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The second preset owns its own field set only: the zero floor and the reject policy that go with
         // it come from the first preset and stay, while leak detection — owned by both — follows the last
         // one applied.
@@ -502,6 +507,7 @@ public class PoolPresetTests
     [Fact(Timeout = 30_000)]
     public void Presets_ShouldHandOutIndependentInstances()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var first = HayatePoolPresets.Create(HayatePoolPreset.HighThroughput);
         first.MaxPoolSize = 123;
         first.EnableLeakDetection = true;
@@ -516,6 +522,7 @@ public class PoolPresetTests
     [Fact(Timeout = 30_000)]
     public void Presets_ShouldRejectAnUnknownValue()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var unknown = (HayatePoolPreset)99;
 
         Assert.Throws<ArgumentOutOfRangeException>(() => { HayatePoolPresets.Create(unknown); });
@@ -527,6 +534,7 @@ public class PoolPresetTests
     [Fact(Timeout = 30_000)]
     public void Presets_ShouldRejectANullCustomPreset()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Throws<ArgumentNullException>(() =>
         {
             new HayatePoolBuilder<TestObject>().WithPreset((HayatePoolOptions)null!);
@@ -537,6 +545,7 @@ public class PoolPresetTests
     [Fact(Timeout = 30_000)]
     public void CustomPreset_ShouldBeAppliedLikeACatalogueEntry()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var custom = new HayatePoolOptions { MaxPoolSize = 128 }.UseFullProfile();
 
         using var pool = new HayatePoolBuilder<TestObject>().WithPreset(custom).Build();
@@ -553,6 +562,7 @@ public class PoolPresetTests
     [Fact(Timeout = 30_000)]
     public void MemoryConstrained_ShouldRoundTripWithAZeroFloor()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The zero floor and CreateOnDemand are a pair: on its own the floor would leave the second
         // borrower waiting out the acquire timeout instead of being served by a fresh object.
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -577,6 +587,7 @@ public class PoolPresetTests
     [Fact(Timeout = 30_000)]
     public void ConnectionPool_ShouldHandOutOnlyAHandleThatValidates()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<ValidatableItem>()
             .WithPreset(HayatePoolPreset.ConnectionPool)
             .WithMinSize(0)

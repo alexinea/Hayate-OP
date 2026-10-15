@@ -29,6 +29,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void GetOrCreate_ShouldReturnTheSameInstanceOnEveryCall()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var catalog = new HayateSharedPoolRegistry();
 
         var first = catalog.GetOrCreate<TestObject>();
@@ -41,6 +42,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void GetOrCreate_ShouldKeepOnePoolPerElementType()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var catalog = new HayateSharedPoolRegistry();
 
         var a = catalog.GetOrCreate<TestObject>();
@@ -55,6 +57,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void GetOrCreate_ShouldApplyTheConfigurationOnlyToTheCallThatCreatesThePool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var catalog = new HayateSharedPoolRegistry();
         var callbacks = 0;
 
@@ -71,6 +74,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void GetOrCreate_ShouldKeepTheOptionsOfEachElementTypeIndependent()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var catalog = new HayateSharedPoolRegistry();
 
         catalog.GetOrCreate<TestObject>(o => { o.ShardCount = 1; o.MinPoolSize = 1; o.MaxPoolSize = 4; });
@@ -84,6 +88,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void GetOrCreateNamed_ShouldAllowSeveralNamedPoolsPerElementType()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var catalog = new HayateSharedPoolRegistry();
 
         var primary = catalog.GetOrCreateNamed<TestObject>("primary");
@@ -98,6 +103,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void GetOrCreate_ShouldTreatTheDefaultNameAsTheUnnamedPool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var catalog = new HayateSharedPoolRegistry();
 
         var unnamed = catalog.GetOrCreate<TestObject>();
@@ -110,6 +116,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void TryGet_ShouldNeverCreateThePool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var catalog = new HayateSharedPoolRegistry();
 
         Assert.False(catalog.TryGet<TestObject>(out var missing));
@@ -125,6 +132,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void TryGet_ShouldReportAnEntryOfAnotherElementTypeAsAbsent()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var catalog = new HayateSharedPoolRegistry();
         using var foreign = new HayatePoolBuilder<OtherObject>().Build();
 
@@ -139,6 +147,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void TryGet_ShouldReportUnusableNamesAsAbsent()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var catalog = new HayateSharedPoolRegistry();
         catalog.GetOrCreate<TestObject>();
 
@@ -151,6 +160,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void Remove_ShouldDisposeThePoolAndAllowRecreation()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var catalog = new HayateSharedPoolRegistry();
         var pool = catalog.GetOrCreate<TrackedProbe>(o =>
         {
@@ -179,6 +189,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void Remove_ShouldRefuseNamesThatAreNotHeld()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var catalog = new HayateSharedPoolRegistry();
 
         Assert.False(catalog.Remove<TestObject>());
@@ -196,6 +207,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void Clear_ShouldReleaseOwnPoolsOnly()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var registry = new HayateObjectPoolRegistry();
         // A pool the catalog never created, holding an object the catalog must not destroy.
         using var foreign = new HayatePoolBuilder<TrackedProbe>()
@@ -234,6 +246,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void Dispose_ShouldEmptyTheCatalogAndRejectFurtherCreation()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var catalog = new HayateSharedPoolRegistry();
         catalog.GetOrCreate<TestObject>();
 
@@ -250,6 +263,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void Registry_ShouldExposeTheSharedPoolsForManagementEnumeration()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var catalog = new HayateSharedPoolRegistry();
 
         var pool = catalog.GetOrCreateNamed<TestObject>("primary");
@@ -264,6 +278,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void GetOrCreate_ShouldBuildExactlyOnePoolUnderConcurrentFirstCalls()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var catalog = new HayateSharedPoolRegistry();
         var results = new IHayateObjectPool<TestObject>?[8];
 
@@ -297,6 +312,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void GetOrCreateNamed_ShouldRejectNamesThatCannotBeAddressed()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var catalog = new HayateSharedPoolRegistry();
 
         Assert.Throws<ArgumentNullException>(() => catalog.GetOrCreateNamed<TestObject>(null!));
@@ -308,6 +324,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void GetOrCreate_ShouldAcceptAnAbsentConfigurationCallback()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var catalog = new HayateSharedPoolRegistry();
 
         // A null callback means "no configuration", the same pool GetOrCreate<T>() returns — this is the
@@ -321,6 +338,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void SharedPool_ShouldServeBorrowAndReleaseLikeAnyOtherPool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var catalog = new HayateSharedPoolRegistry();
         var pool = catalog.GetOrCreate<TrackedProbe>(o =>
         {
@@ -348,6 +366,7 @@ public class SharedPoolTests
     [Fact(Timeout = 30_000)]
     public void Shared_ShouldHandOutTheProcessWidePool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         try
         {
             var fromEntryPoint = HayatePool.Shared<ProcessWideProbe>();

@@ -56,9 +56,9 @@ namespace HayateOP.Tests.Configuration
         /// halves of a cycle, and <c>CreateOnDemand</c> so an empty pool hands out a new object instead of
         /// making the case wait out a timeout for a return that will never come.
         /// </summary>
-        private static Dictionary<string, string> DeterministicGlobal()
+        private static Dictionary<string, string?> DeterministicGlobal()
         {
-            return new Dictionary<string, string>
+            return new Dictionary<string, string?>
             {
                 { "HayatePool:Global:ShardCount", "1" },
                 { "HayatePool:Global:MinPoolSize", "0" },

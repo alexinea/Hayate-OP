@@ -19,6 +19,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void DefaultCapacityTiers_ShouldMatchP89OpDefaults()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // P89OP: DefaultMinimumMemoryStreamCapacity = 4KB, DefaultMaximumMemoryStreamCapacity = 512KB.
         Assert.Equal(4 * 1024, MemoryStreamPool.DefaultMinimumMemoryStreamCapacity);
         Assert.Equal(512 * 1024, MemoryStreamPool.DefaultMaximumMemoryStreamCapacity);
@@ -35,6 +36,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void StreamPool_ShouldCreateStreamsAtMinimumCapacity()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new MemoryStreamPool(4);
 
         using var stream = pool.GetObject();
@@ -46,6 +48,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void StreamPool_UsingShouldReturnAndResetTheStream()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new MemoryStreamPool(4);
 
         PooledMemoryStream borrowed;
@@ -65,6 +68,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void StreamPool_DisposeShouldReturnExactlyOnce()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new MemoryStreamPool(4);
 
         var stream = pool.GetObject();
@@ -82,6 +86,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void StreamPool_ShouldReuseReturnedStream()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new MemoryStreamPool(4);
 
         var first = pool.GetObject();
@@ -93,6 +98,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void StreamPool_OversizedStreamShouldBeDestroyedOnReturn()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new MemoryStreamPool(4);
         // A small window makes an oversized stream cheap to produce.
         pool.MinimumMemoryStreamCapacity = 64;
@@ -117,6 +123,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void StreamPool_TighteningMaximumShouldClearThePool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new MemoryStreamPool(4);
 
         var stream = pool.GetObject();
@@ -132,6 +139,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void StreamPool_StandaloneStreamShouldDisposeLikeAMemoryStream()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // A stream created directly owns nobody: disposing it is a real disposal, not a routed return.
         var standalone = new PooledMemoryStream(16);
         standalone.Dispose();
@@ -141,6 +149,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void StreamPool_SharedInstanceShouldServeConcurrentBorrows()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The shared singleton behaves like any pool: two concurrent borrows yield two distinct streams.
         var a = MemoryStreamPool.Instance.GetObject();
         var b = MemoryStreamPool.Instance.GetObject();
@@ -154,6 +163,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void StringBuilderPool_UsingShouldReturnAndClearTheBuilder()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         PooledStringBuilder borrowed;
@@ -173,6 +183,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void StringBuilderPool_GetObjectWithStringShouldPrefill()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         using var sb = pool.GetObject("order: 42");
@@ -182,6 +193,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void StringBuilderPool_GetObjectWithNullShouldGiveAnEmptyBuilder()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         using var sb = pool.GetObject(null);
@@ -191,6 +203,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void StringBuilderPool_DisposeShouldReturnExactlyOnce()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         var sb = pool.GetObject();
@@ -208,6 +221,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void StringBuilderPool_ShouldReuseReturnedBuilder()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         var first = pool.GetObject();
@@ -219,6 +233,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void StringBuilderPool_OversizedBuilderShouldBeDestroyedOnReturn()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
         // A small window makes an oversized builder cheap to produce.
         pool.MinimumStringBuilderCapacity = 64;
@@ -240,6 +255,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void StringBuilderPool_TighteningMaximumShouldClearThePool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         var sb = pool.GetObject();
@@ -255,6 +271,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void StringBuilderPool_StandaloneInstanceShouldNotRouteAReturn()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // An instance created directly owns nobody: disposing it does nothing.
         var standalone = new PooledStringBuilder(16);
         standalone.StringBuilder.Append("keep me");
@@ -265,6 +282,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void SharedStringBuilder_ShouldSerializeAccessAndClearOnRelease()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         string content;
         using (var scope = SharedStringBuilder.Acquire())
         {
@@ -284,6 +302,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void SharedStringBuilder_ScopeDisposeShouldBeOnceOnly()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var scope = SharedStringBuilder.Acquire();
         scope.StringBuilder.Append("once");
         scope.Dispose();
@@ -305,10 +324,10 @@ public class SpecializedPoolTests
             // The shared builder is exclusively held: this acquires only after the first scope released.
             using var scope = SharedStringBuilder.Acquire();
             secondDone.Set();
-        });
+        }, TestContext.Current.CancellationToken);
         first.Dispose();
 
-        Assert.True(second.Wait(TimeSpan.FromSeconds(20)), "The second acquirer should get in after the first released.");
+        Assert.True(second.Wait(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken), "The second acquirer should get in after the first released.");
         second.Dispose();
         secondDone.Dispose();
     }
@@ -316,6 +335,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void SharedStringBuilder_BuildShouldReturnTheContentAndLeaveAnEmptyBuilder()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var content = SharedStringBuilder.Build(sb => sb.Append("order: ").Append(42));
         Assert.Equal("order: 42", content);
 
@@ -326,6 +346,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void SharedStringBuilder_BuildShouldReleaseTheLockWhenTheCallbackThrows()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Throws<InvalidOperationException>(() =>
             SharedStringBuilder.Build(_ => throw new InvalidOperationException("boom")));
 
@@ -337,6 +358,7 @@ public class SpecializedPoolTests
     [Fact(Timeout = 30_000)]
     public void SharedStringBuilder_DisposedScopeShouldThrow()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var scope = SharedStringBuilder.Acquire();
         scope.Dispose();
 

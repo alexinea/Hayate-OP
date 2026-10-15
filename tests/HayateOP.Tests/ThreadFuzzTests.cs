@@ -32,6 +32,7 @@ public class ThreadFuzzTests
     [Fact(Timeout = 120000)]
     public async Task Fuzz_SyncAcquireRelease_NoDeadlockNoLeak()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         const int workers = 8;
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("fuzz-sync")
@@ -66,6 +67,7 @@ public class ThreadFuzzTests
     [Fact(Timeout = 120000)]
     public async Task Fuzz_AsyncAcquireRelease_NoDeadlockNoLeak()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         const int workers = 8;
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("fuzz-async")
@@ -98,6 +100,7 @@ public class ThreadFuzzTests
     [Fact(Timeout = 120000)]
     public async Task Fuzz_MixedSyncAsyncWithScalingAndReaders_StaysWithinBounds()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         const int workers = 8;
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("fuzz-mixed-scaling")
@@ -180,7 +183,7 @@ public class ThreadFuzzTests
                 await Task.Delay(30);
                 pool.Clear();
             }
-        });
+        }, TestContext.Current.CancellationToken);
 
         await RunWorkersAsync(workers, async _ =>
         {

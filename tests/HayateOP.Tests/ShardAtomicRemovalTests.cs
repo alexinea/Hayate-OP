@@ -206,6 +206,7 @@ public class ShardAtomicRemovalTests
     [Fact(Timeout = 60000)]
     public void T04_ConcurrentAddRemove_NoObjectsLost()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         const int Total = 1000;
         const int Rounds = 3;
 
@@ -269,6 +270,7 @@ public class ShardAtomicRemovalTests
     [Fact(Timeout = 60000)]
     public void T04_BorrowReleaseBorrow_ReturnsSameInstance()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithEnableValidation(false)
             .WithValidateOnBorrow(true)
@@ -307,6 +309,7 @@ public class ShardAtomicRemovalTests
     [Fact(Timeout = 60000)]
     public void T04_HighConcurrency_BorrowedObjectNeverDestroyed()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new BorrowedDestroyDetector<TestObject>();
 
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -406,6 +409,7 @@ public class ShardAtomicRemovalTests
     [Fact(Timeout = 60000)]
     public void T04_Snapshot_GetAll_NeverTornUnderConcurrency()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         const int Total = 500;
         const int SampleCount = 3000;
 
@@ -510,6 +514,7 @@ public class ShardAtomicRemovalTests
     [Fact(Timeout = 60000)]
     public void T04_Snapshot_Invariant_HoldsUnderConcurrency()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         const int Capacity = 64;
         const int WorkerRounds = 3000;
 

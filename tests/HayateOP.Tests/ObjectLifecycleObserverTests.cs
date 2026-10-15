@@ -155,6 +155,7 @@ public class ObjectLifecycleObserverTests
     [InlineData(HayateEvictReason.Expired)]
     public void OnEvict_ShouldReportEvicted_WhenThePoolEvictsByCategory(HayateEvictReason reason)
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         var builder = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-evict-" + reason)
@@ -186,6 +187,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void OnEvict_ShouldReportEvicted_WhenTheFrontTierSweepRemovesTheObject()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-evict-front-tier")
@@ -214,6 +216,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 60_000)]
     public void OnEvict_ShouldReportEvicted_WhenTheBackgroundRunRetiresIdleObjects()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-background-evict")
@@ -237,6 +240,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 60_000)]
     public void OnEvict_ShouldReportEvicted_WhenTheBackgroundRunSweepsTheFrontTier()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-background-tier")
@@ -267,6 +271,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void OnValidationFailed_ShouldFire_WhenTheBorrowPathRejectsAnObject()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy { FailFirstValidations = 1 };
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-validate-borrow")
@@ -306,7 +311,7 @@ public class ObjectLifecycleObserverTests
             .WithEnableAutoScaling(false)
             .Build();
 
-        var obj = await pool.AcquireAsync();
+        var obj = await pool.AcquireAsync(TestContext.Current.CancellationToken);
 
         Assert.NotNull(obj);
         Assert.Single(policy.ValidationFailures);
@@ -317,6 +322,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void OnValidationFailed_ShouldFire_WhenTheReturnPathRejectsAnObject()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-validate-return")
@@ -343,6 +349,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 60_000)]
     public void OnValidationFailed_ShouldFire_WhenTheIdleSweepFindsAnInvalidObject()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-validate-idle")
@@ -370,6 +377,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void OnEvict_ShouldReportReturnRejected_WhenThePolicyRefusesTheReturn()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy { AcceptReturn = false };
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-return-rejected")
@@ -393,6 +401,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void OnEvict_ShouldReportCapacityOverflow_WhenTheSoftCeilingIsReached()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-soft-ceiling")
@@ -420,6 +429,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void OnEvict_ShouldReportCapacityOverflow_WhenTheShardHasNoRoom()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-shard-full")
@@ -447,6 +457,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void OnEvict_ShouldReportRotated_WhenAnExpiredObjectIsReplacedOnBorrow()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-rotated")
@@ -476,6 +487,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void OnEvict_ShouldReportAbandoned_WhenRecoveryReclaimsALeakedObject()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-abandoned")
@@ -504,6 +516,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 60_000)]
     public void OnEvict_ShouldReportScaledDown_WhenThePoolShrinks()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-scaled-down")
@@ -534,6 +547,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void OnEvict_ShouldReportMisuse_WhenAForeignObjectIsReturned()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-misuse")
@@ -557,6 +571,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void OnEvict_ShouldReportMisuse_WhenAnObjectIsReturnedTwice()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-double-return")
@@ -590,6 +605,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void OnEvict_ShouldReportPoolCleared_WhenThePoolIsCleared()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-cleared")
@@ -615,6 +631,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void OnEvict_ShouldReportPoolCleared_WhenThePoolIsDisposed()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-disposed")
@@ -640,6 +657,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void OnEvict_ShouldReportPoolCleared_WhenTheFrontTierDrainFindsNoRoom()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-tier-drain-overflow")
@@ -693,6 +711,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public async Task OnEvict_ShouldReportPoolCleared_WhenThePoolIsDisposedAsynchronously()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-disposed-async")
@@ -717,6 +736,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void Observer_ShouldBeCalledBeforeTheObjectIsTornDown()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy { AcceptReturn = false };
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-ordering")
@@ -738,6 +758,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void ThrowingObserver_ShouldNotBreakTheDestruction()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy { AcceptReturn = false, ThrowFromObserver = true };
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-throwing-observer")
@@ -762,6 +783,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void APolicyWithoutTheObserverContract_ShouldBeUnaffected()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new PlainPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-plain-policy")
@@ -789,6 +811,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void OnEvict_ShouldReportReturnRejected_OnTheLeanPath()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy { AcceptReturn = false };
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-lean-rejected")
@@ -811,6 +834,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void OnEvict_ShouldReportCapacityOverflow_OnTheLeanPath()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-lean-overflow")
@@ -840,6 +864,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void OnEvict_ShouldReportPoolCleared_OnTheLeanPath()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-lean-cleared")
@@ -864,6 +889,7 @@ public class ObjectLifecycleObserverTests
     [Fact(Timeout = 30_000)]
     public void OnValidationFailed_ShouldNeverFire_OnTheLeanPath()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new ObservingPolicy { FailFirstValidations = 1 };
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g22-lean-validation")

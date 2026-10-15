@@ -123,7 +123,7 @@ namespace DotNetCore.HayateOP.Tests
         // Both constructors take the same six arguments in the same order, so the one array fits either and
         // the per-invocation cost of passing it cannot differ between the two measurements. The logger is left
         // null on purpose: the constructor only stores it, and nothing here calls a shard.
-        private static object[] Arguments() => new object[] { new HayatePoolOptions(), 0, 16, null, false, null };
+        private static object?[] Arguments() => new object?[] { new HayatePoolOptions(), 0, 16, null, false, null };
 
         /// <summary>
         /// The padding in bytes: the average of the per-construction difference between what a shard costs
@@ -137,7 +137,7 @@ namespace DotNetCore.HayateOP.Tests
         /// each, so subtracting them inside one iteration cancels it. What is left is stable to a fraction
         /// of a byte: 128.000 over repeated runs on .NET 8 and .NET 10, against 64.000 for either half alone.
         /// </remarks>
-        private static double PaddingBytes(ConstructorInfo shard, ConstructorInfo control, object[] arguments)
+        private static double PaddingBytes(ConstructorInfo shard, ConstructorInfo control, object?[] arguments)
         {
             const int Samples = 512;
             var keep = new object[Samples * 2];
@@ -190,7 +190,7 @@ namespace DotNetCore.HayateOP.Tests
             // empty-array branch, so mirroring them costs the control no allocation and the paired
             // difference still measures the padding alone.
             private readonly bool _useLockFreeStore;
-            private readonly object[] _slots;
+            private readonly object?[] _slots;
             private readonly int[] _freeNext;
             private long _freeHead;
             private int _scanCursor;
@@ -207,7 +207,7 @@ namespace DotNetCore.HayateOP.Tests
 
             private readonly bool _prefersAsyncDisposal;
             private SpinLock _spareLock;
-            private object _spareHead;
+            private object? _spareHead;
             private int _spareCount;
 
             public int Index { get; }

@@ -38,6 +38,7 @@ namespace DotNetCore.HayateOP.Tests
         [Fact(Timeout = 60000)]
         public void MaxLifeTime_ShouldEvictExpiredObjects()
         {
+            TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
             using var pool = new HayatePoolBuilder<TestObject>()
                 .WithEnableEviction(true)
                 .WithEvictionInterval(1000) // builder lower bound 1000ms

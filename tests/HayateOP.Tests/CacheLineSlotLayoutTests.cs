@@ -147,6 +147,7 @@ public class CacheLineSlotLayoutTests
     [Fact(Timeout = 30_000)]
     public void SpacedLayoutPutsEachSlotOnItsOwnCacheLine()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Build(lockFree: true, minSize: 0, maxSize: 4);
 
         var layouts = SlotLayouts(pool);
@@ -165,6 +166,7 @@ public class CacheLineSlotLayoutTests
     [Fact(Timeout = 30_000)]
     public void TheBoundaryItselfIsSpaced()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The boundary is inclusive: a shard of exactly the boundary capacity still gets the layout.
         using var pool = Build(lockFree: true, minSize: 0, maxSize: 64);
 
@@ -178,6 +180,7 @@ public class CacheLineSlotLayoutTests
     [Fact(Timeout = 30_000)]
     public void CompactLayoutAboveTheBoundary()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // One slot past the boundary: the spaced form would hold eight references per object, so the
         // compact layout stands. It is the identity — the layout every shard had before G-23.
         using var pool = Build(lockFree: true, minSize: 0, maxSize: 65);
@@ -192,6 +195,7 @@ public class CacheLineSlotLayoutTests
     [Fact(Timeout = 30_000)]
     public void SpacingIsDecidedPerShard()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // 257 over four shards is 65 / 64 / 64 / 64, so one shard takes the compact layout and three
         // take the spaced one in the same pool. Both layouts run the same protocol, which is what
         // makes the asymmetry harmless rather than a second code path to keep in step.
@@ -199,7 +203,7 @@ public class CacheLineSlotLayoutTests
 
         var layouts = SlotLayouts(pool);
         Assert.Equal(4, layouts.Count);
-        Assert.Equal(1, layouts.FindAll(l => l.Stride == 1).Count);
+        Assert.Single(layouts, l => l.Stride == 1);
         Assert.Equal(3, layouts.FindAll(l => l.Stride == SpacedStride).Count);
         Assert.True(layouts.Exists(l => l.Capacity == 65));
         Assert.True(layouts.Exists(l => l.Capacity == 64 && l.First == SpacedStride));
@@ -217,6 +221,7 @@ public class CacheLineSlotLayoutTests
     [Fact(Timeout = 30_000)]
     public void ASmallPoolSpacesEveryShard()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The default pool is small, so every shard is under the boundary and all of them are spaced.
         using var pool = Build(lockFree: true, minSize: 5, maxSize: 50, shardCount: 4);
 
@@ -230,6 +235,7 @@ public class CacheLineSlotLayoutTests
     [Fact(Timeout = 30_000)]
     public void OffByDefaultKeepsTheEmptyArray()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // With the store off the array is the shared empty singleton: no slots, no layout, and the
         // borrow / return path is exactly what it was.
         using var pool = Build(lockFree: false, minSize: 0, maxSize: 4);
@@ -248,6 +254,7 @@ public class CacheLineSlotLayoutTests
     [Fact(Timeout = 30_000)]
     public void SpacedStore_ParksEachWrapperAtItsMappedPosition()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The mapping is the one thing the layout facts above do not cover: a formula that ignored the
         // stride would still leave every wrapper somewhere, so the store would work and only the
         // cache-line benefit would be gone. This case observes the array itself, so the mapping is
@@ -290,6 +297,7 @@ public class CacheLineSlotLayoutTests
     [Fact(Timeout = 30_000)]
     public void SpacedStore_ServesEveryObjectItHolds()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Every one of the eight objects has to come back out of the store. A mapping that walked the
         // wrong positions would report an occupied store empty, and create-on-miss would quietly hand
         // out a fresh object instead of the one the pool already holds.
@@ -317,6 +325,7 @@ public class CacheLineSlotLayoutTests
     [Fact(Timeout = 30_000)]
     public void CompactStore_ServesEveryObjectItHolds()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The compact layout is the rare path now, so it gets its own coverage rather than relying on
         // the existing store cases, which all sit under the boundary and therefore run spaced.
         using var pool = Build(lockFree: true, minSize: 0, maxSize: 65);
@@ -343,6 +352,7 @@ public class CacheLineSlotLayoutTests
     [Fact(Timeout = 30_000)]
     public void SpacedStore_EvictAndClearClaimEveryObject()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Remove, drain and the sample walk all go through the same mapping the take does, so the two
         // cold claims have to clear the whole store on the spaced layout too.
         using var pool = Build(lockFree: true, minSize: 0, maxSize: 8);
@@ -371,6 +381,7 @@ public class CacheLineSlotLayoutTests
     [Fact(Timeout = 30_000)]
     public void SpacedStore_RefusesASecondReturnAndKeepsTheNextBorrowSound()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // A second return is refused through the store's own claim, which is one of the accesses the
         // mapping had to move. If it claimed the wrong position the wrapper would stay reachable, and
         // the next borrow would hand out a destroyed object.
@@ -422,10 +433,10 @@ public class CacheLineSlotLayoutTests
                     inFlight.AddOrUpdate(item.Id, 0, (_, count) => count - 1);
                     pool.Release(item);
                 }
-            });
+            }, TestContext.Current.CancellationToken);
         }
 
-        Task.WaitAll(tasks);
+        Task.WaitAll(tasks, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, duplicates);
         Assert.Equal(8, pool.GetStats().PooledCount);

@@ -58,6 +58,7 @@ public class LeasedBorrowTests
     [Fact(Timeout = 30_000)]
     public void AcquireLeased_ShouldReturnTheObject_WhenTheLeaseEnds()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder().Build();
         Assert.Equal(1, pool.GetStats().PooledCount);
 
@@ -82,6 +83,7 @@ public class LeasedBorrowTests
     [Fact(Timeout = 30_000)]
     public void AcquireLeased_ShouldReturnTheObject_WhenTheLeaseBodyThrows()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder().Build();
 
         // A named local keeps the lambda an Action: a body that only throws would also convert to
@@ -102,6 +104,7 @@ public class LeasedBorrowTests
     [Fact(Timeout = 30_000)]
     public void Dispose_ShouldReturnTheObjectExactlyOnce()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // CreateOnDemand keeps every borrow immediate, so the assertions depend only on return semantics
         // and not on how long a wait takes.
         using var pool = CreateOnDemandBuilder("g6-once").Build();
@@ -123,6 +126,7 @@ public class LeasedBorrowTests
     [Fact(Timeout = 30_000)]
     public void Value_ShouldThrow_AfterTheLeaseWasDisposed()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder().Build();
 
         var lease = pool.AcquireLeased();
@@ -139,6 +143,7 @@ public class LeasedBorrowTests
     [Fact(Timeout = 30_000)]
     public void AcquireLeased_WithTimeout_ShouldThrowWithoutBorrowing()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder().WithMinSize(1).WithMaxSize(1).Build();
 
         using (var held = pool.AcquireLeased())
@@ -156,6 +161,7 @@ public class LeasedBorrowTests
     [Fact(Timeout = 30_000)]
     public void AcquireLeased_ShouldRejectANullPool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         IHayateObjectPool<TestObject>? nullPool = null;
 
         Assert.Throws<ArgumentNullException>(() => nullPool!.AcquireLeased());
@@ -180,7 +186,7 @@ public class LeasedBorrowTests
 
             // The lease is live across a real suspension point: only a non-ref struct gets this far.
             await Task.Yield();
-            await Task.Delay(10);
+            await Task.Delay(10, TestContext.Current.CancellationToken);
 
             Assert.True(lease.IsActive);
             Assert.Same(before, lease.Value);
@@ -194,6 +200,7 @@ public class LeasedBorrowTests
     [Fact(Timeout = 30_000)]
     public void NestedLeases_ShouldReturnIndependently_InAnyOrder()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // V7: three leases live at once on the same thread. Released out of acquisition order on purpose —
         // ownership is per lease, not per pool.
         using var pool = CreateOnDemandBuilder("g6-v7").Build();
@@ -223,6 +230,7 @@ public class LeasedBorrowTests
     [Fact(Timeout = 30_000)]
     public void NestedLeases_ShouldStillSeeTheirOwnObject_AfterAnInnerLeaseEnds()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = CreateOnDemandBuilder("g6-nested").Build();
 
         using var outer = pool.AcquireLeased();
@@ -241,6 +249,7 @@ public class LeasedBorrowTests
     [Fact(Timeout = 30_000)]
     public void TheLease_ShouldMatchTheClassScope_OnTheSamePool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The two forms must be interchangeable, so the same script run through each leaves the same
         // observable state.
         //
@@ -302,7 +311,7 @@ public class LeasedBorrowTests
         using var pool = BaseBuilder().Build();
 
         TestObject borrowed;
-        using (var lease = await pool.AcquireLeaseAsync())
+        using (var lease = await pool.AcquireLeaseAsync(TestContext.Current.CancellationToken))
         {
             borrowed = lease.Value;
             Assert.True(lease.IsActive);
@@ -317,6 +326,7 @@ public class LeasedBorrowTests
     [Fact(Timeout = 30_000)]
     public async Task AcquireLeaseAsync_WithTimeout_ShouldThrowWithoutBorrowing()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder().WithMinSize(1).WithMaxSize(1).Build();
 
         using (var held = pool.AcquireLeased())
@@ -331,6 +341,7 @@ public class LeasedBorrowTests
     [Fact(Timeout = 30_000)]
     public async Task AcquireLeaseAsync_ShouldThrowNothingWhenAlreadyCancelled()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder().WithMinSize(1).WithMaxSize(1).Build();
 
         using (var held = pool.AcquireLeased())
@@ -351,8 +362,8 @@ public class LeasedBorrowTests
     {
         IHayateObjectPool<TestObject>? nullPool = null;
 
-        await Assert.ThrowsAsync<ArgumentNullException>(() => nullPool!.AcquireLeaseAsync());
-        await Assert.ThrowsAsync<ArgumentNullException>(() => nullPool!.AcquireLeaseAsync(TimeSpan.FromSeconds(1)));
+        await Assert.ThrowsAsync<ArgumentNullException>(() => nullPool!.AcquireLeaseAsync(TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<ArgumentNullException>(() => nullPool!.AcquireLeaseAsync(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken));
     }
 
 #if NET6_0_OR_GREATER
@@ -361,7 +372,7 @@ public class LeasedBorrowTests
     {
         using var pool = CreateOnDemandBuilder("g6-dispose-async").Build();
 
-        var lease = await pool.AcquireLeaseAsync();
+        var lease = await pool.AcquireLeaseAsync(TestContext.Current.CancellationToken);
         var item = lease.Value;
 
         await lease.DisposeAsync();
@@ -381,7 +392,7 @@ public class LeasedBorrowTests
         using var pool = BaseBuilder().Build();
 
         TestObject borrowed;
-        await using (var lease = await pool.AcquireLeaseAsync())
+        await using (var lease = await pool.AcquireLeaseAsync(TestContext.Current.CancellationToken))
         {
             borrowed = lease.Value;
             await Task.Yield();
@@ -396,6 +407,7 @@ public class LeasedBorrowTests
     [Fact(Timeout = 30_000)]
     public async Task AwaitUsing_ShouldReturnTheObject_WhenTheBlockThrows()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder().Build();
 
         async Task BorrowAndFail()
@@ -430,6 +442,7 @@ public class LeasedBorrowTests
     [Fact(Timeout = 120_000)]
     public void AcquireLeased_ShouldNotAllocate_UnlikeTheClassScope()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var manualPool = BaseBuilder().WithPoolName("g6-alloc-manual").WithMinSize(1).WithMaxSize(1).Build();
         using var leasedPool = BaseBuilder().WithPoolName("g6-alloc-leased").WithMinSize(1).WithMaxSize(1).Build();
         using var scopedPool = BaseBuilder().WithPoolName("g6-alloc-scoped").WithMinSize(1).WithMaxSize(1).Build();

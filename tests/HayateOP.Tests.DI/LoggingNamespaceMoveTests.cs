@@ -30,7 +30,7 @@ public class LoggingNamespaceMoveTests
     };
 
     private static Type Shell(string typeName) =>
-        Type.GetType(OldNamespace + "." + typeName + ", " + BridgeAssembly, throwOnError: true);
+        Type.GetType(OldNamespace + "." + typeName + ", " + BridgeAssembly, throwOnError: true)!;
 
     [Fact]
     public void MovedTypes_ShouldLiveInTheDependencyInjectionNamespace()
@@ -73,7 +73,7 @@ public class LoggingNamespaceMoveTests
         // parameter — not the open definition — so the comparison has to go through
         // GetGenericTypeDefinition(). Comparing against BaseType directly fails here.
         Assert.Equal(typeof(HayateMicrosoftLoggerAdapter<>),
-            Shell("HayateMicrosoftLoggerAdapter`1").BaseType.GetGenericTypeDefinition());
+            Shell("HayateMicrosoftLoggerAdapter`1").BaseType!.GetGenericTypeDefinition());
         Assert.Equal(typeof(HayateMicrosoftLoggerFactory), Shell("HayateMicrosoftLoggerFactory").BaseType);
     }
 
@@ -82,8 +82,8 @@ public class LoggingNamespaceMoveTests
     {
         // A derived shell is not a type forward: the two names are two types, and the container hands out
         // the moved one. Anything comparing types across the two namespaces has to expect that.
-        Assert.NotEqual(Shell("HayateMicrosoftLoggerAdapter"), typeof(HayateMicrosoftLoggerAdapter));
-        Assert.NotEqual(Shell("HayateMicrosoftLoggerFactory"), typeof(HayateMicrosoftLoggerFactory));
+        Assert.NotEqual(typeof(HayateMicrosoftLoggerAdapter), Shell("HayateMicrosoftLoggerAdapter"));
+        Assert.NotEqual(typeof(HayateMicrosoftLoggerFactory), Shell("HayateMicrosoftLoggerFactory"));
 
         using var melFactory = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Trace));
         var created = new HayateMicrosoftLoggerFactory(melFactory).CreateLogger("pool");
@@ -101,7 +101,7 @@ public class LoggingNamespaceMoveTests
         // the interface still lives in — so that the assertions are about behaviour, not shape.
         using var melFactory = LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Trace));
         var instance = (DotNetCore.HayateOP.Logging.IHayateLoggerFactory)Activator.CreateInstance(
-            Shell("HayateMicrosoftLoggerFactory"), new object[] { melFactory });
+            Shell("HayateMicrosoftLoggerFactory"), new object[] { melFactory })!;
 
         var logger = instance.CreateLogger("pool");
 

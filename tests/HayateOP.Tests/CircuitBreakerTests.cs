@@ -20,6 +20,7 @@ public class CircuitBreakerTests
     [Fact(Timeout = 30_000)]
     public void DisabledBreaker_ShouldIgnoreFailureReports_AndAlwaysBeAvailable()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder().Build();   // EnableCircuitBreaker defaults to false
 
         for (var i = 0; i < 5; i++) pool.SetUnavailable("dependency down");
@@ -34,6 +35,7 @@ public class CircuitBreakerTests
     [Fact(Timeout = 30_000)]
     public void ThresholdConsecutiveFailures_ShouldTrip_AndFailFastTheWholePool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var unavailableCount = new int[1];
         using var pool = BaseBuilder()
             .WithCircuitBreaker(3, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(5))
@@ -73,6 +75,7 @@ public class CircuitBreakerTests
     [Fact(Timeout = 30_000)]
     public void SuccessfulProbe_ShouldRecover_AndFireOnAvailableOnce()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var unavailableCount = new int[1];
         var availableCount = new int[1];
         using var pool = BaseBuilder()
@@ -107,6 +110,7 @@ public class CircuitBreakerTests
     [Fact(Timeout = 30_000)]
     public void FailingProbe_ShouldKeepThePoolUnavailable()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var availableCount = new int[1];
         var probeCalls = new int[1];
         using var pool = BaseBuilder()
@@ -128,6 +132,7 @@ public class CircuitBreakerTests
     [Fact(Timeout = 30_000)]
     public void NoProbe_ShouldStayUnavailable_UntilSetAvailable()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var availableCount = new int[1];
         using var pool = BaseBuilder()
             .WithCircuitBreaker(1, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(5))
@@ -153,6 +158,7 @@ public class CircuitBreakerTests
     [Fact(Timeout = 30_000)]
     public void Streak_ShouldBeClearedByRecovery_AndBySetAvailableOnAnAvailablePool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder()
             .WithCircuitBreaker(3, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(5))
             .Build();
@@ -180,6 +186,7 @@ public class CircuitBreakerTests
     [Fact(Timeout = 30_000)]
     public void LeanProfile_ShouldForceTheBreakerOff()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(0)
             .WithLeanProfile()
@@ -199,6 +206,7 @@ public class CircuitBreakerTests
     [Fact(Timeout = 30_000)]
     public void OptionsCopyTo_ShouldDeepCopyTheBreakerSettings()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var probe = new Func<bool>(() => true);
         var original = new HayatePoolOptions
         {

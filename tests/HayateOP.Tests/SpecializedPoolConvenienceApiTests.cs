@@ -24,6 +24,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void GetObject_WithCapacity_ShouldReturnBuilderWithAtLeastTheRequestedCapacity()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         using var sb = pool.GetObject(60_000);
@@ -38,6 +39,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void GetObject_WithCapacity_ShouldReuseTierBuildersAcrossBorrows()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         var first = pool.GetObject(60_000);
@@ -50,6 +52,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void GetObject_WithCapacity_AboveMaximum_ShouldParkInsteadOfDestroy()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
         pool.MaximumStringBuilderCapacity = 256 * 1024;
 
@@ -69,6 +72,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void GetObject_WithCapacity_GrowthBeyondTheDeclaredEnvelope_ShouldStillBeDestroyed()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         // The tier covers its declared bucket; appending far past it (and past the global maximum)
@@ -86,6 +90,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void GetObject_WithCapacity_ShouldNotDisturbTheBaseTier()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(1);
 
         var baseBuilder = pool.GetObject();
@@ -104,6 +109,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void GetObject_WithCapacity_BelowMinimum_ShouldBeServedByTheBaseTier()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         var baseBuilder = pool.GetObject();
@@ -117,6 +123,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void GetObject_WithCapacity_ShouldThrowForNonPositiveCapacity()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         Assert.Throws<ArgumentOutOfRangeException>(() => pool.GetObject(0));
@@ -126,6 +133,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void Clear_ShouldAlsoDropTheCapacityTierBuilders()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         var tierBuilder = pool.GetObject(60_000);
@@ -139,6 +147,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void RaisingMinimumCapacity_ShouldRetireTheExistingTiers()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         var tierBuilder = pool.GetObject(60_000);
@@ -154,6 +163,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void GetStats_ShouldIncludeTheCapacityTierBuilders()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         var tierBuilder = pool.GetObject(60_000);
@@ -181,6 +191,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void GetObject_WithSeed_ShouldHoldExactlyTheSeed()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         var seed = new string('s', 5000);
@@ -196,6 +207,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void GetObject_WithSeed_ShouldNotKeepResidueFromThePreviousBorrow()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         var previous = pool.GetObject();
@@ -213,6 +225,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void ToStringReturn_ShouldReturnTheContentAndReleaseTheBuilder()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         var sb = pool.GetObject();
@@ -227,6 +240,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void ToStringReturn_ShouldReturnExactlyOnce()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         var sb = pool.GetObject();
@@ -245,6 +259,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void ToStringReturn_OnAStandaloneBuilder_ShouldJustReturnTheContent()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var standalone = new PooledStringBuilder(16);
         standalone.StringBuilder.Append("keep me");
 
@@ -256,6 +271,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void ToByteArrayReturn_ShouldReturnTheBytesAndReleaseTheStream()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new MemoryStreamPool(4);
 
         var stream = pool.GetObject();
@@ -269,6 +285,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void ToByteArrayReturn_ShouldReturnExactlyOnce()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new MemoryStreamPool(4);
 
         var stream = pool.GetObject();
@@ -286,6 +303,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void ToByteArrayReturn_OnAStandaloneStream_ShouldJustReturnTheBytes()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var standalone = new PooledMemoryStream(16);
         standalone.Write(new byte[] { 5, 6, 7 }, 0, 3);
 
@@ -297,6 +315,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void StreamPool_GetObject_WithCapacity_ShouldReturnStreamWithAtLeastTheRequestedCapacity()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new MemoryStreamPool(4);
 
         using var stream = pool.GetObject(60_000);
@@ -309,6 +328,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void StreamPool_GetObject_WithCapacity_ShouldReuseTierStreamsAcrossBorrows()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new MemoryStreamPool(4);
 
         var first = pool.GetObject(60_000);
@@ -320,6 +340,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void StreamPool_GetObject_WithCapacity_AboveMaximum_ShouldParkInsteadOfDestroy()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new MemoryStreamPool(4);
         pool.MaximumMemoryStreamCapacity = 256 * 1024;
 
@@ -335,6 +356,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void StreamPool_GetObject_WithCapacity_ShouldNotDisturbTheBaseTier()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new MemoryStreamPool(1);
 
         var baseStream = pool.GetObject();
@@ -350,6 +372,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void StreamPool_GetObject_WithCapacity_ShouldThrowForNonPositiveCapacity()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new MemoryStreamPool(4);
 
         Assert.Throws<ArgumentOutOfRangeException>(() => pool.GetObject(0));
@@ -361,6 +384,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void Format_ShouldMatchStringFormat()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Baseline against string.Format at every TFM's current culture, so the comparison is
         // culture-safe by construction.
         Assert.Equal(
@@ -397,6 +421,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void Format_ShouldSupportUpToEightArguments()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Equal(
             string.Format("{7}{6}{5}{4}{3}{2}{1}{0}", 1, 2, 3, 4, 5, 6, 7, 8),
             StringBuilderPool.Format("{7}{6}{5}{4}{3}{2}{1}{0}", 1, 2, 3, 4, 5, 6, 7, 8));
@@ -405,12 +430,14 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void Format_ShouldThrowWhenTheIndexIsOutOfRange()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Throws<FormatException>(() => StringBuilderPool.Format("{1}", "only-one"));
     }
 
     [Fact(Timeout = 30_000)]
     public void Format_ShouldThrowOnMalformedHoles()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Throws<FormatException>(() => StringBuilderPool.Format("{}", "a"));
         Assert.Throws<FormatException>(() => StringBuilderPool.Format("{0", "a"));
         Assert.Throws<FormatException>(() => StringBuilderPool.Format("}", "a"));
@@ -420,6 +447,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void Concat_ShouldMatchStringConcat()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Equal(string.Concat("order", "-", 42), StringBuilderPool.Concat("order", "-", 42));
         Assert.Equal(string.Concat(1, 2, 3), StringBuilderPool.Concat(1, 2, 3));
         Assert.Equal("x", StringBuilderPool.Concat((string?)null, "x"));
@@ -431,6 +459,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void Join_ShouldMatchStringJoin()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // string.Join has no char-separator overload on net48, so the baseline uses the string one —
         // same rendering, culture-consistent on both sides of the comparison.
         Assert.Equal(string.Join("-", 1, 2, 3), StringBuilderPool.Join('-', new[] { 1, 2, 3 }));
@@ -448,6 +477,7 @@ public class SpecializedPoolConvenienceApiTests
     [Fact(Timeout = 30_000)]
     public void Join_ShouldThrowWhenTheValuesAreNull()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Throws<ArgumentNullException>(() => StringBuilderPool.Join('-', (IEnumerable<int>)null!));
         Assert.Throws<ArgumentNullException>(() => StringBuilderPool.Join(", ", (IEnumerable<string>)null!));
     }

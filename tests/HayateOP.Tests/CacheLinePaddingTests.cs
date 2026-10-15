@@ -35,6 +35,7 @@ public class CacheLinePaddingTests
     [Fact(Timeout = 30_000)]
     public void Shard_ShouldCarryBothHalvesOfTheCacheLinePadding()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var shardType = ShardType();
 
         // The leading half. Explicit layout is what makes the offset exact, and it is legal here only
@@ -61,6 +62,7 @@ public class CacheLinePaddingTests
     [Fact(Timeout = 30_000)]
     public void Shard_ShouldCostTwoCacheLinesMoreThanTheSameObjectWithoutThePadding()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var shardType = ShardType();
 
         // The declarations above say the padding is there; this says it reaches the heap. A shard is

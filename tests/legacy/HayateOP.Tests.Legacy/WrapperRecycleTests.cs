@@ -39,7 +39,7 @@ public class WrapperRecycleTests
 
         var arr = field!.GetValue(pool) as Array;
         Assert.NotNull(arr);
-        Assert.Equal(1, arr!.Length);
+        Assert.Single(arr!);
 
         var shard = arr.GetValue(0)!;
         var spareField = shard.GetType().GetField("_spareCount", BindingFlags.Instance | BindingFlags.NonPublic);

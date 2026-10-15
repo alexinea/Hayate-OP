@@ -48,6 +48,7 @@ public class ObjectMetadataTests
     [Fact(Timeout = 30_000)]
     public void GetTimes_ShouldCountEveryBorrow()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder().Build();
 
         var item = pool.Acquire();
@@ -70,6 +71,7 @@ public class ObjectMetadataTests
     [Fact(Timeout = 30_000)]
     public void LastGetThreadId_ShouldIdentifyTheBorrowingThread()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder().Build();
 
         var item = pool.Acquire();
@@ -100,7 +102,7 @@ public class ObjectMetadataTests
     {
         using var pool = BaseBuilder().Build();
 
-        var item = pool.AcquireAsync().GetAwaiter().GetResult();
+        var item = pool.AcquireAsync(TestContext.Current.CancellationToken).GetAwaiter().GetResult();
         var wrapped = GetWrapped(pool, item);
         Assert.Equal(1, wrapped.GetTimes);
         Assert.NotEqual(0, wrapped.LastGetThreadId);
@@ -110,6 +112,7 @@ public class ObjectMetadataTests
     [Fact(Timeout = 30_000)]
     public void CreateTime_ShouldBeTheWallClockCreationInstant()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Bracketed before the build: a warmed-up pool creates its object during construction, not at the
         // first borrow, so a window opened after Build would already be too late.
         var before = DateTimeOffset.UtcNow;
@@ -128,6 +131,7 @@ public class ObjectMetadataTests
     [Fact(Timeout = 30_000)]
     public void Snapshot_ShouldCarryTheLastBorrowerThreadId()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder().Build();
 
         // A warmed-up object that has never been borrowed reports no thread.
@@ -144,6 +148,7 @@ public class ObjectMetadataTests
     [Fact(Timeout = 30_000)]
     public void Recycle_ShouldNotInheritThePreviousObjectsMetadata()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Max 1: the single object is destroyed, its wrapper is parked on the spare stack, and the next
         // borrow reuses that wrapper for a brand-new object.
         using var pool = BaseBuilder().WithMinSize(0).WithMaxSize(1).Build();

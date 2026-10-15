@@ -94,10 +94,10 @@ public class OpenTelemetryMetricsTests
         Assert.Equal(true, releases[0].Tags["valid"]);
         Assert.Equal(false, releases[1].Tags["valid"]);
 
-        var miss = Assert.Single(points.Where(p => p.Name == "HayatePoolMiss"));
+        var miss = Assert.Single(points, p => p.Name == "HayatePoolMiss");
         Assert.Equal("poolA", miss.Tags["pool.name"]);
 
-        var scaled = Assert.Single(points.Where(p => p.Name == "HayatePoolScaled"));
+        var scaled = Assert.Single(points, p => p.Name == "HayatePoolScaled");
         Assert.Equal("expand", scaled.Tags["action"]);
 
         // Assert histogram points (per-measurement values)
@@ -187,7 +187,7 @@ public class OpenTelemetryMetricsTests
         // Events are published normally through the DI-resolved bridge instance
         var (listener, points) = BuildListener("DotNetCore.HayateOP");
         metrics.RecordObjectMiss("di-pool");
-        var miss = Assert.Single(points.Where(p => p.Name == "HayatePoolMiss"));
+        var miss = Assert.Single(points, p => p.Name == "HayatePoolMiss");
         Assert.Equal("di-pool", miss.Tags["pool.name"]);
         listener.Dispose();
     }
@@ -218,7 +218,7 @@ public class OpenTelemetryMetricsTests
         // Counter aggregated value
         var acquirePoints = new List<MetricPoint>();
         foreach (var p in acquireMetric.GetMetricPoints()) acquirePoints.Add(p);
-        Assert.Equal(1, acquirePoints.Count);
+        Assert.Single(acquirePoints);
         Assert.Equal(1, acquirePoints[0].GetSumLong());
         var tags = new Dictionary<string, object?>();
         foreach (var t in acquirePoints[0].Tags) tags[t.Key] = t.Value;

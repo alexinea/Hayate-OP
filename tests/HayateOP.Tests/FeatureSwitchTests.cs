@@ -19,6 +19,7 @@ public class FeatureSwitchTests
     [Fact(Timeout = 60000)]
     public void DisableAutoScaling_ShouldKeepExplicitMaxAsHardCap()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Behavior change (2.1): disabling auto-scaling no longer forces MaxPoolSize = MinPoolSize.
         // Max keeps the user's explicit value as a hard cap; both scale-up callbacks and forced timeout scale-up are gated by EnableAutoScaling and cannot break through.
         var options = new HayatePoolOptions
@@ -45,6 +46,7 @@ public class FeatureSwitchTests
     [Fact(Timeout = 60000)]
     public void DisableAutoScaling_WithZeroMin_ShouldNotCollapseCapacity()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Collapse-trap regression: Min=0 + autoScaling off; the old semantics collapsed Max to 0,
         // all returns were silently rejected by shard max=0; the new semantics keep Max, so borrow/return round-trips work normally.
         // Note: a Min=0 cold pool + the default BlockTimeout policy means an empty-pool borrow is guaranteed to time out (no returner to wake it),

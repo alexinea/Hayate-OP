@@ -199,7 +199,7 @@ public class CacheLineSlotLayoutTests
 
         var layouts = SlotLayouts(pool);
         Assert.Equal(4, layouts.Count);
-        Assert.Equal(1, layouts.FindAll(l => l.Stride == 1).Count);
+        Assert.Single(layouts, l => l.Stride == 1);
         Assert.Equal(3, layouts.FindAll(l => l.Stride == SpacedStride).Count);
         Assert.True(layouts.Exists(l => l.Capacity == 65));
         Assert.True(layouts.Exists(l => l.Capacity == 64 && l.First == SpacedStride));

@@ -66,6 +66,7 @@ public class LoggerFactoryTests
     [Fact(Timeout = 30_000)]
     public void WithLoggerFactory_ShouldCreateDistinctLoggerPerPool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var factory = new RecordingLoggerFactory();
 
         using var poolA = new HayatePoolBuilder<TestObject>()
@@ -106,6 +107,7 @@ public class LoggerFactoryTests
     [Fact(Timeout = 30_000)]
     public void WithoutLoggerFactory_ShouldKeepBuiltInSingletonBehaviour()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Zero regression: building and using without a factory are unaffected
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("pool-default-logger")
@@ -124,6 +126,7 @@ public class LoggerFactoryTests
     [Fact(Timeout = 30_000)]
     public void WithLogger_ShouldTakePrecedenceOverFactory()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var factory = new RecordingLoggerFactory();
         var explicitLogger = new RecordingLogger();
 
@@ -145,6 +148,7 @@ public class LoggerFactoryTests
     [Fact(Timeout = 30_000)]
     public void WithLoggerFactory_ShouldFailFast_WhenFactoryReturnsNull()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Fail fast when the factory returns null (do not silently degrade to no logging)
         var builder = new HayatePoolBuilder<TestObject>()
             .WithPoolName("pool-null-logger")

@@ -31,7 +31,7 @@ public class AcquireAsyncTimeoutTests
         // Act + Assert: the pool is exhausted (1 lent out, Max=1 so no bootstrap); must time out within 200ms
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var ex = await Assert.ThrowsAsync<TimeoutException>(
-            () => pool.AcquireAsync(TimeSpan.FromMilliseconds(200)));
+            () => pool.AcquireAsync(TimeSpan.FromMilliseconds(200), TestContext.Current.CancellationToken));
         sw.Stop();
 
         Assert.Contains("timed out", ex.Message);
@@ -51,7 +51,7 @@ public class AcquireAsyncTimeoutTests
             .Build();
 
         // Act: even an extremely short timeout should succeed immediately (no wait needed for an available object)
-        var obj = await pool.AcquireAsync(TimeSpan.FromMilliseconds(200));
+        var obj = await pool.AcquireAsync(TimeSpan.FromMilliseconds(200), TestContext.Current.CancellationToken);
 
         // Assert
         Assert.NotNull(obj);
@@ -76,10 +76,10 @@ public class AcquireAsyncTimeoutTests
         {
             await Task.Delay(100);
             pool.Release(first);
-        });
+        }, TestContext.Current.CancellationToken);
 
         // Act: wait within a 5s window for the release signal to wake the caller
-        var second = await pool.AcquireAsync(TimeSpan.FromSeconds(5));
+        var second = await pool.AcquireAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
         // Assert: the returned object is the one that was released (pooled reuse)
         Assert.Same(first, second);
@@ -89,6 +89,7 @@ public class AcquireAsyncTimeoutTests
     [Fact(Timeout = 60000)]
     public async Task ExternalCancel_ShouldThrowTaskCanceledNotTimeout()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Arrange: capacity 1; the first borrow holds the object; an external CT is cancelled after 200ms (far below the 10s timeout)
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("a3-external-cancel")
@@ -109,6 +110,7 @@ public class AcquireAsyncTimeoutTests
     [Fact(Timeout = 60000)]
     public async Task InfiniteTimeout_ShouldHonorExternalCancel()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Arrange: InfiniteTimeSpan delegates to the no-timeout overload, with an externally pre-cancelled token
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("a3-infinite-cancel")
@@ -130,6 +132,7 @@ public class AcquireAsyncTimeoutTests
     [Fact(Timeout = 60000)]
     public async Task LegacySignature_ShouldRemainAvailable()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The old AcquireAsync(ct) signature is unchanged (zero-regression guarantee)
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("a3-legacy-signature")

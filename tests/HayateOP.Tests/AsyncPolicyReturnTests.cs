@@ -195,7 +195,7 @@ public class AsyncPolicyReturnTests
     {
         var policy = new GatedReturnPolicy();
         using var pool = Build(policy);
-        var scope = await pool.AcquireScopeAsync();
+        var scope = await pool.AcquireScopeAsync(TestContext.Current.CancellationToken);
 
         await ReturnAfterOpeningGatesAsync(scope, policy);
 
@@ -209,6 +209,7 @@ public class AsyncPolicyReturnTests
     [Fact(Timeout = 30_000)]
     public void AsyncPolicy_SyncRelease_WaitsOnBothAsynchronousHooks()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new GatedReturnPolicy();
         using var pool = Build(policy);
         var item = pool.Acquire();
@@ -246,6 +247,7 @@ public class AsyncPolicyReturnTests
     [Fact(Timeout = 30_000)]
     public async Task AsyncPolicy_LeanAwaitUsing_AwaitsBothReturnHooks()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new GatedReturnPolicy();
         using var pool = Build(policy, lean: true);
         var dispose = DisposeWithAwaitUsingAsync(pool);
@@ -276,7 +278,7 @@ public class AsyncPolicyReturnTests
         var policy = new GatedReturnPolicy();
         var inner = Build(policy);
         using var pool = new HayatePreparationPool<TestObject>(inner, new AlwaysReadyStrategy());
-        var scope = await pool.AcquireScopeAsync();
+        var scope = await pool.AcquireScopeAsync(TestContext.Current.CancellationToken);
 
         await ReturnAfterOpeningGatesAsync(scope, policy);
 
@@ -291,7 +293,7 @@ public class AsyncPolicyReturnTests
     {
         var policy = new RejectingAsyncPolicy();
         using var pool = Build(policy);
-        var scope = await pool.AcquireScopeAsync();
+        var scope = await pool.AcquireScopeAsync(TestContext.Current.CancellationToken);
 
         await scope.DisposeAsync();
 
@@ -307,7 +309,7 @@ public class AsyncPolicyReturnTests
     {
         var policy = new SyncOnlyPolicy();
         using var pool = Build(policy);
-        var scope = await pool.AcquireScopeAsync();
+        var scope = await pool.AcquireScopeAsync(TestContext.Current.CancellationToken);
 
         await scope.DisposeAsync();
 
@@ -320,7 +322,7 @@ public class AsyncPolicyReturnTests
     public async Task AsyncLease_ThirdPartyPool_FallsBackToSynchronousRelease()
     {
         using var pool = new SyncOnlyPool();
-        var scope = await pool.AcquireScopeAsync();
+        var scope = await pool.AcquireScopeAsync(TestContext.Current.CancellationToken);
 
         await scope.DisposeAsync();
 
@@ -332,7 +334,7 @@ public class AsyncPolicyReturnTests
     {
         var policy = new GatedReturnPolicy();
         using var pool = Build(policy);
-        var scope = await pool.AcquireScopeAsync();
+        var scope = await pool.AcquireScopeAsync(TestContext.Current.CancellationToken);
 
         var firstReturn = scope.DisposeAsync().AsTask();
         Assert.True(SpinWait.SpinUntil(() => policy.AsyncPassivateCalls > 0, 5_000),

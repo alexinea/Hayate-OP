@@ -12,6 +12,7 @@ public class BuildOrThrowTests
     [Fact(Timeout = 30_000)]
     public void Build_InvalidOptions_ShouldThrow()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Baseline: the default Build() throws on invalid configuration (this case bypasses Builder parameter validation via Configure)
         var builder = new HayatePoolBuilder<TestObject>()
             .Configure(o => o.DefaultAcquireTimeout = TimeSpan.Zero);
@@ -22,6 +23,7 @@ public class BuildOrThrowTests
     [Fact(Timeout = 30_000)]
     public void BuildOrThrow_Default_ShouldThrowLikeBuild()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var builder = new HayatePoolBuilder<TestObject>()
             .Configure(o => o.DefaultAcquireTimeout = TimeSpan.Zero);
 
@@ -31,6 +33,7 @@ public class BuildOrThrowTests
     [Fact(Timeout = 30_000)]
     public void BuildOrThrow_False_InvalidOptions_ShouldReturnUsableEmptyPool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("degraded-pool")
             .Configure(o => o.DefaultAcquireTimeout = TimeSpan.Zero)
@@ -53,6 +56,7 @@ public class BuildOrThrowTests
     [Fact(Timeout = 30_000)]
     public void BuildOrThrow_False_MetricsMismatch_ShouldDegradeToEmptyPool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Behavior change (2.2): a custom metrics is explicitly registered but EnableMetrics is not enabled -> Build fails fast;
         // BuildOrThrow(false) should degrade to an empty pool instead of crashing
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -67,6 +71,7 @@ public class BuildOrThrowTests
     [Fact(Timeout = 30_000)]
     public void BuildOrThrow_False_ValidOptions_ShouldBuildNormally()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // With valid configuration BuildOrThrow(false) is equivalent to Build() (including normal warm-up)
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(3)

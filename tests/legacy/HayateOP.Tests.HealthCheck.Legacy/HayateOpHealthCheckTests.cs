@@ -75,7 +75,7 @@ public class HayateOpHealthCheckTests
         var after = await check.CheckHealthAsync(new HealthCheckContext());
 
         Assert.Equal(HealthStatus.Unhealthy, after.Status);
-        Assert.Contains("circuit breaker", after.Description.ToLowerInvariant());
+        Assert.Contains("circuit breaker", after.Description, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(true, after.Data["CircuitBreakerOpen"]);
     }
 

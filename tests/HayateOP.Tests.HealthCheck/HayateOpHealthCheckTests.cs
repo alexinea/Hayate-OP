@@ -66,7 +66,7 @@ public class HayateOpHealthCheckTests
         var pool = BuildPoolWithBreaker();
         var check = new HayateOpHealthCheck<Pooled>(pool);
 
-        var before = await check.CheckHealthAsync(new HealthCheckContext());
+        var before = await check.CheckHealthAsync(new HealthCheckContext(), TestContext.Current.CancellationToken);
         Assert.Equal(HealthStatus.Healthy, before.Status);
 
         // The pool has free slots throughout — only the breaker moves, so this isolates the new judgment.
@@ -74,7 +74,7 @@ public class HayateOpHealthCheckTests
         Assert.False(pool.CheckAvailable());
         Assert.True(pool.GetStats().AvailableSlots > 0);
 
-        var after = await check.CheckHealthAsync(new HealthCheckContext());
+        var after = await check.CheckHealthAsync(new HealthCheckContext(), TestContext.Current.CancellationToken);
 
         Assert.Equal(HealthStatus.Unhealthy, after.Status);
         Assert.Contains("circuit breaker", after.Description, StringComparison.OrdinalIgnoreCase);
@@ -88,7 +88,7 @@ public class HayateOpHealthCheckTests
         var probe = new StubProbe(verdict: false);
         var check = new HayateOpHealthCheck<Pooled>(pool, probe);
 
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
+        var result = await check.CheckHealthAsync(new HealthCheckContext(), TestContext.Current.CancellationToken);
 
         Assert.Equal(HealthStatus.Unhealthy, result.Status);
         Assert.Equal(1, probe.Calls);
@@ -102,7 +102,7 @@ public class HayateOpHealthCheckTests
         var probe = new StubProbe(verdict: true);
         var check = new HayateOpHealthCheck<Pooled>(pool, probe);
 
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
+        var result = await check.CheckHealthAsync(new HealthCheckContext(), TestContext.Current.CancellationToken);
 
         Assert.Equal(HealthStatus.Healthy, result.Status);
         Assert.Equal(1, probe.Calls);
@@ -120,7 +120,7 @@ public class HayateOpHealthCheckTests
         var probe = new StubProbe(throws: true);
         var check = new HayateOpHealthCheck<Pooled>(pool, probe);
 
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
+        var result = await check.CheckHealthAsync(new HealthCheckContext(), TestContext.Current.CancellationToken);
 
         Assert.Equal(HealthStatus.Unhealthy, result.Status);
         Assert.NotNull(result.Exception);
@@ -137,7 +137,7 @@ public class HayateOpHealthCheckTests
         var borrowed = pool.Acquire();
         Assert.Equal(0, pool.GetStats().AvailableSlots);
 
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
+        var result = await check.CheckHealthAsync(new HealthCheckContext(), TestContext.Current.CancellationToken);
 
         Assert.Equal(HealthStatus.Degraded, result.Status);
 
@@ -164,7 +164,7 @@ public class HayateOpHealthCheckTests
 
         // StubProbe's default verdict is "healthy", so this only proves the wiring reaches the probe — the
         // verdict itself is what the other cases cover.
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
+        var result = await check.CheckHealthAsync(new HealthCheckContext(), TestContext.Current.CancellationToken);
 
         Assert.Equal(HealthStatus.Healthy, result.Status);
         Assert.Equal(1, provider.GetRequiredService<StubProbe>().Calls);
@@ -176,7 +176,7 @@ public class HayateOpHealthCheckTests
         var pool = BuildPool();
         var check = new HayateOpHealthCheck<Pooled>(pool);
 
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
+        var result = await check.CheckHealthAsync(new HealthCheckContext(), TestContext.Current.CancellationToken);
 
         foreach (var key in new[]
                  {

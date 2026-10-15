@@ -83,6 +83,7 @@ public class PoolOptionCopyTests
     [Fact(Timeout = 30_000)]
     public void CopyTo_ShouldCarryEveryOption()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var source = new HayatePoolOptions();
         FillWithNonDefaultValues(source);
 
@@ -95,6 +96,7 @@ public class PoolOptionCopyTests
     [Fact(Timeout = 30_000)]
     public void CopyToIntoAnExistingInstance_ShouldCarryEveryOption()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var source = new HayatePoolOptions();
         FillWithNonDefaultValues(source);
 
@@ -107,6 +109,7 @@ public class PoolOptionCopyTests
     [Fact(Timeout = 30_000)]
     public void CopyTo_ShouldNotShareTheCircuitBreakerSettings()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The nested settings object is copied, not aliased: mutating the copy must not reconfigure the
         // pool the copy came from.
         var source = new HayatePoolOptions { EnableCircuitBreaker = true };
@@ -122,6 +125,7 @@ public class PoolOptionCopyTests
     [Fact(Timeout = 30_000)]
     public void GetOptions_ShouldReportTheArrayPoolStorageBackend()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The storage shape is live only on the lean fast path, which is exactly the configuration whose
         // snapshot used to lose the switch and report a fixed-buffer pool.
         using var pool = new HayatePoolBuilder<TestObject>()

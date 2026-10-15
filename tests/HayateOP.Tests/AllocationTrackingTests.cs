@@ -28,6 +28,7 @@ public class AllocationTrackingTests
     [Fact(Timeout = 30_000)]
     public void DefaultOff_ShouldReportZeroWithoutSampling()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder("m3-off").Build();
 
         var item = pool.Acquire();
@@ -46,6 +47,7 @@ public class AllocationTrackingTests
     [Fact(Timeout = 30_000)]
     public void Enabled_ShouldSampleBorrowAndReturnPaths()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         const int iterations = 32;
 
         using var pool = BaseBuilder("m3-on").WithEnableAllocationTracking(true).Build();
@@ -77,6 +79,7 @@ public class AllocationTrackingTests
     [Fact(Timeout = 30_000)]
     public void Enabled_ShouldNotChangePoolBehaviour()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var offPool = BaseBuilder("m3-behaviour-off").Build();
         using var onPool = BaseBuilder("m3-behaviour-on").WithEnableAllocationTracking(true).Build();
 
@@ -101,6 +104,7 @@ public class AllocationTrackingTests
     [Fact(Timeout = 30_000)]
     public void Options_CopyTo_ShouldCarryAllocationTrackingSwitch()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var source = new HayatePoolOptions { EnableAllocationTracking = true };
         Assert.True(source.CopyTo().EnableAllocationTracking);
 

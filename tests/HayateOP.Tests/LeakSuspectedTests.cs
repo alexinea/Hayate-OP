@@ -12,6 +12,7 @@ public class LeakSuspectedTests
     [Fact(Timeout = 30_000)]
     public void LeakDetectionOff_BorrowedBeyondThreshold_ShouldCountSuspected()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(2)
             .WithMaxSize(4)
@@ -46,6 +47,7 @@ public class LeakSuspectedTests
     [Fact(Timeout = 30_000)]
     public void LeakDetectionOff_AllFeaturesOff_ShouldStillCountSuspected()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Behavior companion for 2.5: LastBorrowedAt is recorded unconditionally on the borrow path,
         // so the callback path still works even with eviction / leakDetection / autoScaling all off
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -72,6 +74,7 @@ public class LeakSuspectedTests
     [Fact(Timeout = 30_000)]
     public void LeakDetectionOn_ShouldNotCountSuspected()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // When detection is on it uses the original LeakDetectedCount path; the two counters do not double-count
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(1)
@@ -95,6 +98,7 @@ public class LeakSuspectedTests
     [Fact(Timeout = 30_000)]
     public void LeakDetectionOff_ShouldExposeSuspectedCountInStats()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(1)
             .WithMaxSize(2)

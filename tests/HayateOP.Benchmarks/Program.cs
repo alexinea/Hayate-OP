@@ -191,8 +191,6 @@ public class HayateOpBenchmarks
     private IHayateObjectPool<PooledObject> _sharded4 = null!;        // 4 shards only
     private IHayateObjectPool<PooledObject> _full = null!;            // all features on
 
-    private int _releaseCursor;
-
     [GlobalSetup]
     public void Setup()
     {

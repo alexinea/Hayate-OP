@@ -19,6 +19,7 @@ public class DeterministicPresetTests
     [Fact(Timeout = 30_000)]
     public void Deterministic_IsLeanPlusEveryBackgroundPathClosed()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var options = DeterministicOptions();
 
         // The lean fast path itself: no background pass, no per-object bookkeeping.
@@ -37,6 +38,7 @@ public class DeterministicPresetTests
     [Fact(Timeout = 30_000)]
     public void Deterministic_BuiltPool_NormalizesToTheSameGuarantees()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The shared maintenance timer starts only when one of its four concerns is enabled, so the
         // normalized configuration of the built pool is the observable no-timer condition.
         using var pool = new HayatePoolBuilder<TestObject>().WithPreset(HayatePoolPreset.Deterministic).Build();
@@ -54,6 +56,7 @@ public class DeterministicPresetTests
     [Fact(Timeout = 30_000)]
     public void Deterministic_PoolServesBorrowReturnOnTheFastPath()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>().WithPreset(HayatePoolPreset.Deterministic).Build();
 
         var first = pool.Acquire();
@@ -68,6 +71,7 @@ public class DeterministicPresetTests
     [Fact(Timeout = 30_000)]
     public void Deterministic_IsRefinableByALaterFeatureCall()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Composition works both ways: sizing stays the caller's, and re-enabling a background concern
         // after the preset reintroduces that work by choice rather than by surprise.
         using var pool = new HayatePoolBuilder<TestObject>()

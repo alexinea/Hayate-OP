@@ -74,6 +74,7 @@ public class ActiveObjectCeilingTests
     [Fact(Timeout = 30_000)]
     public void ZeroDefault_LendsTheWholePoolAndNeverThrottles()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = EngineBuilder(policy, maxActiveObjects: null).Build();
 
@@ -91,6 +92,7 @@ public class ActiveObjectCeilingTests
     [Fact(Timeout = 30_000)]
     public void Abort_RefusesOnceTheCeilingIsReached_WithoutCreating()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         // Two objects are held, so one is still idle while the single slot is out: a plain miss could
         // therefore have been served, and the refusal can only be the ceiling's.
@@ -119,6 +121,7 @@ public class ActiveObjectCeilingTests
     [Fact(Timeout = 30_000)]
     public void CreateOnDemand_WaitsInsteadOfCreatingAtTheCeiling()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = EngineBuilder(policy, maxActiveObjects: 1).Build();
 
@@ -142,15 +145,15 @@ public class ActiveObjectCeilingTests
         var first = pool.Acquire();
 
         TestObject? second = null;
-        var borrower = Task.Run(() => { second = pool.Acquire(TimeSpan.FromSeconds(20)); });
+        var borrower = Task.Run(() => { second = pool.Acquire(TimeSpan.FromSeconds(20)); }, TestContext.Current.CancellationToken);
 
         // The ceiling holds the second borrow back while the slot is out.
-        Assert.False(borrower.Wait(TimeSpan.FromMilliseconds(300)));
+        Assert.False(borrower.Wait(TimeSpan.FromMilliseconds(300), TestContext.Current.CancellationToken));
         Assert.True(pool.GetStats().ActiveLimitThrottledCount > 0);
 
         pool.Release(first);
 
-        Assert.True(borrower.Wait(TimeSpan.FromSeconds(20)));
+        Assert.True(borrower.Wait(TimeSpan.FromSeconds(20), TestContext.Current.CancellationToken));
         Assert.NotNull(second);
         Assert.Equal(1, second!.Id);   // it is the object that came back, not a freshly created one
         Assert.Equal(1, policy.Created);
@@ -161,6 +164,7 @@ public class ActiveObjectCeilingTests
     [Fact(Timeout = 30_000)]
     public void CeilingIsRestoredByClear_SoAnUnpairedLoanCannotWedgeThePool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         // Two objects held, one slot: the second borrow must be refused by the ceiling while an idle
         // object is still sitting in the pool.
@@ -190,6 +194,7 @@ public class ActiveObjectCeilingTests
     [Fact(Timeout = 30_000)]
     public void IsValid_RejectsCeilingsThatCouldNeverTakeEffect()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Above the hard ceiling: the pool could never have that many objects out at once.
         Assert.False(new HayatePoolOptions { MinPoolSize = 0, MaxPoolSize = 4, MaxActiveObjects = 5 }.IsValid());
         // Negative: not a meaningful ceiling.
@@ -205,6 +210,7 @@ public class ActiveObjectCeilingTests
     [Fact(Timeout = 30_000)]
     public void Builder_RejectsNegativeMaxActiveObjects()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Throws<ArgumentOutOfRangeException>(
             () => new HayatePoolBuilder<TestObject>().WithMaxActiveObjects(-1));
     }
@@ -212,6 +218,7 @@ public class ActiveObjectCeilingTests
     [Fact(Timeout = 30_000)]
     public void CeilingSurvivesACopyOfTheOptions()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var options = new HayatePoolOptions { MinPoolSize = 0, MaxPoolSize = 4, MaxActiveObjects = 2 };
 
         Assert.Equal(2, options.CopyTo().MaxActiveObjects);

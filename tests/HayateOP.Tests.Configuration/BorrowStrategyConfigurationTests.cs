@@ -27,9 +27,9 @@ namespace HayateOP.Tests.Configuration
         /// retires anything, so the instances a case borrows are the whole content of its idle list and
         /// the order they are returned in is the order of that list.
         /// </summary>
-        private static Dictionary<string, string> DeterministicGlobal()
+        private static Dictionary<string, string?> DeterministicGlobal()
         {
-            return new Dictionary<string, string>
+            return new Dictionary<string, string?>
             {
                 { "HayatePool:Global:ShardCount", "1" },
                 { "HayatePool:Global:MinPoolSize", "0" },
@@ -84,6 +84,7 @@ namespace HayateOP.Tests.Configuration
         [Fact(Timeout = 30_000)]
         public void Configuration_ShouldCarryTheLruOrder()
         {
+            TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
             var provider = Container(HayateBorrowStrategy.Lru, registerComparer: false);
             var pool = provider.GetRequiredService<IHayateObjectPool<Item>>();
 
@@ -106,6 +107,7 @@ namespace HayateOP.Tests.Configuration
         [Fact(Timeout = 30_000)]
         public void Priority_ShouldResolveTheComparerFromTheContainer()
         {
+            TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
             var provider = Container(HayateBorrowStrategy.Priority, registerComparer: true);
             var pool = provider.GetRequiredService<IHayateObjectPool<Item>>();
 

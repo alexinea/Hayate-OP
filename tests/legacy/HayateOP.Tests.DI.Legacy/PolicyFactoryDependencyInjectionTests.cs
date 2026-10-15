@@ -198,7 +198,7 @@ namespace HayateOP.Tests.DI
             var hayate = services.AddHayatePoolSupport();
 
             Assert.Throws<ArgumentNullException>(() =>
-                hayate.RegisterHayatePool<Tagged>((Func<IServiceProvider, IHayateObjectPolicy<Tagged>>)null));
+                hayate.RegisterHayatePool<Tagged>((Func<IServiceProvider, IHayateObjectPolicy<Tagged>>)null!));
         }
     }
 }

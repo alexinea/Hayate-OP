@@ -72,6 +72,7 @@ public class LifetimeRotationTests
     [Fact(Timeout = 30_000)]
     public void Rotation_ReplacesAnObjectThatOutlivedMaxLifeTime()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Metrics on so TotalCreated is populated — it is only counted while metrics are enabled.
         using var pool = Build(TimeSpan.FromMilliseconds(50), rotation: true, metrics: true);
 
@@ -95,6 +96,7 @@ public class LifetimeRotationTests
     [Fact(Timeout = 30_000)]
     public void BackgroundEviction_NeverTouchesABorrowedObjectEvenWhenItIsExpired()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TrackedObject>()
             .WithMinSize(2)
             .WithMaxSize(4)
@@ -121,6 +123,7 @@ public class LifetimeRotationTests
     [Fact(Timeout = 30_000)]
     public void Rotation_WithAnImmediatelyExpiringLifetime_ReturnsInsteadOfSpinning()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // A lifetime shorter than the time it takes to create an object must not turn a borrow into an
         // endless create/destroy cycle: at most one object is retired per borrow and the replacement is
         // handed out without being re-checked. The Fact timeout is the assertion that it terminates.
@@ -141,6 +144,7 @@ public class LifetimeRotationTests
     [Fact(Timeout = 30_000)]
     public void Rotation_UnderAbort_DoesNotTurnALifetimeEventIntoARejection()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Build(TimeSpan.FromMilliseconds(50), rotation: true,
             rejectPolicy: HayatePoolRejectPolicy.Abort);
 
@@ -167,6 +171,7 @@ public class LifetimeRotationTests
     [InlineData(true)]
     public void Rotation_DoesNotChangeGenerationalBehaviour(bool generationOptimization)
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var without = RunBorrows(generationOptimization, rotation: false);
         var with = RunBorrows(generationOptimization, rotation: true);
 
@@ -231,6 +236,7 @@ public class LifetimeRotationTests
     [Fact(Timeout = 30_000)]
     public void Rotation_IsOffByDefault_SoAnExpiredObjectIsStillHandedBack()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Build(TimeSpan.FromMilliseconds(50), rotation: false);
 
         var first = pool.Acquire();
@@ -261,6 +267,7 @@ public class LifetimeRotationTests
     [Fact(Timeout = 30_000)]
     public void DefaultProfile_ReadsAsTheIdleSideSemantics()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // 3.0 named MaxLifeTime as the whole lifetime — idle or borrowed — and kept the borrowed half
         // behind a switch that is off by default, so the default profile has to read as the pre-2.9
         // behaviour in full: the age verdict is enforced on the idle side, and on nothing else. U6
@@ -346,6 +353,7 @@ public class LifetimeRotationTests
     [Fact(Timeout = 30_000)]
     public void ExpiryVerdict_AgreesBetweenManualEvictionAndBorrowRotation()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Not yet expired: neither entry treats the object as expired.
         using (var pool = Build(TimeSpan.FromMinutes(10), rotation: true))
         {

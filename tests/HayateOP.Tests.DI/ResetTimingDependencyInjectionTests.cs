@@ -92,6 +92,7 @@ public class ResetTimingDependencyInjectionTests
     [Fact(Timeout = 30_000)]
     public void NamedPool_ShouldTakeTheBorrowSideResetFromItsOptions()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var services = new ServiceCollection();
         services.AddHayatePoolSupport().AddNamedPool<ResettableBuffer>("primary", ResetOnBorrowSide);
 
@@ -125,6 +126,7 @@ public class ResetTimingDependencyInjectionTests
     [Fact(Timeout = 30_000)]
     public void UnnamedPool_ShouldTakeTheBorrowSideResetFromItsOptions()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var services = new ServiceCollection();
         services.AddHayatePoolSupport().RegisterHayatePool<ResettableBuffer>(ResetOnBorrowSide);
 
@@ -147,6 +149,7 @@ public class ResetTimingDependencyInjectionTests
     [Fact(Timeout = 30_000)]
     public void PoolThatAsksForNothing_ShouldKeepTheHistoricalTiming()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The other half of the fix: a pool that never moves the switch must not be moved by it either,
         // which is what makes "the container honours the switches" a change and not a behaviour swap.
         var services = new ServiceCollection();
@@ -169,6 +172,7 @@ public class ResetTimingDependencyInjectionTests
     [Fact(Timeout = 30_000)]
     public void TwoNamesOfOneType_ShouldRunTheirOwnTimings()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Each name has its own options, so each name derives its own default policy. Before this item
         // both names shared one policy instance and therefore one timing.
         var services = new ServiceCollection();
@@ -201,6 +205,7 @@ public class ResetTimingDependencyInjectionTests
     [Fact(Timeout = 30_000)]
     public void CallerPolicyRegisteredBeforeThePool_ShouldBeUsedAndKeepItsOwnReset()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Half of the boundary: the switches govern the library's own policy, so a caller's policy keeps
         // its own reset — and the caller's policy is the one that runs, not the library's.
         var services = new ServiceCollection();
@@ -229,6 +234,7 @@ public class ResetTimingDependencyInjectionTests
     [Fact(Timeout = 30_000)]
     public void CallerPolicyRegisteredAfterThePool_ShouldStillBeUsedAndKeepItsOwnReset()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The other half, and the case a "was the fallback added?" flag gets wrong: the caller registered
         // their policy *after* the pool, so a second descriptor exists and GetRequiredService hands it
         // out. The fallback is therefore not what runs, and it must not be pinned away — dropping the
@@ -253,6 +259,7 @@ public class ResetTimingDependencyInjectionTests
     [Fact(Timeout = 30_000)]
     public void PolicyFactory_ShouldStillWinOverTheOptionsDerivedDefault()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // B8's factory is an explicit, name-aware instruction, so it stays first — and its policy is
         // pinned, so the switches do not move it.
         var services = new ServiceCollection();

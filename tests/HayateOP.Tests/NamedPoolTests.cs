@@ -23,6 +23,7 @@ public class NamedPoolTests
     [Fact(Timeout = 30_000)]
     public void ServiceKey_ShouldBuildTheCanonicalRegistryName()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var key = HayateServiceKey.Create<TestObject>("primary");
 
         Assert.Equal("primary", key.Name);
@@ -34,6 +35,7 @@ public class NamedPoolTests
     [Fact(Timeout = 30_000)]
     public void ServiceKey_ShouldRejectNamesThatCannotBeAddressed()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The separator is what keeps the registry key unambiguous, so a name containing it would
         // make two different keys resolve to the same registry entry.
         Assert.Throws<ArgumentException>(() => HayateServiceKey.Create<TestObject>("a:b"));
@@ -45,6 +47,7 @@ public class NamedPoolTests
     [Fact(Timeout = 30_000)]
     public void ServiceKey_Equality_ShouldCoverElementTypeAndName()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var a = HayateServiceKey.Create<TestObject>("primary");
         var sameAgain = HayateServiceKey.Create<TestObject>("primary");
         var otherName = HayateServiceKey.Create<TestObject>("replica");
@@ -61,6 +64,7 @@ public class NamedPoolTests
     [Fact(Timeout = 30_000)]
     public void ServiceKey_TryCreate_ShouldReportUnusableNamesInsteadOfThrowing()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.True(HayateServiceKey.TryCreate<TestObject>("primary", out var key));
         Assert.NotNull(key);
         Assert.Equal("TestObject:primary", key!.RegistryName);
@@ -74,6 +78,7 @@ public class NamedPoolTests
     [Fact(Timeout = 30_000)]
     public void Factory_Create_ShouldBuildAnIndependentlyConfiguredPool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var registry = new HayateObjectPoolRegistry();
         var factory = new HayatePoolFactory(registry);
 
@@ -94,6 +99,7 @@ public class NamedPoolTests
     [Fact(Timeout = 30_000)]
     public void Factory_GetOrCreate_ShouldReuseAnAlreadyRegisteredPool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var registry = new HayateObjectPoolRegistry();
         var factory = new HayatePoolFactory(registry);
 
@@ -110,6 +116,7 @@ public class NamedPoolTests
     [Fact(Timeout = 30_000)]
     public void Factory_Create_ShouldReplaceTheRegisteredPool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var registry = new HayateObjectPoolRegistry();
         var factory = new HayatePoolFactory(registry);
 
@@ -126,6 +133,7 @@ public class NamedPoolTests
     [Fact(Timeout = 30_000)]
     public void Factory_WithoutRegistry_ShouldNotDeduplicate()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // No registry means no place to remember a pool, so GetOrCreate degrades to Create rather
         // than silently pretending to deduplicate.
         var factory = new HayatePoolFactory();
@@ -142,6 +150,7 @@ public class NamedPoolTests
     [Fact(Timeout = 30_000)]
     public void Factory_ShouldRejectElementTypesItCannotCreate()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var factory = new HayatePoolFactory();
         var noDefaultCtor = HayateServiceKey.Create(typeof(NoDefaultCtorObject), "probe");
 
@@ -153,6 +162,7 @@ public class NamedPoolTests
     [Fact(Timeout = 30_000)]
     public void Factory_ShouldSurfaceBuildFailuresUnwrapped()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var factory = new HayatePoolFactory();
 
         // A rejected configuration must reach the caller as the builder's own InvalidOperationException,
@@ -164,6 +174,7 @@ public class NamedPoolTests
     [Fact(Timeout = 30_000)]
     public void Registry_TypedLookup_ShouldVerifyTheElementType()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var registry = new HayateObjectPoolRegistry();
         var factory = new HayatePoolFactory(registry);
 
@@ -215,7 +226,7 @@ public class NamedPoolTests
         primary.Release(fromPrimary);
         replica.Release(fromReplica);
 
-        var asyncLease = await replica.AcquireAsync();
+        var asyncLease = await replica.AcquireAsync(TestContext.Current.CancellationToken);
         replica.Release(asyncLease);
 
         Assert.Equal(1, primary.GetStats().TotalAcquired);

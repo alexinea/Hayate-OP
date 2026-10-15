@@ -72,7 +72,7 @@ public class DiagnosticMetricsTests
         sink.RecordObjectAcquired("probe", new PooledResource(), 0.5);
 
         // The event landed on the HayateOP meter, and nowhere else.
-        var acquire = Assert.Single(points.Where(p => p.Name == "HayatePoolAcquire"));
+        var acquire = Assert.Single(points, p => p.Name == "HayatePoolAcquire");
         Assert.Equal(1, acquire.Value);
         Assert.Equal("probe", acquire.Tags[HayateMetricsMeter.TagPoolName]);
 
@@ -99,17 +99,17 @@ public class DiagnosticMetricsTests
         var item = pool.Acquire();
         pool.Release(item);
 
-        var acquire = Assert.Single(points.Where(p => p.Name == "HayatePoolAcquire"));
+        var acquire = Assert.Single(points, p => p.Name == "HayatePoolAcquire");
         Assert.Equal(1, acquire.Value);
         Assert.Equal("diag", acquire.Tags[HayateMetricsMeter.TagPoolName]);
 
-        var release = Assert.Single(points.Where(p => p.Name == "HayatePoolRelease"));
+        var release = Assert.Single(points, p => p.Name == "HayatePoolRelease");
         Assert.Equal(1, release.Value);
         Assert.Equal("diag", release.Tags[HayateMetricsMeter.TagPoolName]);
         Assert.Equal(true, release.Tags[HayateMetricsMeter.TagValid]);
 
         // The borrow-path histogram carries the measured wait, not a placeholder.
-        var wait = Assert.Single(points.Where(p => p.Name == "HayatePoolWaitTime"));
+        var wait = Assert.Single(points, p => p.Name == "HayatePoolWaitTime");
         Assert.True(wait.Value >= 0.0);
 
         listener.Dispose();
@@ -134,11 +134,11 @@ public class DiagnosticMetricsTests
         Assert.Empty(points);
         listener.RecordObservableInstruments();
 
-        var size = Assert.Single(points.Where(p => p.Name == "HayatePoolSize"));
+        var size = Assert.Single(points, p => p.Name == "HayatePoolSize");
         Assert.Equal("gauge", size.Tags[HayateMetricsMeter.TagPoolName]);
         Assert.True(size.Value >= 2.0, $"expected at least the pre-warmed capacity, got {size.Value}");
 
-        var available = Assert.Single(points.Where(p => p.Name == "HayatePoolAvailable"));
+        var available = Assert.Single(points, p => p.Name == "HayatePoolAvailable");
         Assert.Equal("gauge", available.Tags[HayateMetricsMeter.TagPoolName]);
         Assert.True(available.Value > 0.0, "a fresh pool has idle objects");
 
@@ -156,7 +156,7 @@ public class DiagnosticMetricsTests
         var (listener, points) = BuildListener("DotNetCore.HayateOP");
         sink.RecordObjectMiss("probe");
 
-        Assert.Single(points.Where(p => p.Name == "HayatePoolMiss"));
+        Assert.Single(points, p => p.Name == "HayatePoolMiss");
 
         // Nothing was published under the default name.
         var (defaultListener, defaultPoints) = BuildListener(HayateMetricsMeter.MeterName);
@@ -183,8 +183,8 @@ public class DiagnosticMetricsTests
         coreSink.RecordObjectAcquired("probe", new PooledResource(), 1.0);
         bridgeSink.RecordObjectAcquired("probe", new PooledResource(), 1.0);
 
-        Assert.Single(corePoints.Where(p => p.Name == "HayatePoolAcquire"));
-        Assert.Single(bridgePoints.Where(p => p.Name == "HayatePoolAcquire"));
+        Assert.Single(corePoints, p => p.Name == "HayatePoolAcquire");
+        Assert.Single(bridgePoints, p => p.Name == "HayatePoolAcquire");
 
         coreListener.Dispose();
         bridgeListener.Dispose();

@@ -38,6 +38,7 @@ public class ScopedBorrowTests
     [Fact(Timeout = 30_000)]
     public void AcquireScoped_ShouldReturnTheObject_WhenTheScopeEnds()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder().Build();
         Assert.Equal(1, pool.GetStats().PooledCount);
 
@@ -62,6 +63,7 @@ public class ScopedBorrowTests
     [Fact(Timeout = 30_000)]
     public void AcquireScoped_ShouldReturnTheObject_WhenTheScopeBodyThrows()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder().Build();
 
         // A named local keeps the lambda an Action: a body that only throws would also convert to
@@ -82,6 +84,7 @@ public class ScopedBorrowTests
     [Fact(Timeout = 30_000)]
     public void Dispose_ShouldReturnTheObjectExactlyOnce()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // CreateOnDemand keeps every borrow immediate, so the assertions depend only on return semantics
         // and not on how long a wait takes.
         using var pool = BaseBuilder()
@@ -107,6 +110,7 @@ public class ScopedBorrowTests
     [Fact(Timeout = 30_000)]
     public void Value_ShouldThrow_AfterTheScopeWasDisposed()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder().Build();
 
         var scope = pool.AcquireScoped();
@@ -123,6 +127,7 @@ public class ScopedBorrowTests
     [Fact(Timeout = 30_000)]
     public void AcquireScoped_WithTimeout_ShouldThrowWithoutBorrowing()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder().WithMinSize(1).WithMaxSize(1).Build();
 
         using (var held = pool.AcquireScoped())
@@ -143,7 +148,7 @@ public class ScopedBorrowTests
         using var pool = BaseBuilder().Build();
 
         TestObject borrowed;
-        using (var scope = await pool.AcquireScopeAsync())
+        using (var scope = await pool.AcquireScopeAsync(TestContext.Current.CancellationToken))
         {
             borrowed = scope.Value;
             Assert.True(scope.IsActive);
@@ -158,6 +163,7 @@ public class ScopedBorrowTests
     [Fact(Timeout = 30_000)]
     public async Task AcquireScopeAsync_WithTimeout_ShouldThrowWithoutBorrowing()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder().WithMinSize(1).WithMaxSize(1).Build();
 
         using (var held = pool.AcquireScoped())
@@ -172,6 +178,7 @@ public class ScopedBorrowTests
     [Fact(Timeout = 30_000)]
     public async Task AcquireScopeAsync_ShouldThrowNothingWhenAlreadyCancelled()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BaseBuilder().WithMinSize(1).WithMaxSize(1).Build();
 
         using (var held = pool.AcquireScoped())
@@ -190,6 +197,7 @@ public class ScopedBorrowTests
     [Fact(Timeout = 30_000)]
     public void Simple_ShouldBuildABoundedPool_ThatCreatesLazily()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var created = 0;
         using var pool = HayatePool.Simple<TestObject>(4, () =>
         {
@@ -231,6 +239,7 @@ public class ScopedBorrowTests
     [Fact(Timeout = 60_000)]
     public void Simple_ShouldServeUpToTheRequestedSize_InsteadOfTimingOutOnAMiss()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var created = 0;
         using var pool = HayatePool.Simple<TestObject>(4, () =>
         {
@@ -263,6 +272,7 @@ public class ScopedBorrowTests
     [Fact(Timeout = 30_000)]
     public void Simple_ShouldUseTheFactory_AndRunTheAcquireCallback()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var acquired = new List<TestObject>();
 
         using var pool = HayatePool.Simple<TestObject>(2, () => new TestObject(), acquired.Add);
@@ -283,6 +293,7 @@ public class ScopedBorrowTests
     [Fact(Timeout = 30_000)]
     public void Simple_ShouldHonourThePoolName()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = HayatePool.Simple<TestObject>(2, () => new TestObject(), null, "s2-simple");
 
         using (var scope = pool.AcquireScoped())
@@ -295,6 +306,7 @@ public class ScopedBorrowTests
     [Fact(Timeout = 30_000)]
     public void Simple_ShouldRejectAnInvalidSizeOrFactory()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Throws<ArgumentOutOfRangeException>(() => HayatePool.Simple<TestObject>(0, () => new TestObject()));
         Assert.Throws<ArgumentOutOfRangeException>(() => HayatePool.Simple<TestObject>(-1, () => new TestObject()));
         Assert.Throws<ArgumentNullException>(() => HayatePool.Simple<TestObject>(2, null!));

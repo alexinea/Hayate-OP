@@ -38,6 +38,7 @@ public class D3ReleaseConcurrencyTests
     [Fact(Timeout = 60000)]
     public void D3_1_ReleaseRoundTrip_SmallPoolOverSharding_NoTimeout()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // ShardCount=4 + MaxSize=2 makes shard 2/3 have max=0
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(1)
@@ -82,6 +83,7 @@ public class D3ReleaseConcurrencyTests
     [Fact(Timeout = 60000)]
     public void D3_2_ReleaseShouldNotDescreasePooledCount_BelowMinSize()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(1)
             .WithMaxSize(2)
@@ -152,7 +154,7 @@ public class D3ReleaseConcurrencyTests
                     try { pool.Release(obj); }
                     catch (Exception ex) { exceptions.Add(ex); }
                 }
-            });
+            }, TestContext.Current.CancellationToken);
         }
 
         startSignal.Set();
@@ -213,7 +215,7 @@ public class D3ReleaseConcurrencyTests
                     try { pool.Release(obj); }
                     catch (Exception ex) { exceptions.Add(ex); }
                 }
-            });
+            }, TestContext.Current.CancellationToken);
         }
 
         await Task.WhenAll(tasks);

@@ -177,10 +177,10 @@ namespace DotNetCore.HayateOP.Tests
         [Fact]
         public void AcquireLeased_ShouldRejectANullPool()
         {
-            IHayateObjectPool<TestObject> nullPool = null;
+            IHayateObjectPool<TestObject>? nullPool = null;
 
-            Assert.Throws<ArgumentNullException>(() => nullPool.AcquireLeased());
-            Assert.Throws<ArgumentNullException>(() => nullPool.AcquireLeased(TimeSpan.FromSeconds(1)));
+            Assert.Throws<ArgumentNullException>(() => nullPool!.AcquireLeased());
+            Assert.Throws<ArgumentNullException>(() => nullPool!.AcquireLeased(TimeSpan.FromSeconds(1)));
         }
 
         // ── G-6: the shape constraints that decided the type ───────────────────────────────────────────
@@ -381,10 +381,10 @@ namespace DotNetCore.HayateOP.Tests
         [Fact(Timeout = 30_000)]
         public async Task AcquireLeaseAsync_ShouldRejectANullPool()
         {
-            IHayateObjectPool<TestObject> nullPool = null;
+            IHayateObjectPool<TestObject>? nullPool = null;
 
-            await Assert.ThrowsAsync<ArgumentNullException>(() => nullPool.AcquireLeaseAsync());
-            await Assert.ThrowsAsync<ArgumentNullException>(() => nullPool.AcquireLeaseAsync(TimeSpan.FromSeconds(1)));
+            await Assert.ThrowsAsync<ArgumentNullException>(() => nullPool!.AcquireLeaseAsync());
+            await Assert.ThrowsAsync<ArgumentNullException>(() => nullPool!.AcquireLeaseAsync(TimeSpan.FromSeconds(1)));
         }
 
 #if NET6_0_OR_GREATER

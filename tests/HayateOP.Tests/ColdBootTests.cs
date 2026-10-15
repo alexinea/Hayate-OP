@@ -22,6 +22,7 @@ public class ColdBootTests
     [Fact(Timeout = 60000)]
     public void ColdBoot_BlockTimeout_FirstAcquireShouldNotTimeout()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Min=0 cold pool + BlockTimeout: the old semantics made the first borrow wait the full timeout (and only when autoScaling was on would the first timeouter replenish,
         // with uncertain results); after the fix, when the pool is completely empty it creates on demand and succeeds immediately.
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -64,7 +65,7 @@ public class ColdBootTests
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var task = pool.AcquireAsync(cts.Token);
-        var completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(2)));
+        var completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken));
 
         Assert.True(completed == task, "async cold-boot acquire hung (old behavior: waits forever on empty pool)");
         var obj = await task;
@@ -75,6 +76,7 @@ public class ColdBootTests
     [Fact(Timeout = 60000)]
     public void ColdBoot_ConcurrentFirstAcquire_ShouldCreateExactlyOne()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Prevent duplicate concurrent first borrows: CAS claim guarantees the cold start creates only one object, and the other waiters reuse the return signal.
         const int concurrency = 8;
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -109,6 +111,7 @@ public class ColdBootTests
     [Fact(Timeout = 60000)]
     public void ColdBoot_CreateNew_SemanticsShouldStayUnchanged()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // CreateNew semantics guard: it creates only after the full AcquireTimeout elapses, unaffected by the cold-boot fix.
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("coldboot-createnew")
@@ -140,6 +143,7 @@ public class ColdBootTests
     [Fact(Timeout = 60000)]
     public void BlockTimeout_NonEmptyPoolDoesNotGrowOnMiss()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("coldboot-e1-nonempty")
             .WithEnableAutoScaling(false)
@@ -173,6 +177,7 @@ public class ColdBootTests
     [Fact(Timeout = 60000)]
     public void BlockTimeout_EmptyPoolSecondBorrowDoesNotGrowEither()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The Min=0 shape of the same contract: the first borrow bootstraps the pool, and the second borrow —
         // taken while the first object is still out — has nothing to reuse, is no longer "completely empty",
         // and therefore does not bootstrap again. It waits out the timeout instead.
@@ -204,6 +209,7 @@ public class ColdBootTests
     [Fact(Timeout = 60000)]
     public void CreateOnDemand_ServesTheSameMissWithoutWaiting()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Counter-proof for the two tests above: the identical shape (Min=5, Max=8, auto-scaling off, every
         // object lent out) is served on the spot under CreateOnDemand. Without this pair, "the wait policy did
         // not grow" could not be told apart from "the pool was unable to grow".
@@ -235,6 +241,7 @@ public class ColdBootTests
     [Fact(Timeout = 60000)]
     public void BlockTimeout_GrowsOnlyThroughBackgroundScaling()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The wait-based policies are not growth-less, they just never grow *on the borrow path*: the pool can
         // still be grown from outside while a caller waits, and auto-scaling is the one such path in the
         // library. So a waiter that outlives a scaling period is served by an object it was never handed a
@@ -270,6 +277,7 @@ public class ColdBootTests
     [Fact(Timeout = 60000)]
     public void BlockTimeout_SeesAPreWarmedObjectPromptly()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // PreWarm() is the one idle-list write a caller can trigger directly, so it is the cheapest way to hand
         // a parked waiter an object that no return produced. Since B6-1 it publishes a wake-up signal, and the
         // waiter is woken by that signal rather than by a re-check. The bound below is deliberately loose - it
@@ -309,6 +317,7 @@ public class ColdBootTests
     [Fact(Timeout = 60000)]
     public void BlockTimeout_ParkedWaiterIsWokenByTheSignalNotByTheSlice()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // B6-1 acceptance (wake-up granularity): the synchronous borrow path now waits once, on the signal,
         // instead of re-checking the shard every 100ms. PreWarm() is the event used here because it publishes a
         // signal only after the refactor, which is what makes the two mechanisms separable by measurement: a
@@ -328,7 +337,7 @@ public class ColdBootTests
         var held = pool.Acquire(TimeSpan.FromMilliseconds(500));   // cold boot; the pool is no longer empty
         Assert.Equal(1, pool.GetStats().TotalCreated);
 
-        TestObject served = null;
+        TestObject? served = null;
         var waiter = new Thread(() => { served = pool.Acquire(TimeSpan.FromSeconds(5)); });
         waiter.IsBackground = true;
         waiter.Start();
@@ -353,6 +362,7 @@ public class ColdBootTests
     [Fact(Timeout = 60000)]
     public void Block_WaitsWithoutATimeoutUntilASignalArrives()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The Block policy now waits on the gate with no timeout at all, so the two properties the slice used to
         // provide have to hold on their own: the thread really parks (it is not spinning), and the only way out
         // is a signal. Both are observed from the outside - the thread state while nothing happens, and the
@@ -369,7 +379,7 @@ public class ColdBootTests
         var held = pool.Acquire(TimeSpan.FromMilliseconds(500));   // cold boot; the pool is no longer empty
         Assert.Equal(1, pool.GetStats().TotalCreated);
 
-        TestObject served = null;
+        TestObject? served = null;
         var waiter = new Thread(() => { served = pool.Acquire(); });
         waiter.IsBackground = true;
         waiter.Start();
@@ -392,6 +402,7 @@ public class ColdBootTests
     [Fact(Timeout = 60000)]
     public void BlockTimeout_HonoursTheTimeoutWithoutOvershooting()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // B6-1 acceptance (timeout boundary): the wait is bounded by the timeout itself now, so a miss can no
         // longer overshoot it by up to a re-check slice. The lower bound is the contract that was already
         // pinned - the miss waits the timeout out rather than returning early - and the upper bound is what the

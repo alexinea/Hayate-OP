@@ -24,6 +24,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void Ratios_ShouldReadZeroWhileTheMetricsGateIsClosed()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The counters are present and would divide cleanly, so a non-zero ratio here would mean the
         // gate is decorative. ReuseEfficiency is the discriminating one: (8 - 0) / 8 is a perfect 1.0,
         // which is exactly the lie the flag exists to prevent -- TotalAcquired keeps counting with
@@ -45,6 +46,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void ReuseEfficiency_ShouldBeTheServedShareOfBorrows()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Equal(1.0, new HayatePoolStats { MetricsEnabled = true, TotalAcquired = 8 }.ReuseEfficiency);
         Assert.Equal(0.7, new HayatePoolStats { MetricsEnabled = true, TotalAcquired = 10, TotalMissed = 3 }.ReuseEfficiency);
         Assert.Equal(0.0, new HayatePoolStats { MetricsEnabled = true, TotalAcquired = 4, TotalMissed = 4 }.ReuseEfficiency);
@@ -53,6 +55,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void ReuseEfficiency_ShouldClampAtZero_WhenMissesOutnumberBorrows()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // TotalMissed also counts a borrow the reject policy refused, and a refused borrow never
         // becomes a TotalAcquired, so the difference can go negative on a pool that rejects under load.
         var stats = new HayatePoolStats { MetricsEnabled = true, TotalAcquired = 1, TotalMissed = 5 };
@@ -63,6 +66,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void Ratios_ShouldBeZeroAndFinite_WhenTheDenominatorIsZero()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Plan acceptance 3: a zero denominator returns 0, never NaN or Infinity. Unguarded, the three
         // expressions here would be 0/0, 7/0 and 0/0.
         var stats = new HayatePoolStats
@@ -86,6 +90,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void CreatesPerAcquire_ShouldCountEveryCreation_NotOnlyTheMissedOnes()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Pre-warm and auto-scaling create objects no borrow asked for, so the ratio is deliberately
         // TotalCreated / TotalAcquired rather than TotalMissed / TotalAcquired. Here four pre-warmed
         // objects served eight borrows with no miss at all.
@@ -103,6 +108,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void UptimeSeconds_ShouldBeZeroWithoutAnOrigin_AndClampABackwardsClock()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Equal(0, new HayatePoolStats().UptimeSeconds);
 
         var elapsed = new HayatePoolStats { StartedAt = DateTimeOffset.UtcNow.AddSeconds(-2) }.UptimeSeconds;
@@ -115,6 +121,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void AcquiresPerSecond_ShouldDivideByUptime()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var stats = new HayatePoolStats
         {
             MetricsEnabled = true,
@@ -129,6 +136,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void ToString_ShouldRenderTheOperationalSection_WithSentinelsAsDashes()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var stats = new HayatePoolStats { MetricsEnabled = true, TotalAcquired = 4, PeakActiveObjects = 2 };
 
         var text = stats.ToString();
@@ -152,6 +160,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void ExistingFields_ShouldKeepTheirExactValues()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g1-golden")
             .WithMinSize(4)
@@ -214,6 +223,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void ZeroBorrows_ShouldReportDeterminedZeros()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g1-zero-borrows")
             .WithMinSize(4)
@@ -243,6 +253,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void MetricsOff_ShouldLeaveEveryOperationalMemberAtItsGateClosedReading()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g1-off")
             .WithMinSize(4)
@@ -282,6 +293,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void MetricsOn_ShouldRecordTheSameBurst()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The control for the test above: the identical burst with the gate open. Without this pair the
         // zeros there could just as well mean the peak is never recorded at all.
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -312,6 +324,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void PeakActiveObjects_ShouldBeAHighWaterMark()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g1-peak")
             .WithMinSize(4)
@@ -333,6 +346,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void TakeSnapshot_ShouldAlsoRaiseThePeak()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g1-snapshot-peak")
             .WithMinSize(4)
@@ -355,6 +369,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void LastActivityTime_ShouldTrackBorrowsAndReturns_ButNotPreWarm()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g1-activity")
             .WithMinSize(1)
@@ -385,6 +400,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void Ratios_ShouldBeLiveOnAPoolThatOnlyReuses()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("g1-ratios")
             .WithMinSize(4)
@@ -423,6 +439,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void ARejectedBorrow_ShouldNotDriveReuseEfficiencyNegative()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The engine half of the clamp: an Abort rejection records a miss without an acquire, so the
         // denominator is zero and the difference is negative. Neither may leak into the ratio.
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -445,6 +462,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void LeanProfile_ShouldReportTheOperationalMembersAsUnmeasured()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithLean()
             .WithMinSize(4)
@@ -471,6 +489,7 @@ public class PoolStatsOperationalMetricsTests
     [Fact(Timeout = 30_000)]
     public void UnboundedPool_ShouldReportItsOwnOperationalReading()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateUnboundedPool<TestObject>(maxIdle: 4);
 
         var fresh = pool.GetStats();

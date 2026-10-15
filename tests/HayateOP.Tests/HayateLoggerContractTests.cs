@@ -105,6 +105,7 @@ public class HayateLoggerContractTests
     [Fact(Timeout = 30_000)]
     public void HayateLogLevel_ShouldCarryTheMicrosoftExtensionsLogLevelValues()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The bridge casts rather than maps, so the two enums have to agree numerically. If this fails,
         // HayateMicrosoftLoggerAdapter.IsEnabled is filtering at the wrong level and nobody notices
         // until an entry goes missing.
@@ -122,6 +123,7 @@ public class HayateLoggerContractTests
     [Fact(Timeout = 30_000)]
     public void BaseClass_ShouldAnswerEnabledForEveryRealLevel_AndDisabledForNone()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var logger = new MinimalLogger();
 
         foreach (var level in new[]
@@ -139,6 +141,7 @@ public class HayateLoggerContractTests
     [Fact(Timeout = 30_000)]
     public void BaseClass_ShouldLeaveTheAddedMembersAsNoOps()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var logger = new MinimalLogger();
         IHayateLogger iface = logger;
 
@@ -160,6 +163,7 @@ public class HayateLoggerContractTests
     [Fact(Timeout = 30_000)]
     public void DefaultBeginScope_ShouldHandBackTheSharedNullScope()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var logger = new MinimalLogger();
 
         // The interface promises a non-null handle, so the default has to be a real object — and a
@@ -175,6 +179,7 @@ public class HayateLoggerContractTests
     [Fact(Timeout = 30_000)]
     public void MigratedImplementation_ShouldStillReceiveInterfaceCalls()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var logger = new MigratedLogger();
         IHayateLogger iface = logger;
 
@@ -188,6 +193,7 @@ public class HayateLoggerContractTests
     [Fact(Timeout = 30_000)]
     public void HidingAnInheritedMember_ShouldNotReachTheInterfaceMap()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var logger = new HidingDerivative();
         IHayateLogger iface = logger;
 
@@ -204,6 +210,7 @@ public class HayateLoggerContractTests
     [Fact(Timeout = 30_000)]
     public void BaseClass_MustKeepTheTwoXMembersAbstract_AndTheThreeZeroAdditionsConcrete()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // A reflection guard, because the thing being relied on is the compiler and there is no runtime
         // state left to observe once the members are abstract. It was measured on 2026-09-23 with the
         // members declared virtual-with-a-body: the one-clause migration compiled, and the migrated
@@ -227,6 +234,7 @@ public class HayateLoggerContractTests
     [Fact(Timeout = 30_000)]
     public void IsEnabledFalse_ShouldSuppressTheDebugTrace_WithoutSilencingAnythingElse()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var logger = new DebugSuppressedLogger();
 
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -254,6 +262,7 @@ public class HayateLoggerContractTests
     [Fact(Timeout = 30_000)]
     public void IsEnabledTrue_ShouldLetTheDebugTraceThrough()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The other arm of the gate: same pool, same traffic, a logger that answers true.
         var logger = new OpenDebugLogger();
 
@@ -278,6 +287,7 @@ public class HayateLoggerContractTests
     [Fact(Timeout = 60_000)]
     public void IsEnabledGate_ShouldRemoveThePerOperationAllocation()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Acceptance 3 of L7: the gate exists so a logger that would discard the entry never pays for
         // the params array and the boxed arguments. Same pool, same traffic, two loggers that differ
         // only in what IsEnabled answers; the gated arm has to allocate less. Measured on the calling

@@ -12,7 +12,20 @@
 // so assembly-level parallelism disable uses v3's Xunit.v3.Parallelization(Mode = ParallelMode.None).
 // The net6/net7 (v2 + VSTest) compatible version is in tests/legacy/HayateOP.Tests.Legacy/AssemblyInfo.cs,
 // which uses the v2 syntax; this file no longer needs conditional-compilation splits.
+using System.Diagnostics.CodeAnalysis;
 using Xunit.v3;
 
 // v3: disable all parallelism at the assembly level (equivalent to v2's DisableTestParallelization)
 [assembly: Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]
+
+// xUnit1031 ("Test methods should not use blocking task operations") exists because a blocked test
+// thread can starve the other tests that share xUnit's thread pool, which risks a deadlock. That
+// hazard needs concurrency, and parallelization is switched off immediately above, so the rule no
+// longer applies here — xUnit's own documentation says as much for an assembly that disables
+// parallelism. The affected cases are the concurrency contracts themselves: they assert that a
+// borrow blocks until a return frees the slot, that a pre-warmed acquire stays parked until the
+// gate opens, and similar wait-and-wake behaviour. Those assertions are the thing under test, so
+// rewriting them as await would delete the coverage rather than fix a defect. Suppressed by
+// justification, deliberately not by a blanket NoWarn (see common.tests.props for that convention).
+[assembly: SuppressMessage("xUnit", "xUnit1031",
+    Justification = "Assembly-level parallelization is disabled, so the blocked-thread starvation hazard the rule guards against cannot occur.")]

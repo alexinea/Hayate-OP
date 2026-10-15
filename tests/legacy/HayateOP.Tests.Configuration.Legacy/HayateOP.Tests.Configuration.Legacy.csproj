@@ -6,7 +6,7 @@
     <!-- net48 的 SDK 默认语言版本是 C# 7.3（同上）。 -->
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>disable</Nullable>
+    <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <!-- B7 / W-B7-3：同上，net48 需要绑定重定向。 -->
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>

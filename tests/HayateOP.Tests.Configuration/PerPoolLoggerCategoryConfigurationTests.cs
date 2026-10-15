@@ -54,7 +54,7 @@ namespace HayateOP.Tests.Configuration
         {
             var factory = new RecordingLoggerFactory();
             var config = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string>
+                .AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     { "HayatePool:Global:MinPoolSize", "1" },
                     { "HayatePool:Global:MaxPoolSize", "4" }

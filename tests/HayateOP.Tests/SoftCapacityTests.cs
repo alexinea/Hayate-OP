@@ -71,6 +71,7 @@ public class SoftCapacityTests
     [Fact(Timeout = 30_000)]
     public void EnginePool_DropsReturnsOnceSoftCapacityIsReached()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = EngineBuilder(policy, softCapacity: 2).Build();
 
@@ -84,6 +85,7 @@ public class SoftCapacityTests
     [Fact(Timeout = 30_000)]
     public void EnginePool_ZeroDefault_RetainsEveryReturn()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = EngineBuilder(policy, softCapacity: null).Build();
 
@@ -97,6 +99,7 @@ public class SoftCapacityTests
     [Fact(Timeout = 30_000)]
     public void EnginePool_PoolStillLendsFullCeiling_AfterDroppingExcess()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = EngineBuilder(policy, softCapacity: 2).Build();
 
@@ -119,6 +122,7 @@ public class SoftCapacityTests
     [Fact(Timeout = 30_000)]
     public void LeanPool_HonoursSoftCapacityThroughItsSlotLimit()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPolicy(policy)
@@ -139,6 +143,7 @@ public class SoftCapacityTests
     [Fact(Timeout = 30_000)]
     public void IsValid_RejectsSoftCapacityThatCouldNeverTakeEffect()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Above the hard ceiling: the check could never fire.
         Assert.False(new HayatePoolOptions { MinPoolSize = 0, MaxPoolSize = 4, SoftCapacity = 5 }.IsValid());
         // Below the floor: the pool could not hold the minimum it promises.
@@ -153,6 +158,7 @@ public class SoftCapacityTests
     [Fact(Timeout = 30_000)]
     public void Builder_RejectsNegativeSoftCapacity()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Throws<ArgumentOutOfRangeException>(
             () => new HayatePoolBuilder<TestObject>().WithSoftCapacity(-1));
     }
@@ -160,6 +166,7 @@ public class SoftCapacityTests
     [Fact(Timeout = 30_000)]
     public void ReloadConfig_RejectsSoftCapacityChange_AndRestoresTheOriginalValue()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = EngineBuilder(new CountingPolicy(), softCapacity: 2).Build();
 
         Assert.Throws<InvalidOperationException>(() => pool.ReloadConfig(o => o.SoftCapacity = 3));

@@ -7,7 +7,7 @@
          （主 legacy 套件由 common.tests.props 提供，本项目属性是内联声明的，故在此显式指定）。 -->
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>disable</Nullable>
+    <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <!-- B7 / W-B7-3：net48 上 M.E 8.x 包族会带入多个版本的依赖程序集，生成绑定重定向，
          否则运行时按混合版本加载（沿 HayateOP.Tests.Legacy 的 Z1 处理）。 -->

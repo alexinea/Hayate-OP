@@ -51,6 +51,7 @@ public class AutoDisposeWithSystemTests
     [Fact(Timeout = 30_000)]
     public void AutoDisposeWithSystem_ShouldBeOffByDefault()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var hook = new ManualShutdownHook();
 
         // Supplying a hook is not enough: the feature has to be asked for explicitly.
@@ -66,6 +67,7 @@ public class AutoDisposeWithSystemTests
     [Fact(Timeout = 30_000)]
     public void AutoDisposeWithSystem_ShouldDisposeThePool_WhenShutdownFires()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var hook = new ManualShutdownHook();
 
         var pool = BaseBuilder(hook).WithAutoDisposeWithSystem().Build();
@@ -84,6 +86,7 @@ public class AutoDisposeWithSystemTests
     [Fact(Timeout = 30_000)]
     public void AutoDisposeWithSystem_ShouldDetach_WhenThePoolIsDisposed()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var hook = new ManualShutdownHook();
 
         var pool = BaseBuilder(hook).WithAutoDisposeWithSystem().Build();
@@ -102,6 +105,7 @@ public class AutoDisposeWithSystemTests
     [Fact(Timeout = 30_000)]
     public void AutoDisposeWithSystem_ShouldReleaseTheObjectOnlyOnce()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var hook = new ManualShutdownHook();
 
         var pool = BaseBuilder(hook).WithAutoDisposeWithSystem().Build();
@@ -118,6 +122,7 @@ public class AutoDisposeWithSystemTests
     [Fact(Timeout = 30_000)]
     public void ProcessShutdownHook_ShouldSubscribeOnce_AndForgetCompletely()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var hook = new HayateProcessShutdownHook();
         var calls = 0;
 
@@ -136,6 +141,7 @@ public class AutoDisposeWithSystemTests
     [Fact(Timeout = 30_000)]
     public void Options_ShouldCarryTheSettingThroughACopy()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var source = new HayatePoolOptions { EnableAutoDisposeWithSystem = true };
 
         Assert.True(source.CopyTo().EnableAutoDisposeWithSystem);

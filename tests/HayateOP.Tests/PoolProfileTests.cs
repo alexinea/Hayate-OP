@@ -30,6 +30,7 @@ public class PoolProfileTests
     [Fact(Timeout = 30_000)]
     public void LeanProfile_ShouldLandTheExplicitConfiguration()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The same options written out by hand.
         var handWritten = new HayatePoolOptions
         {
@@ -59,6 +60,7 @@ public class PoolProfileTests
     [Fact(Timeout = 30_000)]
     public void LeanProfile_ShouldMatchTheExplicitBuilderChain()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var profiled = new HayatePoolBuilder<TestObject>().WithLeanProfile().Build();
         using var explicitChain = new HayatePoolBuilder<TestObject>()
             .WithLean()
@@ -78,6 +80,7 @@ public class PoolProfileTests
     [Fact(Timeout = 30_000)]
     public void LeanProfile_ShouldAlsoMatchTheChainInTheOppositeCallOrder()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Lean is a mode, not a knob: feature toggles enabled before the profile are normalized away by the
         // profile itself, exactly as ApplyFeatureSwitches would do for EnableLean on its own.
         using var profiled = new HayatePoolBuilder<TestObject>().WithLeanProfile().Build();
@@ -98,6 +101,7 @@ public class PoolProfileTests
     [Fact(Timeout = 30_000)]
     public void FullProfile_ShouldTurnEveryFeatureSwitchOn()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var options = new HayatePoolOptions().UseFullProfile();
 
         Assert.False(options.EnableLean);
@@ -115,6 +119,7 @@ public class PoolProfileTests
     [Fact(Timeout = 30_000)]
     public void Profiles_ShouldLeaveSizingTimeoutAndRejectPolicyAlone()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var options = new HayatePoolOptions
         {
             MinPoolSize = 7,
@@ -141,6 +146,7 @@ public class PoolProfileTests
     [Fact(Timeout = 30_000)]
     public void Profiles_ShouldBeOrderDeterministicAgainstEachOther()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Whichever profile is applied last wins, in both directions.
         var fullLast = new HayatePoolOptions().UseLeanProfile().UseFullProfile();
         Assert.False(fullLast.EnableLean);
@@ -158,6 +164,7 @@ public class PoolProfileTests
     [Fact(Timeout = 30_000)]
     public void FullProfile_ShouldBeRefinableByALaterFeatureCall()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithFullProfile()
             .WithEnableAllocationTracking(false)
@@ -174,6 +181,7 @@ public class PoolProfileTests
     [Fact(Timeout = 30_000)]
     public void LeanProfile_ShouldBehaveAsTheLeanFastPath()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithLeanProfile()
             .WithMinSize(0)
@@ -198,6 +206,7 @@ public class PoolProfileTests
     [Fact(Timeout = 30_000)]
     public void FullProfile_Pool_ShouldRecordStatistics()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>().WithFullProfile().WithMinSize(0).Build();
 
         var obj = pool.Acquire();

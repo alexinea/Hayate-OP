@@ -124,7 +124,7 @@ public class ObjectPoolCompatTests
     // ─────────────────────────────────────────────────────────────
 
     [Fact]
-    public void HayateCompatProvider_ConcurrentMissesBelowCapacity_AllServed()
+    public async Task HayateCompatProvider_ConcurrentMissesBelowCapacity_AllServed()
     {
         const int requests = 4;
 
@@ -156,10 +156,13 @@ public class ObjectPoolCompatTests
                 var sw = Stopwatch.StartNew();
                 results[index] = pool.Get();
                 getMs[index] = sw.ElapsedMilliseconds;
-            });
+            }, TestContext.Current.CancellationToken);
         }
 
-        Task.WaitAll(tasks);
+        // Awaited, not Task.WaitAll: this assembly leaves parallelization on, so xUnit1031 applies
+        // for real and blocking the test thread here could starve the very thread-pool workers the
+        // four participants need. The barrier release and the stopwatch bounds are unchanged.
+        await Task.WhenAll(tasks);
 
         Assert.All(results, Assert.NotNull);
         Assert.Equal(requests, results.Distinct().Count());     // one object per request, no double lending

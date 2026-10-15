@@ -74,6 +74,7 @@ public class ThreadLocalFrontSlotTests
     [Fact(Timeout = 30_000)]
     public void OffByDefault_TheCycleIsWhatItAlwaysWas()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = EngineBuilder(policy, frontSlot: false, minSize: 2, maxSize: 2).Build();
 
@@ -95,6 +96,7 @@ public class ThreadLocalFrontSlotTests
     [Fact(Timeout = 30_000)]
     public void Enabled_TheSameThreadGetsItsOwnObjectBack()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Three idle objects, two borrowed: one stays in the shard throughout. So a borrow that finds
         // the parked object can only have come from the front slot — the shard would have handed out the
         // one it held, which is a different instance.
@@ -128,10 +130,10 @@ public class ThreadLocalFrontSlotTests
         var policy = new CountingPolicy();
         using var pool = EngineBuilder(policy, frontSlot: true, minSize: 2, maxSize: 4).Build();
 
-        var first = pool.AcquireAsync().GetAwaiter().GetResult();
+        var first = pool.AcquireAsync(TestContext.Current.CancellationToken).GetAwaiter().GetResult();
         pool.Release(first);
 
-        var second = pool.AcquireAsync().GetAwaiter().GetResult();
+        var second = pool.AcquireAsync(TestContext.Current.CancellationToken).GetAwaiter().GetResult();
 
         Assert.Same(first, second);
         Assert.Equal(2, policy.Created);
@@ -151,7 +153,11 @@ public class ThreadLocalFrontSlotTests
 
         var item = pool.Acquire();
 
-        Task.Run(() => pool.Release(item)).Wait();
+        // Both calls take the token: xUnit1051 reports each blocking wait that could be cancelled, and
+        // the outer Task.Run is one too. Deliberately still a blocking wait rather than `await` — the
+        // assertion below has to run on this thread, which has never borrowed from the pool.
+        Task.Run(() => pool.Release(item), TestContext.Current.CancellationToken)
+            .Wait(TestContext.Current.CancellationToken);
 
         var again = pool.Acquire();
 
@@ -164,6 +170,7 @@ public class ThreadLocalFrontSlotTests
     [Fact(Timeout = 30_000)]
     public void Enabled_AParkedObjectStillCountsAsIdle()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // A parked object lives in no shard, so the shard-only sums would report it as borrowed: the pool
         // would say it holds nothing while holding an object. Both the statistics and the snapshot have
         // to include it.
@@ -182,6 +189,7 @@ public class ThreadLocalFrontSlotTests
     [Fact(Timeout = 30_000)]
     public void Enabled_ClearLeavesNothingParked()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = EngineBuilder(policy, frontSlot: true, minSize: 2, maxSize: 4).Build();
 
@@ -206,6 +214,7 @@ public class ThreadLocalFrontSlotTests
     [Fact(Timeout = 30_000)]
     public void Enabled_ProactiveEvictReachesAParkedObject()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // A parked object is marked Borrowed (that is what keeps a shard from accepting the wrapper
         // twice), so it cannot come out of a shard snapshot; the eviction paths have to look at the
         // tier's own slots.
@@ -224,6 +233,7 @@ public class ThreadLocalFrontSlotTests
     [Fact(Timeout = 30_000)]
     public void Enabled_AnObjectTakenBackFromTheSlotIsStillTrackedAsBorrowed()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // A park unlinks the wrapper from the borrowed list — it is idle in the slot, and an abandoned
         // scan must not treat an idle object as a loan — so the slot hit has to re-link it. Without that,
         // an object borrowed from the slot and then abandoned is invisible to the scan and is never
@@ -267,6 +277,7 @@ public class ThreadLocalFrontSlotTests
     [Fact(Timeout = 30_000)]
     public void TheTwoStorageSwitches_AreIndependent()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Evaluated as a pair, switched independently: every combination has to lend, count and reuse the
         // same objects, or one of the two would be reporting a pool the other cannot serve.
         foreach (var lockFree in new[] { false, true })
@@ -311,6 +322,7 @@ public class ThreadLocalFrontSlotTests
     [Fact(Timeout = 30_000)]
     public void LeanMode_TurnsTheSlotOff()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Lean has its own fast lane ahead of its own storage, so the general-purpose tier cannot apply;
         // it is normalized off rather than accepted and ignored.
         using var pool = new HayatePoolBuilder<TestObject>()

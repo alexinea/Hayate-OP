@@ -36,12 +36,16 @@ public class LegacyLoggingNamespaceCallSiteTests
 
             public Sink(CapturingProvider owner, LogLevel minimum) => (_owner, _minimum) = (owner, minimum);
 
-            public IDisposable BeginScope<TState>(TState state) where TState : notnull => new Nop();
+            // Explicit, not implicit: MEL 6.0.4 / 7.0.0 declare BeginScope<TState>(TState state)
+            // without the notnull constraint that 8.0+ adds, so an implicit implementation cannot
+            // match either spelling of the constraint on these targets (CS8633). Going explicit is
+            // what the compiler asks for, and the type still implements ILogger exactly as stated.
+            IDisposable ILogger.BeginScope<TState>(TState state) => new Nop();
 
             public bool IsEnabled(LogLevel logLevel) => logLevel >= _minimum;
 
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception,
-                Func<TState, Exception, string> formatter) => _owner.Messages.Add(formatter(state, exception));
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter) => _owner.Messages.Add(formatter(state, exception));
         }
 
         private sealed class Nop : IDisposable

@@ -225,6 +225,7 @@ public class AsyncPoolDisposalTests
     [Fact(Timeout = 30_000)]
     public async Task AsyncPolicy_DisposeAsync_AwaitsTheDestroyHookWhileItDrains()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var counter = new DisposalCounter();
         var policy = new GatedDestroyPolicy(counter);
         var pool = new HayatePoolBuilder<DualDisposeObject>()
@@ -262,6 +263,7 @@ public class AsyncPoolDisposalTests
     [Fact(Timeout = 30_000)]
     public async Task SyncOnlyPolicy_DisposeAsync_PrefersAsyncDisposalWithoutASynchronousHookCall()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var counter = new DisposalCounter();
         var policy = new SyncOnlyPolicy(counter);
         var pool = new HayatePoolBuilder<DualDisposeObject>()
@@ -288,6 +290,7 @@ public class AsyncPoolDisposalTests
     [Fact(Timeout = 30_000)]
     public void SyncOnlyPolicy_Dispose_KeepsTheSynchronousDrainUnchanged()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var counter = new DisposalCounter();
         var policy = new SyncOnlyPolicy(counter);
         var pool = new HayatePoolBuilder<DualDisposeObject>()
@@ -311,6 +314,7 @@ public class AsyncPoolDisposalTests
     [Fact(Timeout = 30_000)]
     public void AsyncPolicy_Dispose_KeepsTheBareDrainWhilePreferringAsyncDisposal()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var counter = new DisposalCounter();
         var policy = new GatedDestroyPolicy(counter);
         var pool = new HayatePoolBuilder<DualDisposeObject>()
@@ -337,6 +341,7 @@ public class AsyncPoolDisposalTests
     [Fact(Timeout = 30_000)]
     public async Task AsyncPolicy_LeanDisposeAsync_DrainsThroughTheAwaitedDestroyHook()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var counter = new DisposalCounter();
         var policy = new GatedDestroyPolicy(counter);
         var pool = new HayatePoolBuilder<DualDisposeObject>()
@@ -370,6 +375,7 @@ public class AsyncPoolDisposalTests
     [Fact(Timeout = 30_000)]
     public void AsyncPolicy_LeanClear_RunsTheDestroySiteThroughTheAsynchronousHook()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var counter = new DisposalCounter();
         var policy = new GatedDestroyPolicy(counter);
         var pool = new HayatePoolBuilder<DualDisposeObject>()
@@ -415,6 +421,7 @@ public class AsyncPoolDisposalTests
     [Fact(Timeout = 30_000)]
     public async Task PreparationPool_DisposeAsync_ForwardsToTheInnerAsynchronousDrain()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var counter = new DisposalCounter();
         var policy = new GatedDestroyPolicy(counter);
         var inner = new HayatePoolBuilder<DualDisposeObject>()
@@ -447,6 +454,7 @@ public class AsyncPoolDisposalTests
     [Fact(Timeout = 30_000)]
     public async Task PreparationPool_DisposeAsync_FallsBackToTheSynchronousTeardown()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var counter = new DisposalCounter();
         var inner = new SyncOnlyInnerPool(counter);
         var pool = new HayatePreparationPool<DualDisposeObject>(inner, new AlwaysReadyStrategy());
@@ -464,6 +472,7 @@ public class AsyncPoolDisposalTests
     [Fact(Timeout = 30_000)]
     public async Task UnboundedPool_DisposeAsync_ClearsTheRetainedObjects()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var pool = new HayateUnboundedPool<PlainObject>();
         Assert.Equal(4, pool.PreWarm(4));
         Assert.Equal(4, pool.PooledCount);

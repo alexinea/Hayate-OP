@@ -11,7 +11,7 @@ namespace HayateOP.Tests.Configuration
         [Fact]
         public void AddHayatePoolFromConfiguration_ShouldBindGlobalConfig()
         {
-            var configData = new Dictionary<string, string>
+            var configData = new Dictionary<string, string?>
             {
                 {"HayatePool:Global:MinPoolSize", "10"},
                 {"HayatePool:Global:MaxPoolSize", "100"}
@@ -35,7 +35,7 @@ namespace HayateOP.Tests.Configuration
         [Fact]
         public void AddHayatePool_ShouldBindPoolSpecificConfig()
         {
-            var configData = new Dictionary<string, string>
+            var configData = new Dictionary<string, string?>
             {
                 {"HayatePool:Global:MinPoolSize", "5"},
                 {"HayatePool:Pools:TestObject:MinPoolSize", "20"},

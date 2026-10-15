@@ -24,6 +24,7 @@ public class SpecializedFastAppendTests
     [Fact(Timeout = 30_000)]
     public void PooledStringBuilder_Append_Generic_ShouldBuildTheContent()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         var sb = pool.GetObject();
@@ -35,6 +36,7 @@ public class SpecializedFastAppendTests
     [Fact(Timeout = 30_000)]
     public void PooledStringBuilder_Append_WithFormat_ShouldMatchStringFormat()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         var sb = pool.GetObject();
@@ -48,6 +50,7 @@ public class SpecializedFastAppendTests
     [Fact(Timeout = 30_000)]
     public void PooledStringBuilder_Append_Null_ShouldAppendNothing()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         var sb = pool.GetObject();
@@ -59,6 +62,7 @@ public class SpecializedFastAppendTests
     [Fact(Timeout = 30_000)]
     public void PooledStringBuilder_Append_CustomIFormattable_ShouldHonorTheFormat()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         var sb = pool.GetObject();
@@ -74,6 +78,7 @@ public class SpecializedFastAppendTests
     [Fact(Timeout = 30_000)]
     public void PooledStringBuilder_Append_ValueAndReferenceTypes_ShouldUseToString()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         var sb = pool.GetObject();
@@ -87,6 +92,7 @@ public class SpecializedFastAppendTests
     [Fact(Timeout = 30_000)]
     public void ValueBuilder_Append_Generic_ShouldBuildTheContent()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var sb = new HayateValueStringBuilder(64);
         sb.Append("n=");
         sb.Append(42);
@@ -98,6 +104,7 @@ public class SpecializedFastAppendTests
     [Fact(Timeout = 30_000)]
     public void ValueBuilder_Append_WithFormat_ShouldMatchStringFormat()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var sb = new HayateValueStringBuilder(64);
         sb.Append(1234.5678, "F2");
         sb.Append('|');
@@ -111,6 +118,7 @@ public class SpecializedFastAppendTests
     [Fact(Timeout = 30_000)]
     public void ValueBuilder_Append_CustomIFormattable_ShouldHonorTheFormat()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var sb = new HayateValueStringBuilder(64);
         sb.Append(new Wallet { Amount = 12.5m }, "F1");
 
@@ -122,6 +130,7 @@ public class SpecializedFastAppendTests
     [Fact(Timeout = 30_000)]
     public void ValueBuilder_Append_GrowingForTheFormattedValue_ShouldPreserveContent()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The TryFormat path grows the buffer when the remaining space does not fit the formatted
         // value; the content written so far must survive the growth.
         using var sb = new HayateValueStringBuilder(16);
@@ -135,6 +144,7 @@ public class SpecializedFastAppendTests
     [Fact(Timeout = 30_000)]
     public void ValueBuilder_Append_Generic_AfterToString_ShouldThrow()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var sb = new HayateValueStringBuilder(64);
         sb.Append(42);
         Assert.Equal("42", sb.ToString());
@@ -152,6 +162,7 @@ public class SpecializedFastAppendTests
     [Fact(Timeout = 30_000)]
     public void ValueBuilder_Append_Generic_ShouldAllocateNothing()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Collect BEFORE warming: a collection after the warmup trims the shared pool's per-thread
         // caches and would make the measured rent allocate a fresh buffer.
         GC.Collect();
@@ -183,6 +194,7 @@ public class SpecializedFastAppendTests
     [Fact(Timeout = 30_000)]
     public void PooledStringBuilder_Append_Generic_ShouldAddNothingBeyondTheEngineFloor()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new StringBuilderPool(4);
 
         // Loop the warmup for the same tiering reason as the value-builder test: the tier0 code of

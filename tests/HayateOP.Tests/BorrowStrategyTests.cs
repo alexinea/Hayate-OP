@@ -145,6 +145,7 @@ public class BorrowStrategyTests
     [Fact(Timeout = 30_000)]
     public void Default_ShouldBeFifo()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // No WithBorrowStrategy call at all: the default is the order every release before the switch
         // used, so a pool that never asks for anything keeps behaving exactly as it did.
         using var pool = BuildThreeObjectPool();
@@ -161,6 +162,7 @@ public class BorrowStrategyTests
     [Fact(Timeout = 30_000)]
     public void Fifo_ShouldServeTheOldestReturnedObjectFirst()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BuildThreeObjectPool(HayateBorrowStrategy.Fifo);
         var (first, second, third) = FillInReturnOrder(pool);
 
@@ -172,6 +174,7 @@ public class BorrowStrategyTests
     [Fact(Timeout = 30_000)]
     public void Lifo_ShouldServeTheMostRecentlyReturnedObjectFirst()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The mirror image of the FIFO sequence above, from the same pool state: same list, same
         // contents, opposite end. That is what makes the two cases a discriminating pair.
         using var pool = BuildThreeObjectPool(HayateBorrowStrategy.Lifo);
@@ -185,6 +188,7 @@ public class BorrowStrategyTests
     [Fact(Timeout = 30_000)]
     public void Lifo_ShouldHandBackTheObjectThatCameBackLast()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BuildThreeObjectPool(HayateBorrowStrategy.Lifo);
         FillInReturnOrder(pool);
 
@@ -200,6 +204,7 @@ public class BorrowStrategyTests
     [Fact(Timeout = 30_000)]
     public void Lifo_ShouldBeVisibleThroughGetOptions()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BuildThreeObjectPool(HayateBorrowStrategy.Lifo);
         Assert.Equal(HayateBorrowStrategy.Lifo, pool.GetOptions().BorrowStrategy);
     }
@@ -228,6 +233,7 @@ public class BorrowStrategyTests
     [InlineData(HayateBorrowStrategy.Priority)]
     public void NonFifoOrder_ShouldBeRejectedOnTheLeanFastPath(HayateBorrowStrategy strategy)
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The lean fast path keeps no ordered idle list (it has a fast lane plus a slot array), so no
         // borrow order is something it can promise. Rewriting the request into FIFO would be the
         // "accepted but never applied" outcome this item exists to remove, so the build fails instead.
@@ -243,6 +249,7 @@ public class BorrowStrategyTests
     [InlineData(HayateBorrowStrategy.Priority)]
     public void NonFifoOrder_ShouldBeRejectedOnTheLockFreeStore(HayateBorrowStrategy strategy)
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The lock-free store is a slot array: a wrapper owns its slot for as long as it is parked, so
         // the backend keeps no order at all and cannot honour one.
         var ex = Assert.Throws<InvalidOperationException>(
@@ -257,6 +264,7 @@ public class BorrowStrategyTests
     [InlineData(HayateBorrowStrategy.Priority)]
     public void NonFifoOrder_ShouldBeRejectedAlongsideTheFrontTier(HayateBorrowStrategy strategy)
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The per-shard front tier is consulted before the shard, so it hands back whatever this thread
         // parked last without the selection ever running: the order would hold on a tier miss only.
         // Half-applied is the outcome every guard here exists to prevent, so the combination is refused
@@ -270,6 +278,7 @@ public class BorrowStrategyTests
     [Fact(Timeout = 30_000)]
     public void DefaultOrder_ShouldStillBuildOnEveryBackend()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The three guards above must fire on a request, not on the default value: a pool that never
         // asked for an order keeps building and pooling on each backend.
         var backends = new[]
@@ -295,6 +304,7 @@ public class BorrowStrategyTests
     [Fact(Timeout = 30_000)]
     public void Lru_ShouldServeTheObjectBorrowedLongestAgo()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The discriminating pair with the FIFO case below. The two borrows are taken a tick apart and
         // returned in the opposite order, so the idle list and the borrow stamps disagree: the list head
         // is the object borrowed *last*, the smallest stamp belongs to the object borrowed *first*. FIFO
@@ -315,6 +325,7 @@ public class BorrowStrategyTests
     [Fact(Timeout = 30_000)]
     public void Fifo_ShouldServeTheOldestReturnedObjectEvenWhenItWasBorrowedLast()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The mirror arm of the case above, from the same pool state: FIFO serves the head, which here is
         // the object that was borrowed last. Without this arm the Lru assertion above would also pass for
         // a pool that ignored the strategy and kept serving the head.
@@ -333,6 +344,7 @@ public class BorrowStrategyTests
     [Fact(Timeout = 30_000)]
     public void Lru_ShouldKeepServingTheRemainingIdleObjectsInBorrowOrder()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // With three objects the walk has to pick a node in the middle of the list, so this case also pins
         // that the unlink removed the node it chose rather than an end: the sequence is neither the list
         // order nor its reverse.
@@ -358,6 +370,7 @@ public class BorrowStrategyTests
     [Fact(Timeout = 30_000)]
     public void Lru_ShouldBeVisibleThroughGetOptions()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BuildThreeObjectPool(HayateBorrowStrategy.Lru);
         Assert.Equal(HayateBorrowStrategy.Lru, pool.GetOptions().BorrowStrategy);
     }
@@ -365,6 +378,7 @@ public class BorrowStrategyTests
     [Fact(Timeout = 30_000)]
     public void Priority_ShouldServeTheHighestRankedObject()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Ranks are assigned so the order the comparer asks for is neither the creation order nor its
         // reverse — which is what makes this discriminate a comparer-driven walk from either end read.
         using var pool = BuildThreeObjectPool(HayateBorrowStrategy.Priority, HigherRankFirst());
@@ -388,6 +402,7 @@ public class BorrowStrategyTests
     [Fact(Timeout = 30_000)]
     public void Priority_ShouldServeEqualRanksOldestReturnedFirst()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // A comparer that calls every pair equal leaves only the tie rule: the walk keeps the first winner
         // it meets, and it starts at the head. The sequence must therefore be FIFO's, object for object,
         // which is what makes the tie rule — and the end the walk starts from — checkable.
@@ -402,6 +417,7 @@ public class BorrowStrategyTests
     [Fact(Timeout = 30_000)]
     public void WithBorrowPriority_ShouldSelectTheStrategyByItself()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The comparer cannot be supplied and then ignored: installing one selects Priority, so the order
         // below is the comparer's and GetOptions reports the strategy that goes with it.
         using var pool = BuildThreeObjectPool(priority: HigherRankFirst());
@@ -429,6 +445,7 @@ public class BorrowStrategyTests
     [Fact(Timeout = 30_000)]
     public void WithBorrowStrategy_ShouldDropAnEarlierPriorityComparer()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The single-mechanism rule: the last call describes the order. A comparer left behind by an
         // earlier call would make Build refuse a chain that ended somewhere else entirely.
         using var pool = ThreeObjectBuilder()
@@ -453,6 +470,7 @@ public class BorrowStrategyTests
     [Fact(Timeout = 30_000)]
     public void WithBorrowPriority_ShouldWinOverAnEarlierStrategy()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The other direction of the same rule.
         using var pool = ThreeObjectBuilder()
             .WithBorrowStrategy(HayateBorrowStrategy.Fifo)
@@ -508,6 +526,7 @@ public class BorrowStrategyTests
     [Fact(Timeout = 30_000)]
     public void ReloadConfig_ShouldRefuseABorrowOrderChange()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Every shard snapshots the order when it is constructed, so a reload cannot move it: accepting
         // the change would leave the shards serving the order they were built with while GetOptions
         // reported the new one. Refused with the original value restored, the same rule SoftCapacity
@@ -528,6 +547,7 @@ public class BorrowStrategyTests
     [Fact(Timeout = 30_000)]
     public void ReloadConfig_ShouldStillAcceptARuntimeSetting()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The guard above is specific to the borrow order: the settings a reload is meant to move keep
         // moving.
         using var pool = BuildThreeObjectPool(HayateBorrowStrategy.Fifo);

@@ -15,6 +15,7 @@ public class RegistryTests
     [Fact(Timeout = 30_000)]
     public void Register_ShouldPopulateMetadata()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var registry = new HayateObjectPoolRegistry();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("probe-meta")
@@ -38,6 +39,7 @@ public class RegistryTests
     [Fact(Timeout = 30_000)]
     public void GetAll_ShouldEnumerateAllRegistrations()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var registry = new HayateObjectPoolRegistry();
         using var poolA = BuildPool("pool-a");
         using var poolB = BuildPool("pool-b");
@@ -59,6 +61,7 @@ public class RegistryTests
     [Fact(Timeout = 30_000)]
     public void Remove_ShouldUnregisterOnlyTargetName()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var registry = new HayateObjectPoolRegistry();
         using var poolA = BuildPool("pool-a");
         using var poolB = BuildPool("pool-b");
@@ -81,6 +84,7 @@ public class RegistryTests
     [Fact(Timeout = 30_000)]
     public void Register_ShouldReplaceExistingEntryWithNewMetadata()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var registry = new HayateObjectPoolRegistry();
         using var poolV1 = BuildPool("pool-x");
         registry.Register("pool-x", poolV1);
@@ -98,6 +102,7 @@ public class RegistryTests
     [Fact(Timeout = 30_000)]
     public async Task GetAll_ConcurrentRegisterRemove_ShouldYieldConsistentSnapshot()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var registry = new HayateObjectPoolRegistry();
         using var pool = BuildPool("pool-concurrent");
         registry.Register("pool-concurrent", pool);

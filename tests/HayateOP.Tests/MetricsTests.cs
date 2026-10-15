@@ -40,6 +40,7 @@ public class MetricsTests
     [Fact(Timeout = 60000)]
     public void Build_WithCustomMetricsButMetricsDisabled_Throws()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Behavior change (2.2): when a custom metrics is explicitly registered but EnableMetrics is not enabled,
         // Build() fails fast instead of silently replacing it with EmptyHayateMetrics.
         var mockMetrics = new Mock<IHayateMetrics>();
@@ -59,6 +60,7 @@ public class MetricsTests
     [Fact(Timeout = 60000)]
     public void Build_MetricsDisabledWithoutCustomMetrics_DoesNotThrow()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Default (no custom metrics registered) + metrics disabled: a valid configuration that does not throw.
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithEnableMetrics(false)

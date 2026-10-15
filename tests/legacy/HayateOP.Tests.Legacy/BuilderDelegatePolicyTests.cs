@@ -26,8 +26,6 @@ public class BuilderDelegatePolicyTests
     /// lambdas express so the two can be compared behaviour by behaviour.</summary>
     private sealed class ClassPolicy : IHayateObjectPolicy<TestObject>
     {
-        private int _next;
-
         public TestObject Create() => new() { CreatedBy = "class" };
 
         public bool OnRelease(TestObject item) => true;

@@ -328,7 +328,7 @@ public class ColdBootTests
         var held = pool.Acquire(TimeSpan.FromMilliseconds(500));   // cold boot; the pool is no longer empty
         Assert.Equal(1, pool.GetStats().TotalCreated);
 
-        TestObject served = null;
+        TestObject? served = null;
         var waiter = new Thread(() => { served = pool.Acquire(TimeSpan.FromSeconds(5)); });
         waiter.IsBackground = true;
         waiter.Start();
@@ -369,7 +369,7 @@ public class ColdBootTests
         var held = pool.Acquire(TimeSpan.FromMilliseconds(500));   // cold boot; the pool is no longer empty
         Assert.Equal(1, pool.GetStats().TotalCreated);
 
-        TestObject served = null;
+        TestObject? served = null;
         var waiter = new Thread(() => { served = pool.Acquire(); });
         waiter.IsBackground = true;
         waiter.Start();

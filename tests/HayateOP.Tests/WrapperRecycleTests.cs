@@ -39,7 +39,7 @@ public class WrapperRecycleTests
 
         var arr = field!.GetValue(pool) as Array;
         Assert.NotNull(arr);
-        Assert.Equal(1, arr!.Length);
+        Assert.Single(arr!);
 
         var shard = arr.GetValue(0)!;
         var spareField = shard.GetType().GetField("_spareCount", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -91,6 +91,7 @@ public class WrapperRecycleTests
     [Fact(Timeout = 30_000)]
     public void O2_DestroyedWrapperIsReusedByNextCreation()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BuildPool(maxSize: 4, name: "o2-reuse");
 
         // Cycle 1: empty pool -> cold boot creates object #1 in a fresh wrapper.
@@ -119,6 +120,7 @@ public class WrapperRecycleTests
     [Fact(Timeout = 30_000)]
     public void O2_RecycledWrapperCarriesPristineLeaseState()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BuildPool(maxSize: 4, name: "o2-pristine");
 
         // Cycle 1: lease once (lease count 1, lease duration recorded on return), then evict.
@@ -155,6 +157,7 @@ public class WrapperRecycleTests
     [Fact(Timeout = 30_000)]
     public void O2_ParkedWrapperDoesNotRootDestroyedValue()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BuildPool(maxSize: 4, name: "o2-noroot");
 
         var wr = BorrowReturnAndEvict(pool);
@@ -170,6 +173,7 @@ public class WrapperRecycleTests
     [Fact(Timeout = 30_000)]
     public void O2_ConcurrentRecycleCyclesKeepPoolConsistent()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = BuildPool(maxSize: 8, name: "o2-concurrent");
 
         // Concurrent borrow/return churn plus periodic proactive eviction drives create/destroy

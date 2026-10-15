@@ -34,15 +34,15 @@ namespace HayateOP.Tests.Endpoints
                     });
                 });
 
-            using var host = await hostBuilder.StartAsync();
+            using var host = await hostBuilder.StartAsync(TestContext.Current.CancellationToken);
             var client = host.GetTestClient();
 
             // Act
-            var response = await client.GetAsync("/hayateop");
+            var response = await client.GetAsync("/hayateop", TestContext.Current.CancellationToken);
 
             // Assert
             response.EnsureSuccessStatusCode();
-            var content = await response.Content.ReadAsStringAsync();
+            var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
             Assert.Contains("Hayate Object Pool", content);
         }
 
@@ -69,7 +69,7 @@ namespace HayateOP.Tests.Endpoints
                     });
                 });
 
-            using var host = await hostBuilder.StartAsync();
+            using var host = await hostBuilder.StartAsync(TestContext.Current.CancellationToken);
 
             // The pool factory is resolved lazily - resolve it once first to make it register itself with IHayateObjectPoolRegistry,
             // so the management endpoints can find it by the logical pool name "TestObject" (replacing Type.GetType reflection-based addressing).
@@ -79,11 +79,11 @@ namespace HayateOP.Tests.Endpoints
             var client = host.GetTestClient();
 
             // Act: pool name = typeof(TestObject).Name = "TestObject"
-            var response = await client.GetAsync("/hayateop/TestObject/stats");
+            var response = await client.GetAsync("/hayateop/TestObject/stats", TestContext.Current.CancellationToken);
 
             // Assert: registry addressing should hit and return 200 + stats detail
             response.EnsureSuccessStatusCode();
-            var content = await response.Content.ReadAsStringAsync();
+            var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
             Assert.Contains("stats", content, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("pooledCount", content, StringComparison.OrdinalIgnoreCase);
         }
@@ -111,11 +111,11 @@ namespace HayateOP.Tests.Endpoints
                     });
                 });
 
-            using var host = await hostBuilder.StartAsync();
+            using var host = await hostBuilder.StartAsync(TestContext.Current.CancellationToken);
             var client = host.GetTestClient();
 
             // Act: a pool name that was never registered
-            var response = await client.GetAsync("/hayateop/DoesNotExist");
+            var response = await client.GetAsync("/hayateop/DoesNotExist", TestContext.Current.CancellationToken);
 
             // Assert: registry miss -> 404
             Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
@@ -144,18 +144,18 @@ namespace HayateOP.Tests.Endpoints
                     });
                 });
 
-            using var host = await hostBuilder.StartAsync();
+            using var host = await hostBuilder.StartAsync(TestContext.Current.CancellationToken);
 
             // The pool factory is resolved lazily - resolve it once first to make it register itself with IHayateObjectPoolRegistry
             var svc = host.Services.GetRequiredService<IHayateObjectPool<TestObject>>();
             Assert.NotNull(svc);
 
             // Act: request the pool-list endpoint
-            var response = await host.GetTestClient().GetAsync("/hayateop/pools");
+            var response = await host.GetTestClient().GetAsync("/hayateop/pools", TestContext.Current.CancellationToken);
 
             // Assert: the full registry enumeration should include the registered pool's name and element type
             response.EnsureSuccessStatusCode();
-            var content = await response.Content.ReadAsStringAsync();
+            var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
             Assert.Contains("TestObject", content);
             Assert.Contains("registeredAt", content, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("pooledCount", content, StringComparison.OrdinalIgnoreCase);
@@ -184,15 +184,15 @@ namespace HayateOP.Tests.Endpoints
                     });
                 });
 
-            using var host = await hostBuilder.StartAsync();
+            using var host = await hostBuilder.StartAsync(TestContext.Current.CancellationToken);
             var client = host.GetTestClient();
 
             // Act: supports a registered-but-unresolved pool -> registry is empty
-            var response = await client.GetAsync("/hayateop/pools");
+            var response = await client.GetAsync("/hayateop/pools", TestContext.Current.CancellationToken);
 
             // Assert: empty list returns 200, not 404/500
             response.EnsureSuccessStatusCode();
-            var content = await response.Content.ReadAsStringAsync();
+            var content = await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
             Assert.Contains("[]", content);
         }
 

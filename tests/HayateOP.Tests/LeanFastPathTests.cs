@@ -113,6 +113,7 @@ public class LeanFastPathTests
     [Fact(Timeout = 60000)]
     public void Lean_AcquireRelease_ShouldReuseTheSameInstance()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Lean(1, 1).Build();
 
         var first = pool.Acquire();
@@ -126,6 +127,7 @@ public class LeanFastPathTests
     [Fact(Timeout = 60000)]
     public void Lean_MinPoolSize_ShouldPrewarmTheBuffer()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Lean(5, 10).Build();
 
         Assert.Equal(5, pool.GetStats().PooledCount);
@@ -135,6 +137,7 @@ public class LeanFastPathTests
     [Fact(Timeout = 60000)]
     public void Lean_MaxPoolSize_ShouldBeAHardCeiling()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Lean(0, 3)
             .WithRejectPolicy(HayatePoolRejectPolicy.Abort)
             .Build();
@@ -156,6 +159,7 @@ public class LeanFastPathTests
     [Fact(Timeout = 60000)]
     public void Lean_EmptyPool_ShouldCreateOnDemandWithoutWaiting()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // An empty lean pool grows on demand instead of parking until a timeout elapses, which is
         // what makes the fast path non-blocking for MinPoolSize = 0 configurations.
         using var pool = Lean(0, 4)
@@ -175,6 +179,7 @@ public class LeanFastPathTests
     [Fact(Timeout = 60000)]
     public void Lean_ReleaseOfUnknownInstance_ShouldNotCorruptThePool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Lean mode keeps no registry, so it cannot reject a foreign instance — the return is
         // accepted, exactly as the reference zero-wrapper pool does. What matters is that the pool
         // stays usable and consistent afterwards.
@@ -194,6 +199,7 @@ public class LeanFastPathTests
     [Fact(Timeout = 60000)]
     public void Lean_ReleaseNull_ShouldBeIgnored()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Lean(1, 2).Build();
 
         pool.Release(null!);
@@ -216,7 +222,7 @@ public class LeanFastPathTests
         {
             await Task.Delay(100);
             pool.Release(first);
-        });
+        }, TestContext.Current.CancellationToken);
 
         var sw = Stopwatch.StartNew();
         var second = pool.Acquire();
@@ -230,6 +236,7 @@ public class LeanFastPathTests
     [Fact(Timeout = 60000)]
     public void Lean_BlockTimeoutPolicy_ShouldThrowAfterTheTimeout()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Lean(1, 1)
             .WithRejectPolicy(HayatePoolRejectPolicy.BlockTimeout)
             .WithAcquireTimeout(TimeSpan.FromMilliseconds(150))
@@ -249,6 +256,7 @@ public class LeanFastPathTests
     [Fact(Timeout = 60000)]
     public void Lean_CreateNewPolicy_ShouldDegradeToTheTimeoutBehaviour()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // CreateNew promises a fresh object once the timeout elapses, but at MaxPoolSize the pool is
         // at its hard ceiling and cannot deliver one; the policy therefore degrades to BlockTimeout.
         using var pool = Lean(1, 1)
@@ -269,9 +277,9 @@ public class LeanFastPathTests
     {
         using var pool = Lean(1, 1).Build();
 
-        var first = await pool.AcquireAsync();
+        var first = await pool.AcquireAsync(TestContext.Current.CancellationToken);
         pool.Release(first);
-        var second = await pool.AcquireAsync();
+        var second = await pool.AcquireAsync(TestContext.Current.CancellationToken);
 
         Assert.NotNull(second);
         Assert.Same(first, second);
@@ -280,6 +288,7 @@ public class LeanFastPathTests
     [Fact(Timeout = 60000)]
     public async Task Lean_AcquireAsync_ShouldRespectCancellation()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Lean(1, 1)
             .WithRejectPolicy(HayatePoolRejectPolicy.Block)
             .Build();
@@ -300,7 +309,7 @@ public class LeanFastPathTests
         var first = pool.Acquire();
         pool.Release(first);
 
-        var second = await pool.AcquireAsync();
+        var second = await pool.AcquireAsync(TestContext.Current.CancellationToken);
         Assert.Same(first, second);
 
         pool.Release(second);
@@ -312,6 +321,7 @@ public class LeanFastPathTests
     [Fact(Timeout = 60000)]
     public void Lean_Clear_ShouldDestroyIdleObjectsOnly()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Lean(4, 8).Build();
 
         var borrowed = pool.Acquire();
@@ -329,6 +339,7 @@ public class LeanFastPathTests
     [Fact(Timeout = 60000)]
     public void Lean_GetStats_ShouldReportInstantaneousStateWithoutCumulativeCounters()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Lean(3, 6).Build();
 
         var obj = pool.Acquire();
@@ -350,6 +361,7 @@ public class LeanFastPathTests
     [Fact(Timeout = 60000)]
     public void Lean_TakeSnapshot_ShouldDeriveBorrowedCountAndOmitObjectDetails()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Lean(3, 6).Build();
 
         var obj = pool.Acquire();
@@ -366,6 +378,7 @@ public class LeanFastPathTests
     [Fact(Timeout = 60000)]
     public void Lean_Evict_ShouldThrowInsteadOfSilentlyDoingNothing()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Lean(2, 4).Build();
 
         Assert.Throws<InvalidOperationException>(() => pool.Evict(HayateEvictReason.Idle));
@@ -376,6 +389,7 @@ public class LeanFastPathTests
     [Fact(Timeout = 60000)]
     public void Lean_ReloadConfig_ShouldRejectAResizeButAcceptRuntimeSettings()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Lean(2, 4).Build();
 
         Assert.Throws<InvalidOperationException>(() => pool.ReloadConfig(o => o.MaxPoolSize = 8));
@@ -392,6 +406,7 @@ public class LeanFastPathTests
     [Fact(Timeout = 60000)]
     public void Lean_WaitForWarmup_ShouldStillPrewarmBeforeServingBorrows()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Lean(4, 8)
             .WithWaitForWarmup(true)
             .Build();
@@ -408,6 +423,7 @@ public class LeanFastPathTests
     [Fact(Timeout = 120000)]
     public void Lean_ConcurrentBorrowReturn_ShouldNeverHandOutTheSameInstanceTwice()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         const int threads = 8;
         const int iterations = 2000;
 
@@ -441,6 +457,7 @@ public class LeanFastPathTests
     [Fact(Timeout = 120000)]
     public void Lean_ConcurrentGrowBeyondCapacity_ShouldWaitForReturns()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // 8 threads against a ceiling of 2: most borrows must wait for a return rather than create.
         using var pool = Lean(0, 2)
             .WithRejectPolicy(HayatePoolRejectPolicy.Block)

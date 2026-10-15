@@ -26,8 +26,6 @@ public class BuilderDelegatePolicyTests
     /// lambdas express so the two can be compared behaviour by behaviour.</summary>
     private sealed class ClassPolicy : IHayateObjectPolicy<TestObject>
     {
-        private int _next;
-
         public TestObject Create() => new() { CreatedBy = "class" };
 
         public bool OnRelease(TestObject item) => true;
@@ -62,6 +60,7 @@ public class BuilderDelegatePolicyTests
     [Fact(Timeout = 30_000)]
     public void FactoryOnly_ReusesLikeThePolicyItReplaces()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var factory = new CountingFactory();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithFactory(() => factory.Build("delegate"))
@@ -95,6 +94,7 @@ public class BuilderDelegatePolicyTests
     [Fact(Timeout = 30_000)]
     public void Reset_RunsOnTheWayIntoTheIdleState()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var resets = 0;
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithFactory(() => new TestObject())
@@ -124,6 +124,7 @@ public class BuilderDelegatePolicyTests
     [Fact(Timeout = 30_000)]
     public void Reset_RunsEvenWhenOrderedBeforeTheFactory()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var resets = 0;
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithReset(item => { item.Resets++; resets++; })
@@ -141,6 +142,7 @@ public class BuilderDelegatePolicyTests
     [Fact(Timeout = 30_000)]
     public void ReturnPredicateFalse_DestroysInsteadOfParking()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var factory = new CountingFactory();
         var accepted = 0;
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -170,6 +172,7 @@ public class BuilderDelegatePolicyTests
     [Fact(Timeout = 30_000)]
     public void ReturnPredicate_RunsAfterTheReset()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var order = new System.Collections.Generic.List<string>();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithFactory(() => new TestObject())
@@ -190,6 +193,7 @@ public class BuilderDelegatePolicyTests
     [Fact(Timeout = 30_000)]
     public void Delegates_CombineWithTheWholeOptionSurface()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var factory = new CountingFactory();
         var predicateCalls = 0;
         var pool = new HayatePoolBuilder<TestObject>()
@@ -241,6 +245,7 @@ public class BuilderDelegatePolicyTests
     [Fact(Timeout = 30_000)]
     public void LastCallWins_FromFactoryToPolicy()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var factory = new CountingFactory();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithFactory(() => factory.Build("delegate"))
@@ -261,6 +266,7 @@ public class BuilderDelegatePolicyTests
     [Fact(Timeout = 30_000)]
     public void LastCallWins_FromPolicyToFactory()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var factory = new CountingFactory();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPolicy(new ClassPolicy())
@@ -277,6 +283,7 @@ public class BuilderDelegatePolicyTests
     [Fact(Timeout = 30_000)]
     public void LastCallWins_WithinTheDelegates()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var first = new CountingFactory();
         var second = new CountingFactory();
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -300,6 +307,7 @@ public class BuilderDelegatePolicyTests
     [Fact(Timeout = 30_000)]
     public void NullDelegates_Throw()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Throws<ArgumentNullException>(() => new HayatePoolBuilder<TestObject>().WithFactory(null!));
         Assert.Throws<ArgumentNullException>(() => new HayatePoolBuilder<TestObject>().WithReset(null!));
         Assert.Throws<ArgumentNullException>(() => new HayatePoolBuilder<TestObject>().WithReturnPredicate(null!));
@@ -308,6 +316,7 @@ public class BuilderDelegatePolicyTests
     [Fact(Timeout = 30_000)]
     public void HookWithoutFactory_FailsAtBuild()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // A pool that cannot create is a builder mistake, reported next to the other build-time
         // rejections rather than at the first borrow.
         var ex = Assert.Throws<InvalidOperationException>(
@@ -329,6 +338,7 @@ public class BuilderDelegatePolicyTests
     [Fact(Timeout = 30_000)]
     public void FactoryReturningNull_StillFailsAtCreation()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithFactory(() => null!)
             .WithMinSize(0)

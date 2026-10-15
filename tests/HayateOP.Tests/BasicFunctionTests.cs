@@ -156,7 +156,7 @@ public class BasicFunctionTests
                     var obj = pool.Acquire();
                     pool.Release(obj);
                 }
-            });
+            }, TestContext.Current.CancellationToken);
         }
         await Task.WhenAll(tasks);
 

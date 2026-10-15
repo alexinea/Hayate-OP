@@ -100,6 +100,7 @@ public class TryAcquireTests
     [Fact(Timeout = 30_000)]
     public void IdlePool_ServesBothForms()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = EngineBuilder(policy).Build();
 
@@ -117,6 +118,7 @@ public class TryAcquireTests
     [Fact(Timeout = 30_000)]
     public void Abort_EmptyPool_ReportsFalseWithoutWaiting()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = EngineBuilder(policy, HayatePoolRejectPolicy.Abort, minSize: 0)
             .WithEnableMetrics(true) // the miss counter is gated by metrics, so it must be on to assert
@@ -143,6 +145,7 @@ public class TryAcquireTests
     [Fact(Timeout = 30_000)]
     public void Block_EmptyOfIdle_NeverParksPastItsBudget()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = EngineBuilder(policy, HayatePoolRejectPolicy.Block).Build();
 
@@ -176,6 +179,7 @@ public class TryAcquireTests
     [Fact(Timeout = 30_000)]
     public void BlockTimeout_ReportsTimeoutAsFalse()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         var pool = EngineBuilder(policy, HayatePoolRejectPolicy.BlockTimeout)
             .WithEnableMetrics(true) // the miss counter is gated by metrics, so it must be on to assert
@@ -208,7 +212,7 @@ public class TryAcquireTests
         {
             await Task.Delay(TimeSpan.FromMilliseconds(120));
             pool.Release(held);
-        });
+        }, TestContext.Current.CancellationToken);
 
         var sw = Stopwatch.StartNew();
         Assert.True(pool.TryAcquire(TimeSpan.FromSeconds(10), out var item));
@@ -221,12 +225,13 @@ public class TryAcquireTests
         Assert.True(sw.Elapsed >= TimeSpan.FromMilliseconds(50), $"wait={sw.Elapsed}");
 
         pool.Release(item);
-        returner.Wait(TimeSpan.FromSeconds(5));
+        returner.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
     }
 
     [Fact(Timeout = 30_000)]
     public void CreateOnDemand_EmptyPool_ServesTheTryWithAFreshObject()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = EngineBuilder(policy, HayatePoolRejectPolicy.CreateOnDemand, minSize: 0).Build();
 
@@ -242,6 +247,7 @@ public class TryAcquireTests
     [Fact(Timeout = 30_000)]
     public void ActiveCeiling_RefusesInsteadOfThrowing()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         var pool = EngineBuilder(policy, HayatePoolRejectPolicy.BlockTimeout, minSize: 2, maxSize: 2)
             .WithMaxActiveObjects(1)
@@ -264,6 +270,7 @@ public class TryAcquireTests
     [Fact(Timeout = 30_000)]
     public void ActiveCeiling_AbortPolicy_RefusesInsteadOfThrowing()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         var pool = EngineBuilder(policy, HayatePoolRejectPolicy.Abort, minSize: 2, maxSize: 2)
             .WithMaxActiveObjects(1)
@@ -296,6 +303,7 @@ public class TryAcquireTests
     [Fact(Timeout = 30_000)]
     public void NegativeBudget_StillThrows()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var pool = EngineBuilder(policy).Build();
 
@@ -308,6 +316,7 @@ public class TryAcquireTests
     [Fact(Timeout = 30_000)]
     public void FactoryFailure_Propagates()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = EngineBuilder(new ExplodingPolicy(), HayatePoolRejectPolicy.CreateOnDemand, minSize: 0).Build();
 
         // A factory that fails is a fault: it must not be swallowed into a false that reads as
@@ -322,6 +331,7 @@ public class TryAcquireTests
     [Fact(Timeout = 30_000)]
     public void OpenBreaker_ReportsFalse()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         var pool = EngineBuilder(policy)
             .WithCircuitBreaker(1, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(5), () => true)
@@ -352,6 +362,7 @@ public class TryAcquireTests
     [Fact(Timeout = 30_000)]
     public void Lean_EmptyOfIdle_ReportsFalseAndServesWhenIdle()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         var builder = new HayatePoolBuilder<TestObject>()
             .WithPolicy(policy)
@@ -387,6 +398,7 @@ public class TryAcquireTests
     [Fact(Timeout = 30_000)]
     public void Lean_Timeout_ReportsFalseWithinBudget()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         var builder = new HayatePoolBuilder<TestObject>()
             .WithPolicy(policy)
@@ -421,6 +433,7 @@ public class TryAcquireTests
     [Fact(Timeout = 30_000)]
     public void Unbounded_AlwaysSucceeds()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateUnboundedPool<TestObject>(maxIdle: 4, factory: () => new TestObject());
 
         // An unbounded pool never waits and never refuses, so both try forms answer true — the same
@@ -437,6 +450,7 @@ public class TryAcquireTests
     [Fact(Timeout = 30_000)]
     public void Preparation_ForwardsTheRefusal_KeepsPrepareFailuresLoud()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var inner = EngineBuilder(policy, HayatePoolRejectPolicy.BlockTimeout, minSize: 1, maxSize: 1).Build();
         using var pool = inner.WithPreparation(new AlwaysReadyStrategy());
@@ -459,6 +473,7 @@ public class TryAcquireTests
     [Fact(Timeout = 30_000)]
     public void Preparation_FailingStrategy_StillThrows()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
         using var inner = EngineBuilder(policy, HayatePoolRejectPolicy.CreateOnDemand, minSize: 0, maxSize: 2).Build();
         using var pool = inner.WithPreparation(new AlwaysBrokenStrategy());
@@ -471,6 +486,7 @@ public class TryAcquireTests
     [Fact(Timeout = 30_000)]
     public void SpecializedPools_ForwardTheTry()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The three specialized pools delegate their whole borrow surface to the inner pool, and the
         // try form is no exception.
         Assert.True(CancellationTokenSourcePool.Instance.TryAcquire(out var cts));

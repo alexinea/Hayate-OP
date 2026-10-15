@@ -20,6 +20,7 @@ public class CapacityAlarmTests
     [Fact(Timeout = 30_000)]
     public void WarningThreshold_ShouldFireOnce_AndNotRefireAtSameLevel()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var warnCount = new int[1];
         var criticalCount = new int[1];
 
@@ -67,6 +68,7 @@ public class CapacityAlarmTests
     [Fact(Timeout = 30_000)]
     public void CriticalThreshold_ShouldFire_WhenFullyDrained()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var warnCount = new int[1];
         var criticalCount = new int[1];
         HayatePoolCapacityAlarmEventArgs? lastArgs = null;
@@ -120,6 +122,7 @@ public class CapacityAlarmTests
     [Fact(Timeout = 30_000)]
     public void DisabledByDefault_ShouldNotFireCallbacks()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Default WarnAtRatio=0 / CriticalAtRatio=0: even a full-pool borrow does not fire when no alarm is configured
         var fired = new int[1];
 
@@ -145,6 +148,7 @@ public class CapacityAlarmTests
     [Fact(Timeout = 30_000)]
     public void CallbackException_ShouldNotBreakAcquire()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // A user callback exception must be swallowed by the pool (logged) and must not affect the borrow main flow
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(10)
@@ -167,6 +171,7 @@ public class CapacityAlarmTests
     [Fact(Timeout = 30_000)]
     public void InvalidThresholds_ShouldBeRejectedByBuilder()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var builder = new HayatePoolBuilder<TestObject>();
 
         Assert.Throws<ArgumentOutOfRangeException>(() => builder.WithCapacityAlarm(-0.1));
@@ -178,6 +183,7 @@ public class CapacityAlarmTests
     [Fact(Timeout = 30_000)]
     public void ThresholdNormalization_ShouldClampToValidRange()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // A threshold greater than 1 is clamped to 1 by ApplyFeatureSwitches (verified indirectly via Build)
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(1)

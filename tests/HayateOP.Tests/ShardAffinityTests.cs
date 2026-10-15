@@ -18,6 +18,7 @@ public class ShardAffinityTests
     [Fact(Timeout = 30_000)]
     public void NoneMode_ShouldKeepSequentialSemantics()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("affinity-none")
             .WithMinSize(4)
@@ -36,6 +37,7 @@ public class ShardAffinityTests
     [Fact(Timeout = 30_000)]
     public void ThreadMode_SameThreadShouldStablyHitAffinityShard()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("affinity-thread")
             .WithMinSize(8)
@@ -63,6 +65,7 @@ public class ShardAffinityTests
     [Fact(Timeout = 30_000)]
     public void ThreadMode_ThreadIdsShouldMapToDeterminedShard()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Verify the start-shard pure function: when the pool is full (every shard has stock), under Thread mode
         // the first borrowed object's ShardIndex should equal the golden-ratio hash mapping result.
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -82,6 +85,7 @@ public class ShardAffinityTests
     [Fact(Timeout = 30_000)]
     public void CustomMode_ShouldStartFromSelectorIndex()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("affinity-custom")
             .WithMinSize(4)
@@ -99,6 +103,7 @@ public class ShardAffinityTests
     [Fact(Timeout = 30_000)]
     public void CustomMode_OutOfRangeAndThrowingSelectors_ShouldFallBackSafely()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Out-of-range fallback: the delegate returns 99 (out of range) -> sequential scan semantics
         using var pool1 = new HayatePoolBuilder<TestObject>()
             .WithPoolName("affinity-oob")
@@ -127,6 +132,7 @@ public class ShardAffinityTests
     [Fact(Timeout = 30_000)]
     public void CustomMode_WithoutSelector_ShouldFallBackToNoneOnBuild()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // ApplyFeatureSwitches normalization: Custom but no delegate -> falls back to None (does not reject the build)
         var options = new HayatePoolOptions { ShardAffinityMode = HayateShardAffinityMode.Custom };
         options.ApplyFeatureSwitches();
@@ -145,6 +151,7 @@ public class ShardAffinityTests
     [Fact(Timeout = 30_000)]
     public async Task ThreadMode_ConcurrentThreads_ShouldBorrowWithoutConflict()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("affinity-concurrent")
             .WithMinSize(8)

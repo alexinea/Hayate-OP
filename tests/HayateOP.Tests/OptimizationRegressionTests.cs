@@ -111,7 +111,7 @@ public class OptimizationRegressionTests
                     pool.Release(obj);
                     Interlocked.Increment(ref totalOperations);
                 }
-            });
+            }, TestContext.Current.CancellationToken);
         }
 
         await Task.WhenAll(tasks);
@@ -183,7 +183,7 @@ public class OptimizationRegressionTests
                         Interlocked.Decrement(ref currentOutstanding);
                     }
                 }
-            });
+            }, TestContext.Current.CancellationToken);
         }
     
         await Task.WhenAll(tasks);

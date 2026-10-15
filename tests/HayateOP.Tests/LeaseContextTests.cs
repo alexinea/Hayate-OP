@@ -32,6 +32,7 @@ public class LeaseContextTests
     [Fact(Timeout = 30_000)]
     public async Task ConcurrentAcquires_ShouldOwnIsolatedLeaseContexts()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m16-isolated")
             .WithMinSize(16)
@@ -67,6 +68,7 @@ public class LeaseContextTests
     [Fact(Timeout = 30_000)]
     public void SequentialReborrow_ShouldProduceDistinctLeaseIds()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m16-reborrow")
             .WithMinSize(1)
@@ -92,6 +94,7 @@ public class LeaseContextTests
     [Fact(Timeout = 30_000)]
     public void Destroy_ShouldClearWrapperLeaseContextReference()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Release is rejected -> Release goes down Destroy(w) -> the wrapper-side LeaseContext reference is cleared
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m16-destroy")
@@ -114,6 +117,7 @@ public class LeaseContextTests
     [Fact(Timeout = 30_000)]
     public void CaptureOff_ShouldNotCreateLeaseContext()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m16-off")
             .WithEnableLeakDetection(true)

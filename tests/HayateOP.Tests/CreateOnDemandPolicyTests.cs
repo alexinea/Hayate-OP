@@ -21,6 +21,7 @@ public class CreateOnDemandPolicyTests
     [Fact(Timeout = 30_000)]
     public void CreateOnDemand_EmptyPool_ShouldReturnWithoutWaitingOutTheTimeout()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("on-demand-cold")
             .WithMinSize(0)
@@ -88,6 +89,7 @@ public class CreateOnDemandPolicyTests
     [Fact(Timeout = 30_000)]
     public void CreateOnDemand_BelowCapacityMisses_ShouldEachCreateWithoutWaiting()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         const int requests = 4;
 
         // Warm-up burst on a throwaway pool: primes the JIT of the acquire/create path and the
@@ -116,6 +118,7 @@ public class CreateOnDemandPolicyTests
     [Fact(Timeout = 30_000)]
     public void CreateOnDemand_AtCapacity_ShouldWaitThenCreateInsteadOfThrowing()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("on-demand-capacity")
             .WithMinSize(0)
@@ -152,6 +155,7 @@ public class CreateOnDemandPolicyTests
     [Fact(Timeout = 30_000)]
     public void CreateOnDemand_ShouldStillReuseReturnedObjects()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("on-demand-reuse")
             .WithMinSize(0)
@@ -177,6 +181,7 @@ public class CreateOnDemandPolicyTests
     [Fact(Timeout = 30_000)]
     public async Task CreateOnDemand_AsyncAcquireOnEmptyPool_ShouldReturnWithoutWaiting()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("on-demand-async")
             .WithMinSize(0)

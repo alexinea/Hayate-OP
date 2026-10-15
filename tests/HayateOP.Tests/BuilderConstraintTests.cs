@@ -71,6 +71,7 @@ public class BuilderConstraintTests
     [Fact(Timeout = 30_000)]
     public void Builder_WithoutParameterlessConstructor_WithPolicy_BorrowsAndReturns()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<ConnectionLike>()
             .WithPolicy(new ConnectionPolicy("Host=primary"))
             .Build();
@@ -86,6 +87,7 @@ public class BuilderConstraintTests
     [Fact(Timeout = 30_000)]
     public void Builder_WithoutParameterlessConstructor_WithoutPolicy_ThrowsAnActionableMessage()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var builder = new HayatePoolBuilder<ConnectionLike>();
 
         var ex = Assert.Throws<InvalidOperationException>(() => builder.Build());
@@ -97,6 +99,7 @@ public class BuilderConstraintTests
     [Fact(Timeout = 30_000)]
     public void Builder_WithParameterlessConstructor_StillUsesTheDefaultPolicy()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<ParameterlessItem>().Build();
 
         var item = pool.Acquire();
@@ -110,6 +113,7 @@ public class BuilderConstraintTests
     [Fact(Timeout = 30_000)]
     public void ObjectPolicies_Default_IsTheLibraryDefaultPolicy()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = HayateObjectPolicies.Default<ResettableItem>();
         var item = policy.Create();
 
@@ -126,6 +130,7 @@ public class BuilderConstraintTests
     [Fact(Timeout = 30_000)]
     public void ObjectPolicies_Default_WithoutParameterlessConstructor_ThrowsAnActionableMessage()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var ex = Assert.Throws<InvalidOperationException>(() => HayateObjectPolicies.Default<ConnectionLike>());
 
         Assert.Contains(typeof(ConnectionLike).FullName!, ex.Message);
@@ -134,6 +139,7 @@ public class BuilderConstraintTests
     [Fact(Timeout = 30_000)]
     public void UnboundedPool_WithoutParameterlessConstructor_ConvenienceOverloads_ThrowAnActionableMessage()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var ex = Assert.Throws<InvalidOperationException>(() => new HayateUnboundedPool<ConnectionLike>());
         Assert.Contains(typeof(ConnectionLike).FullName!, ex.Message);
 
@@ -143,6 +149,7 @@ public class BuilderConstraintTests
     [Fact(Timeout = 30_000)]
     public void UnboundedPool_WithoutParameterlessConstructor_WithFactory_BorrowsAndReturns()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateUnboundedPool<ConnectionLike>(8, () => new ConnectionLike("Host=replica"));
 
         var item = pool.Acquire();

@@ -74,7 +74,9 @@ public class HayatePreparationPoolTests
         using var pool = inner.WithPreparation(strategy);
 
         var conn = await pool.AcquireAsync();
-        Assert.True(conn.Connected is false or true); // any state, just delivered
+        // Delivered ready, so PrepareAsync never ran and Connected was never set: the state
+        // assertion below is the one the test name promises, not a tautology.
+        Assert.False(conn.Connected);
         Assert.Equal(1, strategy.ReadyCalls);
         Assert.Equal(0, strategy.PrepareCalls);
     }

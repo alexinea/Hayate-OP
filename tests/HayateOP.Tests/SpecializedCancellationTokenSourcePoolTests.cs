@@ -22,6 +22,7 @@ public class SpecializedCancellationTokenSourcePoolTests
     [Fact(Timeout = 30_000)]
     public void Defaults_ShouldMatchTheSpecializedPoolConvention()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Equal(16, CancellationTokenSourcePool.DefaultPoolMaximumSize);
         Assert.NotNull(CancellationTokenSourcePool.Instance);
 
@@ -40,6 +41,7 @@ public class SpecializedCancellationTokenSourcePoolTests
     [Fact(Timeout = 30_000)]
     public void InvalidPoolSize_ShouldThrow()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Throws<ArgumentOutOfRangeException>(() => new CancellationTokenSourcePool(0));
         Assert.Throws<ArgumentOutOfRangeException>(() => new CancellationTokenSourcePool(-1));
     }
@@ -47,6 +49,7 @@ public class SpecializedCancellationTokenSourcePoolTests
     [Fact(Timeout = 30_000)]
     public void Rent_ShouldReturnAFreshUncanceledSource()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new CancellationTokenSourcePool(4);
 
         using var source = pool.Rent();
@@ -59,6 +62,7 @@ public class SpecializedCancellationTokenSourcePoolTests
     [Fact(Timeout = 30_000)]
     public void ReturnedSource_ShouldBeReusedOnlyWhereTheRuntimeCanResetOne()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new CancellationTokenSourcePool(4);
 
         CancellationTokenSource first;
@@ -89,6 +93,7 @@ public class SpecializedCancellationTokenSourcePoolTests
     [Fact(Timeout = 30_000)]
     public void CanceledSource_ShouldNeverBeHandedOutAgain()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new CancellationTokenSourcePool(4);
 
         var canceled = pool.Rent();
@@ -111,6 +116,7 @@ public class SpecializedCancellationTokenSourcePoolTests
     [Fact(Timeout = 30_000)]
     public void SourceWhoseTimerHasFired_ShouldNeverBeHandedOutAgain()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new CancellationTokenSourcePool(4);
 
         var fired = pool.Rent();
@@ -127,6 +133,7 @@ public class SpecializedCancellationTokenSourcePoolTests
     [Fact(Timeout = 30_000)]
     public void RentLinked_ShouldFollowTheUpstreamToken()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new CancellationTokenSourcePool(4);
         using var upstream = new CancellationTokenSource();
 
@@ -141,6 +148,7 @@ public class SpecializedCancellationTokenSourcePoolTests
     [Fact(Timeout = 30_000)]
     public void RentLinked_WithAnAlreadyCanceledUpstream_ShouldProduceACanceledRentalThatIsNotReused()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new CancellationTokenSourcePool(4);
         using var upstream = new CancellationTokenSource();
         upstream.Cancel();
@@ -158,6 +166,7 @@ public class SpecializedCancellationTokenSourcePoolTests
     [Fact(Timeout = 30_000)]
     public void RentLinked_WithANonCancelableToken_ShouldTakeTheOrdinaryRentalPath()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new CancellationTokenSourcePool(4);
 
         CancellationTokenSource plain;
@@ -182,6 +191,7 @@ public class SpecializedCancellationTokenSourcePoolTests
     [Fact(Timeout = 30_000)]
     public void AFormerUpstream_ShouldNotReachAReusedSource()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new CancellationTokenSourcePool(4);
         using var upstream = new CancellationTokenSource();
 
@@ -199,6 +209,7 @@ public class SpecializedCancellationTokenSourcePoolTests
     [Fact(Timeout = 30_000)]
     public void CallbacksRegisteredByAFormerRental_ShouldNotSurviveTheReturn()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new CancellationTokenSourcePool(4);
 
         var callbacks = 0;
@@ -220,6 +231,7 @@ public class SpecializedCancellationTokenSourcePoolTests
     [Fact(Timeout = 30_000)]
     public void DoubleDispose_ShouldParkTheSourceOnlyOnce()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new CancellationTokenSourcePool(2);
 
         var source = pool.Rent();
@@ -237,6 +249,7 @@ public class SpecializedCancellationTokenSourcePoolTests
     [Fact(Timeout = 30_000)]
     public void Clear_ShouldDropRetainedSourcesAndLeaveThePoolUsable()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new CancellationTokenSourcePool(4);
 
         var retained = pool.Rent();
@@ -256,6 +269,7 @@ public class SpecializedCancellationTokenSourcePoolTests
     [Fact(Timeout = 30_000)]
     public void Dispose_ShouldDropRetainedSourcesAndDestroyARentalThatComesBack()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var pool = new CancellationTokenSourcePool(4);
 
         var retained = pool.Rent();
@@ -276,6 +290,7 @@ public class SpecializedCancellationTokenSourcePoolTests
     [Fact(Timeout = 30_000)]
     public void RentalDisposedAfterThePoolIsClosed_ShouldBeDestroyedForReal()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var pool = new CancellationTokenSourcePool(4);
 
         var outstanding = pool.Rent();
@@ -290,6 +305,7 @@ public class SpecializedCancellationTokenSourcePoolTests
     [Fact(Timeout = 60_000)]
     public void ConcurrentRentals_ShouldNeverHandOutACanceledSource()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new CancellationTokenSourcePool(8);
         var canceledHandOuts = 0;
 

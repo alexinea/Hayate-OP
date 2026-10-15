@@ -58,6 +58,7 @@ public class BorrowStrategyDependencyInjectionTests
     [Fact(Timeout = 30_000)]
     public void Priority_ShouldResolveTheComparerFromTheContainer()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var provider = Container(HayateBorrowStrategy.Priority, registerComparer: true).BuildServiceProvider();
         var pool = provider.GetRequiredService<IHayateObjectPool<Item>>();
 
@@ -94,6 +95,7 @@ public class BorrowStrategyDependencyInjectionTests
     [Fact(Timeout = 30_000)]
     public void AFifoPool_ShouldNotPickUpAComparerItNeverAskedFor()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The lookup is conditional on the configured order, so a comparer registered for some unrelated
         // purpose does not quietly become this pool's borrow order.
         var provider = Container(HayateBorrowStrategy.Fifo, registerComparer: true).BuildServiceProvider();

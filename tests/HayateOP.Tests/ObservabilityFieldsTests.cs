@@ -19,6 +19,7 @@ public class ObservabilityFieldsTests
     [Fact(Timeout = 30_000)]
     public void EveryAcquireMode_ShouldCaptureLeaseContext()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m10-every")
             .WithEnableLeakDetection(true)
@@ -56,6 +57,7 @@ public class ObservabilityFieldsTests
     [Fact(Timeout = 30_000)]
     public void OffMode_ShouldNotCaptureLeaseContext()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m10-off")
             .WithEnableLeakDetection(true)
@@ -71,6 +73,7 @@ public class ObservabilityFieldsTests
     [Fact(Timeout = 30_000)]
     public void Snapshot_LeakTraces_ShouldBeFormattedFromFrames()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m10-format")
             .WithEnableLeakDetection(true)
@@ -98,6 +101,7 @@ public class ObservabilityFieldsTests
     [Fact(Timeout = 30_000)]
     public void LeaseCount_ShouldIncrementPerAcquire()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m20-lease")
             .WithMinSize(1)
@@ -119,6 +123,7 @@ public class ObservabilityFieldsTests
     [Fact(Timeout = 30_000)]
     public void OwnerPoolName_And_CreatedAtTick_ShouldBeStampedAtCreation()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m20-owner")
             .WithMinSize(1)
@@ -140,6 +145,7 @@ public class ObservabilityFieldsTests
     [Fact(Timeout = 30_000)]
     public void Snapshot_ObjectDetails_ShouldCarryLifecycleFields()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("m20-detail")
             .WithMinSize(2)

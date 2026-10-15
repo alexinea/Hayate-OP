@@ -102,6 +102,7 @@ public class LockFreeStorageTests
     [Fact(Timeout = 30_000)]
     public void OffByDefault_TheCycleIsWhatItAlwaysWas()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var (policy, builder) = NewPool(lockFree: false);
         using var pool = builder.Build();
 
@@ -119,6 +120,7 @@ public class LockFreeStorageTests
     [Fact(Timeout = 30_000)]
     public void Enabled_LendsEveryObjectAndReusesIt()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var (policy, builder) = NewPool(lockFree: true);
         using var pool = builder.Build();
 
@@ -146,6 +148,7 @@ public class LockFreeStorageTests
     [Fact(Timeout = 30_000)]
     public void Enabled_ServesEveryTakeFromTheStoreAndNotTheLock()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var (_, builder) = NewPool(lockFree: true, minSize: 2, maxSize: 2);
         using var pool = builder.Build();
 
@@ -166,6 +169,7 @@ public class LockFreeStorageTests
     [Fact(Timeout = 30_000)]
     public void Enabled_RefusesLifoAtBuildTime()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new CountingPolicy();
 
         // The store keeps an explicit order it cannot honour, so the build is refused instead of the
@@ -186,6 +190,7 @@ public class LockFreeStorageTests
     [Fact(Timeout = 30_000)]
     public void LeanMode_TurnsTheStoreOff()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Lean has its own storage, so the general-purpose store cannot apply. It is normalized off —
         // accepted and ignored is the failure mode the option set exists to prevent.
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -201,6 +206,7 @@ public class LockFreeStorageTests
     [Fact(Timeout = 30_000)]
     public void Enabled_TheIdleSetIsStillCountedAndSampled()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var (_, builder) = NewPool(lockFree: true);
         using var pool = builder.Build();
 
@@ -225,6 +231,7 @@ public class LockFreeStorageTests
     [Fact(Timeout = 30_000)]
     public void Enabled_ProactiveEvictStillClaimsIdleObjects()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var (_, builder) = NewPool(lockFree: true, minSize: 4, maxSize: 4);
         using var pool = builder.Build();
 
@@ -243,6 +250,7 @@ public class LockFreeStorageTests
     [Fact(Timeout = 30_000)]
     public void Enabled_ClearLeavesNothingIdle()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // MinSize 2, so the two objects the case borrows are the whole pool: the count it asserts after
         // each return is the store's count and nothing else.
         var (_, builder) = NewPool(lockFree: true, minSize: 2, maxSize: 4);
@@ -267,6 +275,7 @@ public class LockFreeStorageTests
     [Fact(Timeout = 30_000)]
     public void Enabled_ReloadCannotRaiseTheCeilingPastTheSlotArray()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var (_, builder) = NewPool(lockFree: true, minSize: 2, maxSize: 4);
         using var pool = builder.Build();
 
@@ -283,6 +292,7 @@ public class LockFreeStorageTests
     [Fact(Timeout = 30_000)]
     public void Enabled_ReloadIsMeasuredPerShardAndNotPerPool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The store's ceiling is per shard while MaxPoolSize is per pool, so a reload has to be measured
         // by the per-shard maximum it implies. Eight objects over two shards is four slots each: reloading
         // to eight asks for exactly what the shards were built with, and a check written against the pool
@@ -329,10 +339,10 @@ public class LockFreeStorageTests
                     inFlight.AddOrUpdate(item.Id, 0, (_, count) => count - 1);
                     pool.Release(item);
                 }
-            });
+            }, TestContext.Current.CancellationToken);
         }
 
-        Task.WaitAll(tasks);
+        Task.WaitAll(tasks, TestContext.Current.CancellationToken);
 
         Assert.Equal(0, duplicates);
         Assert.Equal(4, policy.Created);

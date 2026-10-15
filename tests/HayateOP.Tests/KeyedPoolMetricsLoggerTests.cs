@@ -55,6 +55,7 @@ public class KeyedPoolMetricsLoggerTests
     [Fact(Timeout = 30_000)]
     public void SubPools_ShouldUseTheInjectedMetricsAndLogger()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var metrics = new RecordingMetrics();
         var logger = new RecordingLogger();
 
@@ -76,6 +77,7 @@ public class KeyedPoolMetricsLoggerTests
     [Fact(Timeout = 30_000)]
     public void WithoutASink_TheKeyedPoolKeepsItsPreviousBehaviour()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pools = new ParameterizedHayatePool<string, Pooled>(
             _ => new Pooled(), maxSizePerKey: 2, name: "keyed");
 
@@ -89,6 +91,7 @@ public class KeyedPoolMetricsLoggerTests
     [Fact(Timeout = 30_000)]
     public void TheSubPoolFactoryOverload_StillDecidesForItself()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The escape hatch is unchanged and still lets a caller give each key whatever it likes — here one
         // shared sink attached to a pool the caller built, which is what the new arguments cannot express
         // (they are per keyed pool, not per key).

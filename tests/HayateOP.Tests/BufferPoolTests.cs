@@ -28,6 +28,7 @@ public class BufferPoolTests
     [Fact(Timeout = 30_000)]
     public void Rent_RoutesToTheSmallestBucketThatCoversTheRequest()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = ThreeBucketPool();
 
         Assert.Equal(100, pool.Rent(1).Length);
@@ -41,6 +42,7 @@ public class BufferPoolTests
     [Fact(Timeout = 30_000)]
     public void Rent_AboveTheLargestDeclaredBucket_IsRejected()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = ThreeBucketPool();
 
         var exception = Assert.Throws<ArgumentException>(() => pool.Rent(401));
@@ -50,6 +52,7 @@ public class BufferPoolTests
     [Fact(Timeout = 30_000)]
     public void Rent_NonPositiveSize_IsRejected()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = ThreeBucketPool();
 
         Assert.Throws<ArgumentOutOfRangeException>(() => pool.Rent(0));
@@ -59,6 +62,7 @@ public class BufferPoolTests
     [Fact(Timeout = 30_000)]
     public void Constructor_SortsBucketsAscending_AndExposesTheDeclaredLadder()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateBufferPool<byte>(
             new HayateSegmentDefinition(400),
             new HayateSegmentDefinition(100),
@@ -71,6 +75,7 @@ public class BufferPoolTests
     [Fact(Timeout = 30_000)]
     public void Constructor_RejectsDuplicates_AndInvalidDefinitions()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Throws<ArgumentNullException>(() => new HayateBufferPool<byte>(null!));
         Assert.Throws<ArgumentOutOfRangeException>(() => new HayateSegmentDefinition(0));
         Assert.Throws<ArgumentOutOfRangeException>(() => new HayateSegmentDefinition(100, 0));
@@ -85,6 +90,7 @@ public class BufferPoolTests
     [Fact(Timeout = 30_000)]
     public void Rent_Return_RentsTheSameInstanceAgain()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateBufferPool<byte>(new HayateSegmentDefinition(100, 2));
 
         var first = pool.Rent(1);
@@ -98,6 +104,7 @@ public class BufferPoolTests
     [Fact(Timeout = 30_000)]
     public void Bucket_RetainsAtMostItsCapacity_OfReturnedArrays()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Three buffers returned into a bucket that keeps two: exactly the first two returned are
         // parked, the third is dropped, and a subsequent rent observes the difference through the
         // markers the caller left in the arrays (contents are not cleared, like ArrayPool).
@@ -132,6 +139,7 @@ public class BufferPoolTests
     [Fact(Timeout = 30_000)]
     public void Dispose_RejectsFurtherRents_ButOutstandingBuffersStillReturn()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var pool = ThreeBucketPool();
         var outstanding = pool.Rent(1);
 
@@ -144,6 +152,7 @@ public class BufferPoolTests
     [Fact(Timeout = 30_000)]
     public void Return_RejectsForeignBuffers_AndIgnoresNull()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = ThreeBucketPool();
         using var other = ThreeBucketPool();
 

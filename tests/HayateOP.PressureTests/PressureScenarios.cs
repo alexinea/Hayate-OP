@@ -31,8 +31,9 @@ public class PressureScenarios
     // Scenario 1: SustainedHighLoad - sustained high load, asserting zero leaks
     // ─────────────────────────────────────────────────────────────
     [Fact(Timeout = 700_000)]
-    public void SustainedHighLoad_ZeroLeakDetected()
+    public async Task SustainedHighLoad_ZeroLeakDetected()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var duration = LongRun ? TimeSpan.FromMinutes(10) : TimeSpan.FromSeconds(60);
         const int threads = 100;
 
@@ -69,7 +70,7 @@ public class PressureScenarios
             }
         })).ToArray();
 
-        Task.WaitAll(workers);
+        await Task.WhenAll(workers);   // awaited, not Task.WaitAll: this assembly leaves parallelization on
 
         var snapshot = pool.TakeSnapshot();
         Assert.Equal(0, errors);
@@ -82,8 +83,9 @@ public class PressureScenarios
     // Scenario 2: BurstLoad - 10->200 concurrent pulse x 5 rounds, scaling back to MinPoolSize each round
     // ─────────────────────────────────────────────────────────────
     [Fact(Timeout = 180_000)]
-    public void BurstLoad_ScalesBackToMinAfterEachBurst()
+    public async Task BurstLoad_ScalesBackToMinAfterEachBurst()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         const int minSize = 50;
         const int burstThreads = 200;
         const int rounds = 5;
@@ -121,7 +123,7 @@ public class PressureScenarios
                 }
             })).ToArray();
 
-            Task.WaitAll(workers);
+            await Task.WhenAll(workers);
             Assert.Equal(0, errors);
 
             // Between rounds, wait for scale-down to converge: poll until <= min+5 (10s cap).
@@ -146,6 +148,7 @@ public class PressureScenarios
     [Fact(Timeout = 120_000)]
     public void OscillatingLoad_NoOomAndBoundedPoolSize()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<PooledResource>()
             .WithPoolName("pressure-oscillating")
             .WithMinSize(20)
@@ -202,8 +205,9 @@ public class PressureScenarios
     // Scenario 4: SpikeLoad - instantaneous 1000 concurrent + Abort policy, no crash or hang
     // ─────────────────────────────────────────────────────────────
     [Fact(Timeout = 90_000)]
-    public void SpikeLoad_AbortPolicyNeverCrashes()
+    public async Task SpikeLoad_AbortPolicyNeverCrashes()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         const int spike = 1000;
 
         using var pool = new HayatePoolBuilder<PooledResource>()
@@ -236,7 +240,7 @@ public class PressureScenarios
             }
         })).ToArray();
 
-        Task.WaitAll(tasks);                        // All completed = no hang; the Timeout watchdog is the backstop
+        await Task.WhenAll(tasks);                  // All completed = no hang; the Timeout watchdog is the backstop
 
         Assert.Equal(spike, succeeded + rejected);  // No lost requests
         Assert.True(succeeded > 0, "spike should acquire at least some objects");
@@ -258,8 +262,9 @@ public class PressureScenarios
     // The "ScalingCallback empty-pool short-circuit" and "CreateNew delayed creation" are logged as improvement items.
     // ─────────────────────────────────────────────────────────────
     [Fact(Timeout = 60_000)]
-    public void ColdStart_ColdPoolBehaviorAndWarmPathP99()
+    public async Task ColdStart_ColdPoolBehaviorAndWarmPathP99()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Segment A: Min=0 cold pool - after the fix, the first concurrent borrows all succeed instantly via cold-boot bootstrap (deterministic)
         using (var cold = new HayatePoolBuilder<PooledResource>()
             .WithPoolName("pressure-coldstart-cold")
@@ -283,7 +288,7 @@ public class PressureScenarios
                 }
                 catch (TimeoutException) { Interlocked.Increment(ref timeouts); }
             })).ToArray();
-            Task.WaitAll(tasks);
+            await Task.WhenAll(tasks);
             var succeeded = 5 - (int)Interlocked.Read(ref timeouts);
 
             // Behavior guard (2.1 behavior change):
@@ -385,7 +390,7 @@ public class PressureScenarios
 
         foreach (var t in threads) t.Start();
         startGate.Set();
-        allQueued.Wait(TimeSpan.FromSeconds(2));   // Wait for all to enter the wait state (or the 2s backstop)
+        allQueued.Wait(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);   // Wait for all to enter the wait state (or the 2s backstop)
         Thread.Sleep(300);                          // Settle to ensure the Block wait is stable
 
         var proc = Process.GetCurrentProcess();

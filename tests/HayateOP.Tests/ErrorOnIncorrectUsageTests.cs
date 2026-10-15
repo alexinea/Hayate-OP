@@ -106,6 +106,7 @@ public class ErrorOnIncorrectUsageTests
     [Fact(Timeout = 30_000)]
     public void Default_Path_KeepsTheForgivingBehaviour()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Builder(throwOnMisuse: false).Build();
 
         // Null: warned and ignored.
@@ -134,6 +135,7 @@ public class ErrorOnIncorrectUsageTests
     [Fact(Timeout = 30_000)]
     public void NullReturn_ThrowsWhenEnabled()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Builder(throwOnMisuse: true).Build();
 
         var ex = Assert.Throws<InvalidOperationException>(() => pool.Release(null!));
@@ -150,6 +152,7 @@ public class ErrorOnIncorrectUsageTests
     [Fact(Timeout = 30_000)]
     public void ForeignObject_ThrowsAndIsLeftWithTheCaller()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Builder(throwOnMisuse: true).Build();
 
         var foreign = new TestObject();
@@ -169,6 +172,7 @@ public class ErrorOnIncorrectUsageTests
     [Fact(Timeout = 30_000)]
     public void AlreadyReturned_ThrowsAndThePoolKeepsTheObject()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Builder(throwOnMisuse: true).Build();
 
         var held = pool.Acquire();
@@ -190,6 +194,7 @@ public class ErrorOnIncorrectUsageTests
     [Fact(Timeout = 30_000)]
     public void AlreadyReturned_CountsTheRefusedRelease()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var metrics = new CountingMetrics();
         using var pool = Builder(throwOnMisuse: true)
             .WithEnableMetrics(true)
@@ -213,6 +218,7 @@ public class ErrorOnIncorrectUsageTests
     [Fact(Timeout = 30_000)]
     public void AlreadyReturned_ParkedInTheFrontSlot_Throws()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithFactory(() => new TestObject())
             .WithMinSize(0)
@@ -237,6 +243,7 @@ public class ErrorOnIncorrectUsageTests
     [Fact(Timeout = 30_000)]
     public void Lean_NullReturn_ThrowsWhenEnabled()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Builder(throwOnMisuse: true).WithLean().Build();
 
         var ex = Assert.Throws<InvalidOperationException>(() => pool.Release(null!));
@@ -246,6 +253,7 @@ public class ErrorOnIncorrectUsageTests
     [Fact(Timeout = 30_000)]
     public void Lean_ForeignObject_IsStillAccepted()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The lean return path keeps no ownership lookup — an object from elsewhere is pooled by
         // contract — so the switch has nothing to detect there and does not pretend to.
         using var pool = Builder(throwOnMisuse: true).WithLean().Build();
@@ -259,6 +267,7 @@ public class ErrorOnIncorrectUsageTests
     [Fact(Timeout = 30_000)]
     public void Preparation_ForwardsTheThrow()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var inner = Builder(throwOnMisuse: true).Build();
         using var pool = inner.WithPreparation(new AlwaysReadyStrategy());
 
@@ -271,6 +280,7 @@ public class ErrorOnIncorrectUsageTests
     [Fact(Timeout = 30_000)]
     public void TheSwitchIsOffByDefault_AndCanBeTurnedBackOff()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.False(new HayatePoolOptions().ErrorOnIncorrectUsage);
 
         using var off = Builder(throwOnMisuse: false).Build();
@@ -287,6 +297,7 @@ public class ErrorOnIncorrectUsageTests
     [Fact(Timeout = 30_000)]
     public void PolicyRejection_DoesNotThrow()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // A verdict about the object is not a mistake by the caller: the switch leaves the
         // non-throwing refusal exactly where it was.
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -305,6 +316,7 @@ public class ErrorOnIncorrectUsageTests
     [Fact(Timeout = 30_000)]
     public void ValidateOnReturnFailure_DoesNotThrow()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPolicy(new RejectingPolicy(accept: true, valid: false))
             .WithValidateOnReturn(true)
@@ -350,6 +362,7 @@ public class DoubleReturnStoreConsistencyTests
     [InlineData(true)]
     public void TheRefusedReturn_NeverLeavesADestroyedObjectReachable(bool lockFree)
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Builder(lockFree).Build();
 
         var held = pool.Acquire();
@@ -373,6 +386,7 @@ public class DoubleReturnStoreConsistencyTests
     [InlineData(true)]
     public void TheStoreKeepsServingObjects_AfterARefusedReturn(bool lockFree)
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = Builder(lockFree).Build();
 
         var first = pool.Acquire();

@@ -44,6 +44,7 @@ public class HayateUnboundedPoolTests
     [Fact(Timeout = 30_000)]
     public void Acquire_ShouldNeverBlockOrFail_BeyondAnyCapacity()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateUnboundedPool<PooledItem>(maxIdle: 4);
 
         // Far beyond MaxIdle: every borrow is served instantly, by reuse or creation.
@@ -60,6 +61,7 @@ public class HayateUnboundedPoolTests
     [Fact(Timeout = 30_000)]
     public void NotReturningObjects_ShouldBeHarmless()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateUnboundedPool<PooledItem>(maxIdle: 4);
 
         // The lease is ownership: dropping objects without returning them leaves the pool intact
@@ -80,6 +82,7 @@ public class HayateUnboundedPoolTests
     [Fact(Timeout = 30_000)]
     public void ReturnWithinMaxIdle_ShouldReuseTheObject()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateUnboundedPool<PooledItem>(maxIdle: 4);
 
         var first = pool.Acquire();
@@ -91,6 +94,7 @@ public class HayateUnboundedPoolTests
     [Fact(Timeout = 30_000)]
     public void ReturnPastMaxIdle_ShouldDestroyInsteadOfPark()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateUnboundedPool<PooledItem>(maxIdle: 2);
 
         var a = pool.Acquire();
@@ -114,6 +118,7 @@ public class HayateUnboundedPoolTests
     [Fact(Timeout = 30_000)]
     public void Factory_ShouldCreateObjects()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var created = 0;
         using var pool = new HayateUnboundedPool<PooledItem>(maxIdle: 4, factory: () =>
         {
@@ -128,6 +133,7 @@ public class HayateUnboundedPoolTests
     [Fact(Timeout = 30_000)]
     public void ResettableItems_ShouldBeResetOnReturn()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateUnboundedPool<ResettableItem>(maxIdle: 4);
 
         var item = pool.Acquire();
@@ -143,6 +149,7 @@ public class HayateUnboundedPoolTests
     [Fact(Timeout = 30_000)]
     public void InvalidItems_ShouldBeDestroyedOnReturn()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateUnboundedPool<ValidatableItem>(maxIdle: 4);
 
         var broken = pool.Acquire();
@@ -159,6 +166,7 @@ public class HayateUnboundedPoolTests
     [Fact(Timeout = 30_000)]
     public void GetStats_ShouldTrackTheLifecycle()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateUnboundedPool<PooledItem>(maxIdle: 2);
 
         var a = pool.Acquire();
@@ -197,6 +205,7 @@ public class HayateUnboundedPoolTests
     [Fact(Timeout = 30_000)]
     public void Clear_ShouldEmptyThePoolAndServeFreshObjects()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateUnboundedPool<PooledItem>(maxIdle: 4);
 
         var first = pool.Acquire();
@@ -213,6 +222,7 @@ public class HayateUnboundedPoolTests
     [Fact(Timeout = 30_000)]
     public void Evict_ShouldDestroyEveryParkedObject()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateUnboundedPool<PooledItem>(maxIdle: 8);
 
         var a = pool.Acquire();
@@ -232,16 +242,17 @@ public class HayateUnboundedPoolTests
     {
         using var pool = new HayateUnboundedPool<PooledItem>(maxIdle: 4);
 
-        var task = pool.AcquireAsync();
+        var task = pool.AcquireAsync(TestContext.Current.CancellationToken);
         Assert.True(task.IsCompleted);
 
-        var timeoutTask = pool.AcquireAsync(TimeSpan.FromSeconds(5));
+        var timeoutTask = pool.AcquireAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         Assert.True(timeoutTask.IsCompleted);
     }
 
     [Fact(Timeout = 30_000)]
     public void AcquireWithTimeout_ShouldIgnoreTheTimeout()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateUnboundedPool<PooledItem>(maxIdle: 4);
 
         // A bounded pool would wait or throw; the unbounded model serves immediately.
@@ -252,6 +263,7 @@ public class HayateUnboundedPoolTests
     [Fact(Timeout = 30_000)]
     public void ScopedBorrow_ShouldWorkThroughTheInterfaceExtension()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateUnboundedPool<PooledItem>(maxIdle: 4);
 
         PooledItem item;
@@ -269,6 +281,7 @@ public class HayateUnboundedPoolTests
     [Fact(Timeout = 30_000)]
     public void AvailabilityFlag_ShouldBeReportableWithoutAffectingBorrows()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateUnboundedPool<PooledItem>(maxIdle: 4);
         Assert.True(pool.CheckAvailable());
 
@@ -285,6 +298,7 @@ public class HayateUnboundedPoolTests
     [Fact(Timeout = 30_000)]
     public void InvalidConstruction_ShouldThrow()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Throws<ArgumentOutOfRangeException>(() => new HayateUnboundedPool<PooledItem>(0));
         Assert.Throws<ArgumentOutOfRangeException>(() => new HayateUnboundedPool<PooledItem>(-1));
         Assert.Throws<ArgumentNullException>(() => new HayateUnboundedPool<PooledItem>(4, null!));
@@ -293,6 +307,7 @@ public class HayateUnboundedPoolTests
     [Fact(Timeout = 30_000)]
     public void ReleaseNull_ShouldThrow()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateUnboundedPool<PooledItem>(maxIdle: 4);
         Assert.Throws<ArgumentNullException>(() => pool.Release(null!));
     }
@@ -300,6 +315,7 @@ public class HayateUnboundedPoolTests
     [Fact(Timeout = 30_000)]
     public void ConcurrentBorrowAndReturn_ShouldStayConsistent()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayateUnboundedPool<PooledItem>(maxIdle: 8);
 
         const int threads = 16;

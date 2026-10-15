@@ -142,7 +142,7 @@ public class AsyncPolicyCreationTests
             .WithPolicy(policy)
             .Build();
 
-        var acquire = pool.AcquireAsync();
+        var acquire = pool.AcquireAsync(TestContext.Current.CancellationToken);
 
         Assert.True(SpinWait.SpinUntil(() => policy.AsyncCreateCalls > 0, 5_000),
             "the asynchronous borrow never invoked CreateAsync");
@@ -163,6 +163,7 @@ public class AsyncPolicyCreationTests
     [Fact(Timeout = 30_000)]
     public void AsyncPolicy_SyncBorrow_WaitsOnTheSameAsynchronousHook()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new GatedAsyncPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("async-creation-sync-borrow")
@@ -208,7 +209,7 @@ public class AsyncPolicyCreationTests
             .WithPolicy(policy)
             .Build();
 
-        var item = await pool.AcquireAsync();
+        var item = await pool.AcquireAsync(TestContext.Current.CancellationToken);
 
         Assert.NotNull(item);
         Assert.Equal(1, policy.AsyncCreateCalls);
@@ -226,7 +227,7 @@ public class AsyncPolicyCreationTests
             .WithPolicy(asyncPolicy)
             .Build())
         {
-            var acquire = leanAsync.AcquireAsync();
+            var acquire = leanAsync.AcquireAsync(TestContext.Current.CancellationToken);
 
             Assert.True(SpinWait.SpinUntil(() => asyncPolicy.AsyncCreateCalls > 0, 5_000),
                 "the lean asynchronous borrow never invoked CreateAsync");
@@ -274,6 +275,7 @@ public class AsyncPolicyCreationTests
     [Fact(Timeout = 30_000)]
     public async Task AsyncPolicy_CancellationDuringCreation_PropagatesWithoutConsumingRetries()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new HangingAsyncPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithPoolName("async-creation-cancel")
@@ -306,7 +308,7 @@ public class AsyncPolicyCreationTests
             .WithPolicy(policy)
             .Build();
 
-        var item = await pool.AcquireAsync();
+        var item = await pool.AcquireAsync(TestContext.Current.CancellationToken);
 
         Assert.NotNull(item);
         Assert.Equal(1, policy.CreateCalls);

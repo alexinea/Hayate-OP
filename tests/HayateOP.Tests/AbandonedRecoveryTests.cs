@@ -42,6 +42,7 @@ public class AbandonedRecoveryTests
     [Fact(Timeout = 30_000)]
     public void Default_NoOptIn_BorrowedPastTimeout_IsNotReclaimed_AndStillCountsSuspected()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // The default forensics-only configuration (both toggles off) must be exactly M4:
         // the borrowed object past the threshold is counted in LeakSuspectedCount but never reclaimed.
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -72,6 +73,7 @@ public class AbandonedRecoveryTests
     [Fact(Timeout = 30_000)]
     public void RemoveAbandonedOnBorrow_AbandonedObject_IsReclaimed_NotCountedAsLeak()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new TrackingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(1)
@@ -107,6 +109,7 @@ public class AbandonedRecoveryTests
     [Fact(Timeout = 30_000)]
     public void RemoveAbandonedOnBorrow_ObjectNotPastTimeout_IsNotReclaimed()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new TrackingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(1)
@@ -134,6 +137,7 @@ public class AbandonedRecoveryTests
     [Fact(Timeout = 30_000)]
     public void RemoveAbandonedOnMaintenance_AbandonedObject_IsReclaimed()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var policy = new TrackingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(1)
@@ -165,6 +169,7 @@ public class AbandonedRecoveryTests
     [Fact(Timeout = 30_000)]
     public void RemoveAbandonedOnBorrow_ReleasedObject_SurvivesReclamationScan()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // A normally returned object must never be reclaimed: after Release it leaves the borrowed list.
         var policy = new TrackingPolicy();
         using var pool = new HayatePoolBuilder<TestObject>()
@@ -200,6 +205,7 @@ public class AbandonedRecoveryTests
     [Fact(Timeout = 30_000)]
     public void ReleaseAfterReclaim_DoesNotThrow_AndPoolRemainsUsable()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Reclamation is a documented opt-in: the caller may still hold the reference and eventually
         // release it. The pool must stay consistent — the later release is treated as a foreign object
         // (disposed, existing foreign-return semantics) and the pool keeps working.
@@ -235,6 +241,7 @@ public class AbandonedRecoveryTests
     [Fact(Timeout = 30_000)]
     public void LogAbandoned_Enabled_ReclamationDoesNotThrow()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(1)
             .WithMaxSize(2)
@@ -259,6 +266,7 @@ public class AbandonedRecoveryTests
     [Fact(Timeout = 30_000)]
     public void Builder_RemoveAbandonedTimeout_Zero_Throws()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             new HayatePoolBuilder<TestObject>().WithRemoveAbandonedTimeout(TimeSpan.Zero));
     }
@@ -266,6 +274,7 @@ public class AbandonedRecoveryTests
     [Fact(Timeout = 30_000)]
     public void Options_RecoveryEnabled_WithZeroTimeout_IsInvalid()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var options = new HayatePoolOptions
         {
             RemoveAbandonedOnBorrow = true,
@@ -280,6 +289,7 @@ public class AbandonedRecoveryTests
     [Fact(Timeout = 30_000)]
     public void CopyTo_PreservesAbandonedRecoverySettings()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var source = new HayatePoolOptions
         {
             RemoveAbandonedOnBorrow = true,
@@ -333,7 +343,7 @@ public class AbandonedRecoveryTests
 
         Thread.Sleep(500);
         Volatile.Write(ref stop, 1);
-        Task.WaitAll(workers);
+        Task.WaitAll(workers, TestContext.Current.CancellationToken);
 
         Assert.True(pool.GetStats().AbandonedRemovedCount >= 1,
             "Concurrent reclaim should have reclaimed at least the held abandoned objects, actual " + pool.GetStats().AbandonedRemovedCount);

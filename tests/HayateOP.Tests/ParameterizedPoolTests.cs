@@ -30,6 +30,7 @@ public class ParameterizedPoolTests
     [Fact(Timeout = 30_000)]
     public void GetObject_ShouldGiveEachKeyItsOwnObject()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pools = CreateKeyedPool(maxSizePerKey: 2);
 
         var a = pools.GetObject("a");
@@ -51,6 +52,7 @@ public class ParameterizedPoolTests
     [Fact(Timeout = 30_000)]
     public void Capacity_ShouldBePerKeyRatherThanShared()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pools = CreateKeyedPool(maxSizePerKey: 1);
 
         // Two keys, one object each: a shared pool of one could not serve both, and each sub-pool reports
@@ -69,6 +71,7 @@ public class ParameterizedPoolTests
     [Fact(Timeout = 30_000)]
     public void PerKeySize_ShouldSetTheOptionsItPromises()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pools = CreateKeyedPool(maxSizePerKey: 2);
 
         var options = pools.GetPool("a").GetOptions();
@@ -94,6 +97,7 @@ public class ParameterizedPoolTests
     [Fact(Timeout = 30_000)]
     public void ReturnObject_ShouldGiveTheObjectBackToItsOwnKey()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pools = CreateKeyedPool(maxSizePerKey: 1);
 
         var item = pools.GetObject("a");
@@ -106,6 +110,7 @@ public class ParameterizedPoolTests
     [Fact(Timeout = 30_000)]
     public void ReturnObject_ShouldRejectAKeyThatHasNoSubPool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pools = CreateKeyedPool();
 
         Assert.Throws<InvalidOperationException>(() => pools.ReturnObject("never-used", new TestObject()));
@@ -115,6 +120,7 @@ public class ParameterizedPoolTests
     [Fact(Timeout = 30_000)]
     public void Keys_ShouldCountAndExposeOnlyTheKeysInUse()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pools = CreateKeyedPool(maxSizePerKey: 2);
 
         Assert.Equal(0, pools.KeysInPoolCount);
@@ -134,6 +140,7 @@ public class ParameterizedPoolTests
     [Fact(Timeout = 30_000)]
     public void GetPool_ShouldAddressTheSameSubPoolForAKey()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pools = CreateKeyedPool(maxSizePerKey: 2);
 
         var item = pools.GetObject("a");
@@ -153,6 +160,7 @@ public class ParameterizedPoolTests
     [Fact(Timeout = 30_000)]
     public void SubPools_ShouldHaveIndependentLifecycles()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pools = CreateKeyedPool(maxSizePerKey: 2);
 
         var a = pools.GetObject("a");
@@ -172,6 +180,7 @@ public class ParameterizedPoolTests
     [Fact(Timeout = 30_000)]
     public void Clear_ShouldDrainEverySubPoolButKeepTheKeys()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pools = CreateKeyedPool(maxSizePerKey: 2);
 
         pools.ReturnObject("a", pools.GetObject("a"));
@@ -189,8 +198,8 @@ public class ParameterizedPoolTests
     {
         using var pools = CreateKeyedPool(maxSizePerKey: 2);
 
-        var a = await pools.GetObjectAsync("a");
-        var b = await pools.GetObjectAsync("b");
+        var a = await pools.GetObjectAsync("a", TestContext.Current.CancellationToken);
+        var b = await pools.GetObjectAsync("b", TestContext.Current.CancellationToken);
 
         Assert.NotSame(a, b);
         Assert.Equal(2, pools.KeysInPoolCount);
@@ -202,6 +211,7 @@ public class ParameterizedPoolTests
     [Fact(Timeout = 30_000)]
     public void SubPools_ShouldBeRegisteredUnderADerivedName()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var registry = new HayateObjectPoolRegistry();
 
         using (var pools = CreateKeyedPool(maxSizePerKey: 1, registry: registry))
@@ -223,6 +233,7 @@ public class ParameterizedPoolTests
     [Fact(Timeout = 30_000)]
     public void TryRemove_ShouldRetireTheKeyAndItsSubPool()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var registry = new HayateObjectPoolRegistry();
         using var pools = CreateKeyedPool(maxSizePerKey: 1, registry: registry);
 
@@ -246,6 +257,7 @@ public class ParameterizedPoolTests
     [Fact(Timeout = 30_000)]
     public void Dispose_ShouldDisposeEverySubPoolAndTakeItOutOfService()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         var pools = CreateKeyedPool(maxSizePerKey: 1);
         pools.GetObject("a");
 
@@ -261,6 +273,7 @@ public class ParameterizedPoolTests
     [Fact(Timeout = 30_000)]
     public void Constructor_ShouldRejectArgumentsItCannotUse()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         Assert.Throws<ArgumentNullException>(() =>
             new ParameterizedHayatePool<string, TestObject>(
                 (Func<string, IHayateObjectPool<TestObject>>)null!));
@@ -278,6 +291,7 @@ public class ParameterizedPoolTests
     [Fact(Timeout = 30_000)]
     public void FactoryReturningNull_ShouldFailAtTheCreationBoundary()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         using var pools = new ParameterizedHayatePool<string, TestObject>(_ => null!, 1);
 
         Assert.Throws<InvalidOperationException>(() => pools.GetObject("a"));

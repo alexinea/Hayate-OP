@@ -41,7 +41,7 @@ public class RejectPolicyTests
         {
             await Task.Delay(100);
             pool.Release(obj1);
-        });
+        }, TestContext.Current.CancellationToken);
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
         obj2 = pool.Acquire();
@@ -56,6 +56,7 @@ public class RejectPolicyTests
     [Fact(Timeout = 60000)]
     public void RejectPolicy_BlockTimeout_ShouldThrowAfterTimeout()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Arrange
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(1)
@@ -83,6 +84,7 @@ public class RejectPolicyTests
     [Fact(Timeout = 60000)]
     public void RejectPolicy_CreateNew_ShouldReturnNewObjectWhenTimeout()
     {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
         // Arrange
         using var pool = new HayatePoolBuilder<TestObject>()
             .WithMinSize(1)

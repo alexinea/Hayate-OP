@@ -12,7 +12,7 @@ namespace HayateOP.Tests.Configuration
         [Fact]
         public void RegisterNamedHayatePool_ShouldMergeGlobalAndPoolSections()
         {
-            var configData = new Dictionary<string, string>
+            var configData = new Dictionary<string, string?>
             {
                 {"HayatePool:Global:MinPoolSize", "5"},
                 {"HayatePool:Pools:replica:MinPoolSize", "20"},
@@ -38,7 +38,7 @@ namespace HayateOP.Tests.Configuration
         [Fact]
         public void RegisterNamedHayatePool_ShouldNotOccupyTheUnnamedPoolSlot()
         {
-            var configData = new Dictionary<string, string>
+            var configData = new Dictionary<string, string?>
             {
                 {"HayatePool:Pools:replica:MaxPoolSize", "16"}
             };
