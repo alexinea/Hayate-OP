@@ -10,6 +10,17 @@ Breaking changes are described in full — with migration guidance — in
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-10-16
+
+Capability and performance window. Everything a caller of the library touches is a pure addition — a
+ceiling on concurrent borrows, a value-type lease, reset-timing switches, two more borrow orders,
+two storage backends that are off by default, a ready-made `CancellationTokenSource` pool, an
+optional analyzer package, and a sentence in the timeout messages that names the usual cause of the
+wait — so a pool that asks for none of them runs the statements it ran before. The one exception
+reaches an author who **implements** `IHayateObjectPool<T>` outside this repository: the interface
+gained `TryAcquire`. Read [`docs/BREAKING-CHANGES.md`](docs/BREAKING-CHANGES.md) before adopting;
+that entry is the only breaking one.
+
 The 3.1 capability line adds three things to the borrow path's vocabulary: a ceiling on how many
 objects may be out on loan at once (G-5), a value-type lease so a scoped borrow allocates nothing
 (G-6), and two switches that move the automatic reset of an `IHayateResettable` object from the return
@@ -1679,7 +1690,8 @@ No breaking change beyond the lease-context rework listed below.
 
 Initial release.
 
-[Unreleased]: https://github.com/alexinea/object-pool/compare/v3.0...HEAD
+[Unreleased]: https://github.com/alexinea/object-pool/compare/v3.1...HEAD
+[3.1.0]: https://github.com/alexinea/object-pool/compare/v3.0...v3.1
 [3.0.0]: https://github.com/alexinea/object-pool/compare/v2.9...v3.0
 [2.9.0]: https://github.com/alexinea/object-pool/compare/v2.8...v2.9
 [2.8.0]: https://github.com/alexinea/object-pool/compare/v2.7...v2.8
