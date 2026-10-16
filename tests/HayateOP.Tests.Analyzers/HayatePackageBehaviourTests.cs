@@ -85,12 +85,17 @@ internal sealed class Loaner
     }
 
     [Fact]
-    public void EveryDescriptor_IsListedInUnshipped()
+    public void EveryDescriptor_IsListedInTheReleaseTrackingFiles()
     {
-        // The other half of RS2008: the release-tracking file is what keeps a descriptor from shipping
-        // without a row in it. This parses the real file and diffs the ids, so adding a descriptor without
-        // its row fails here instead of relying on the compiler's warning surviving the gate.
-        var shipped = ShippedIds();
+        // The other half of RS2008: the release-tracking files are what keep a descriptor from shipping
+        // without a row in one of them. This parses the real files and diffs the ids, so adding a
+        // descriptor without its row fails here instead of relying on the compiler's warning surviving
+        // the gate. Both files are read rather than Unshipped alone: a rule moves from Unshipped to
+        // Shipped at the release that first carries it, and the invariant has to hold on either side of
+        // that move -- reading one file would call the release itself a regression.
+        var unshipped = TrackedIds("AnalyzerReleases.Unshipped.md");
+        var shipped = TrackedIds("AnalyzerReleases.Shipped.md");
+        var tracked = unshipped.Concat(shipped).ToHashSet(StringComparer.Ordinal);
         var descriptors = new[]
         {
             HayateDiagnostics.LeaseNotDisposed,
@@ -101,20 +106,23 @@ internal sealed class Loaner
             HayateDiagnostics.OnReleaseDisposesItem,
         }.Select(d => d.Id).ToHashSet();
 
-        Assert.Equal(6, shipped.Count);
-        Assert.Equal(descriptors.OrderBy(id => id, StringComparer.Ordinal), shipped.OrderBy(id => id, StringComparer.Ordinal));
+        Assert.Equal(6, tracked.Count);
+        Assert.Equal(descriptors.OrderBy(id => id, StringComparer.Ordinal), tracked.OrderBy(id => id, StringComparer.Ordinal));
+        // A move, not a copy: an id present in both files means the row was duplicated rather than
+        // relocated, which is the one way this file pair can be wrong while each half looks right.
+        Assert.Empty(unshipped.Intersect(shipped, StringComparer.Ordinal));
     }
 
-    private static HashSet<string> ShippedIds()
+    private static string[] TrackedIds(string fileName)
     {
         var path = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src",
-            "HayateOP.Extensions.Analyzers", "AnalyzerReleases.Unshipped.md");
+            "HayateOP.Extensions.Analyzers", fileName);
         Assert.True(File.Exists(path), $"release tracking not found at {path}");
         return File.ReadAllLines(path)
             .Select(line => line.Split('|'))
             .Where(parts => parts.Length > 1 && parts[0].Trim().StartsWith("HYO", StringComparison.Ordinal))
             .Select(parts => parts[0].Trim())
-            .ToHashSet(StringComparer.Ordinal);
+            .ToArray();
     }
 
     private static async Task<ImmutableArray<Diagnostic>> RunAllAsync(string source)
